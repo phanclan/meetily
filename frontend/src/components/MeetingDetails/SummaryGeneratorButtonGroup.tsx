@@ -40,6 +40,7 @@ interface SummaryGeneratorButtonGroupProps {
   hasSummary?: boolean;
   isModelConfigLoading?: boolean;
   onOpenModelSettings?: (openFn: () => void) => void;
+  showPrimaryAction?: boolean;
 }
 
 export function SummaryGeneratorButtonGroup({
@@ -54,10 +55,11 @@ export function SummaryGeneratorButtonGroup({
   selectedTemplate,
   onTemplateSelect,
   hasTranscripts = true,
-  hasSummary = false,
   isModelConfigLoading = false,
   onOpenModelSettings,
-  languageSlot
+  languageSlot,
+  hasSummary = false,
+  showPrimaryAction = true,
 }: SummaryGeneratorButtonGroupProps) {
   const [isCheckingModels, setIsCheckingModels] = useState(false);
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
@@ -244,57 +246,61 @@ export function SummaryGeneratorButtonGroup({
 
   return (
     <ButtonGroup>
-      {/* Generate Summary or Stop button */}
-      {isGenerating ? (
-        <Button
-          variant="outline"
-          size="sm"
-          className="bg-gradient-to-r from-red-50 to-orange-50 hover:from-red-100 hover:to-orange-100 border-red-200 xl:px-4"
-          onClick={() => {
-            Analytics.trackButtonClick('stop_summary_generation', 'meeting_details');
-            onStopGeneration();
-          }}
-          title="Stop summary generation"
-        >
-          <Square className="xl:mr-2" size={18} fill="currentColor" />
-          <span className="hidden lg:inline xl:inline">Stop</span>
-        </Button>
-      ) : (
-        <Button
-          variant="outline"
-          size="sm"
-          className="bg-gradient-to-r from-blue-50 to-purple-50 hover:from-blue-100 hover:to-purple-100 border-blue-200 xl:px-4"
-          onClick={() => {
-            Analytics.trackButtonClick('generate_summary', 'meeting_details');
-            checkOllamaModelsAndGenerate();
-          }}
-          disabled={isCheckingModels || isModelConfigLoading}
-          title={
-            isModelConfigLoading
-              ? 'Loading model configuration...'
-              : isCheckingModels
-                ? 'Checking models...'
-                : hasSummary ? 'Regenerate AI Summary' : 'Generate AI Summary'
-          }
-        >
-          {isCheckingModels || isModelConfigLoading ? (
-            <>
-              <Loader2 className="animate-spin xl:mr-2" size={18} />
-              <span className="hidden xl:inline">Processing...</span>
-            </>
+      {showPrimaryAction && (
+        <>
+          {/* Generate Summary or Stop button */}
+          {isGenerating ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="bg-gradient-to-r from-red-50 to-orange-50 hover:from-red-100 hover:to-orange-100 border-red-200 xl:px-4"
+              onClick={() => {
+                Analytics.trackButtonClick('stop_summary_generation', 'meeting_details');
+                onStopGeneration();
+              }}
+              title="Stop summary generation"
+            >
+              <Square className="xl:mr-2" size={18} fill="currentColor" />
+              <span className="hidden lg:inline xl:inline">Stop</span>
+            </Button>
           ) : (
-            <>
-              <Sparkles className="xl:mr-2" size={18} />
-              <span className="hidden lg:inline xl:inline">{hasSummary ? 'Regenerate Summary' : 'Generate Summary'}</span>
-            </>
+            <Button
+              variant="outline"
+              size="sm"
+              className="bg-gradient-to-r from-blue-50 to-purple-50 hover:from-blue-100 hover:to-purple-100 border-blue-200 xl:px-4"
+              onClick={() => {
+                Analytics.trackButtonClick('generate_summary', 'meeting_details');
+                checkOllamaModelsAndGenerate();
+              }}
+              disabled={isCheckingModels || isModelConfigLoading}
+              title={
+                isModelConfigLoading
+                  ? 'Loading model configuration...'
+                  : isCheckingModels
+                    ? 'Checking models...'
+                    : 'Generate AI Summary'
+              }
+            >
+              {isCheckingModels || isModelConfigLoading ? (
+                <>
+                  <Loader2 className="animate-spin xl:mr-2" size={18} />
+                  <span className="hidden xl:inline">Processing...</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="xl:mr-2" size={18} />
+                  <span className="hidden lg:inline xl:inline">Generate Summary</span>
+                </>
+              )}
+            </Button>
           )}
-        </Button>
+        </>
       )}
 
-      {languageSlot}
-
       {/* Settings button */}
-      <Dialog open={settingsDialogOpen} onOpenChange={setSettingsDialogOpen}>
+      <{languageSlot}
+
+      Dialog open={settingsDialogOpen} onOpenChange={setSettingsDialogOpen}>
         <DialogTrigger asChild>
           <Button
             variant="outline"
@@ -319,7 +325,6 @@ export function SummaryGeneratorButtonGroup({
             modelConfig={modelConfig}
             setModelConfig={setModelConfig}
             skipInitialFetch={true}
-            layout="dialog"
           />
         </DialogContent>
       </Dialog>

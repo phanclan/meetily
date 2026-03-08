@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, StickyNote, Home, Trash2, Mic, Square, Plus, Search, Pencil, NotebookPen, SearchIcon, X, Upload } from 'lucide-react';
+import { File, Settings, PanelLeftClose, PanelLeftOpen, Home, Trash2, Mic, Square, Pencil, SearchIcon, X, Upload, FolderOpen, ChevronDown } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useSidebar } from './SidebarProvider';
 import type { CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
@@ -16,6 +16,14 @@ import { toast } from 'sonner';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { useImportDialog } from '@/contexts/ImportDialogContext';
 import { useConfig } from '@/contexts/ConfigContext';
+import { safelyUnlisten } from '@/lib/tauriEvents';
+import {
+  DEFAULT_GROQ_SUMMARY_MODEL,
+  DEFAULT_GROQ_TRANSCRIPT_MODEL,
+  DEFAULT_SUMMARY_PROVIDER,
+  DEFAULT_TRANSCRIPT_PROVIDER,
+  DEFAULT_WHISPER_MODEL,
+} from '@/constants/modelDefaults';
 
 import {
   Dialog,
@@ -62,20 +70,24 @@ const Sidebar: React.FC = () => {
   const { openImportDialog } = useImportDialog();
   const { betaFeatures } = useConfig();
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['meetings']));
+  const [meetingsExpanded, setMeetingsExpanded] = useState(true);
+  const [showAllMeetings, setShowAllMeetings] = useState(false);
+  const MEETINGS_PREVIEW_COUNT = 10;
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showModelSettings, setShowModelSettings] = useState(false);
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
-    provider: 'ollama',
-    model: '',
-    whisperModel: '',
+    provider: DEFAULT_SUMMARY_PROVIDER,
+    model: DEFAULT_GROQ_SUMMARY_MODEL,
+    whisperModel: DEFAULT_WHISPER_MODEL,
     apiKey: null,
     ollamaEndpoint: null
   });
   const [transcriptModelConfig, setTranscriptModelConfig] = useState<TranscriptModelProps>({
-    provider: 'parakeet',
-    model: 'parakeet-tdt-0.6b-v3-int8',
+    provider: DEFAULT_TRANSCRIPT_PROVIDER,
+    model: DEFAULT_GROQ_TRANSCRIPT_MODEL,
   });
   const [settingsSaveSuccess, setSettingsSaveSuccess] = useState<boolean | null>(null);
+  const isHomePage = pathname === '/';
 
   // State for edit modal
   const [editModalState, setEditModalState] = useState<{ isOpen: boolean; meetingId: string | null; currentTitle: string }>({
@@ -84,15 +96,6 @@ const Sidebar: React.FC = () => {
     currentTitle: ''
   });
   const [editingTitle, setEditingTitle] = useState<string>('');
-
-  // Ensure 'meetings' folder is always expanded
-  useEffect(() => {
-    if (!expandedFolders.has('meetings')) {
-      const newExpanded = new Set(expandedFolders);
-      newExpanded.add('meetings');
-      setExpandedFolders(newExpanded);
-    }
-  }, [expandedFolders]);
 
   // useEffect(() => {
   //   if (settingsSaveSuccess !== null) {
@@ -176,7 +179,7 @@ const Sidebar: React.FC = () => {
     setupListener().then(fn => cleanup = fn);
 
     return () => {
-      cleanup?.();
+      safelyUnlisten(cleanup, 'sidebar:model-config-updated');
     };
   }, []);
 
@@ -317,6 +320,16 @@ const Sidebar: React.FC = () => {
     }
   }, [sidebarItems, searchQuery, searchResults, expandedFolders]);
 
+  // Derive the flat meeting items list from filtered sidebar items
+  const meetingItems = useMemo(() => {
+    const folder = filteredSidebarItems.find(item => item.type === 'folder' && item.id === 'meetings');
+    return folder?.children ?? [];
+  }, [filteredSidebarItems]);
+
+  const visibleMeetings = useMemo(
+    () => showAllMeetings ? meetingItems : meetingItems.slice(0, MEETINGS_PREVIEW_COUNT),
+    [meetingItems, showAllMeetings]
+  );
 
   const handleDelete = async (itemId: string) => {
     console.log('Deleting item:', itemId);
@@ -444,107 +457,6 @@ const Sidebar: React.FC = () => {
     };
   }, []);
 
-  const renderCollapsedIcons = () => {
-    if (!isCollapsed) return null;
-
-    const isHomePage = pathname === '/';
-    const isMeetingPage = pathname?.includes('/meeting-details');
-    const isSettingsPage = pathname === '/settings';
-
-    return (
-      <TooltipProvider>
-        <div className="flex flex-col items-center space-y-4 mt-4">
-          <Logo isCollapsed={isCollapsed} />
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={() => router.push('/')}
-                className={`p-2 rounded-lg transition-colors duration-150 ${isHomePage ? 'bg-gray-100' : 'hover:bg-gray-100'
-                  }`}
-              >
-                <Home className="w-5 h-5 text-gray-600" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="right">
-              <p>Home</p>
-            </TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={handleRecordingToggle}
-                disabled={isRecording}
-                className={`p-2 ${isRecording ? 'bg-red-500 cursor-not-allowed' : 'bg-red-500 hover:bg-red-600'} rounded-full transition-colors duration-150 shadow-sm`}
-              >
-                {isRecording ? (
-                  <Square className="w-5 h-5 text-white" />
-                ) : (
-                  <Mic className="w-5 h-5 text-white" />
-                )}
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="right">
-              <p>{isRecording ? "Recording in progress..." : "Start Recording"}</p>
-            </TooltipContent>
-          </Tooltip>
-
-          {betaFeatures.importAndRetranscribe && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  onClick={() => openImportDialog()}
-                  className="p-2 rounded-lg transition-colors duration-150 hover:bg-blue-100 bg-blue-50"
-                >
-                  <Upload className="w-5 h-5 text-blue-600" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="right">
-                <p>Import Audio</p>
-              </TooltipContent>
-            </Tooltip>
-          )}
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={() => {
-                  if (isCollapsed) toggleCollapse();
-                  toggleFolder('meetings');
-                }}
-                className={`p-2 rounded-lg transition-colors duration-150 ${isMeetingPage ? 'bg-gray-100' : 'hover:bg-gray-100'
-                  }`}
-              >
-                <NotebookPen className="w-5 h-5 text-gray-600" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="right">
-              <p>Meeting Notes</p>
-            </TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={() => router.push('/settings')}
-                className={`p-2 rounded-lg transition-colors duration-150 ${isSettingsPage ? 'bg-gray-100' : 'hover:bg-gray-100'
-                  }`}
-              >
-                <Settings className="w-5 h-5 text-gray-600" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="right">
-              <p>Settings</p>
-            </TooltipContent>
-          </Tooltip>
-
-          <Info isCollapsed={isCollapsed} />
-        </div>
-      </TooltipProvider>
-    );
-  };
-
   // Find matching transcript snippet for a meeting item
   const findMatchingSnippet = (itemId: string) => {
     if (!searchQuery.trim() || !searchResults.length) return null;
@@ -552,108 +464,74 @@ const Sidebar: React.FC = () => {
   };
 
   const renderItem = (item: SidebarItem, depth = 0) => {
-    const isExpanded = expandedFolders.has(item.id);
-    const paddingLeft = `${depth * 12 + 12}px`;
     const isActive = item.type === 'file' && currentMeeting?.id === item.id;
-    const isMeetingItem = item.id.includes('-') && !item.id.startsWith('intro-call');
-
-    // Check if this item has a matching transcript snippet
+    const isMeetingItem = item.type === 'file' && item.id.includes('-') && !item.id.startsWith('intro-call');
     const matchingResult = isMeetingItem ? findMatchingSnippet(item.id) : null;
     const hasTranscriptMatch = !!matchingResult;
 
-    if (isCollapsed) return null;
+    if (item.type !== 'file') return null;
 
+    // Collapsed: icon-only with tooltip
+    if (isCollapsed) {
+      return (
+        <Tooltip key={item.id}>
+          <TooltipTrigger asChild>
+            <div
+              className={`flex items-center justify-center p-2 rounded-lg my-0.5 cursor-pointer transition-colors ${
+                isActive ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-100 text-gray-500'
+              }`}
+              onClick={() => {
+                setCurrentMeeting({ id: item.id, title: item.title });
+                const path = item.id.startsWith('intro-call') ? '/' : `/meeting-details?id=${item.id}`;
+                router.push(path);
+              }}
+            >
+              <File className="w-4 h-4" />
+            </div>
+          </TooltipTrigger>
+          <TooltipContent side="right"><p>{item.title}</p></TooltipContent>
+        </Tooltip>
+      );
+    }
+
+    // Expanded: full item with label + actions
     return (
       <div key={item.id}>
         <div
-          className={`flex items-center transition-all duration-150 group ${item.type === 'folder' && depth === 0
-            ? 'p-3 text-lg font-semibold h-10 mx-3 mt-3 rounded-lg'
-            : `px-3 py-2 my-0.5 rounded-md text-sm ${isActive ? 'bg-blue-100 text-blue-700 font-medium' :
-              hasTranscriptMatch ? 'bg-yellow-50' : 'hover:bg-gray-50'
-            } cursor-pointer`
-            }`}
-          style={item.type === 'folder' && depth === 0 ? {} : { paddingLeft }}
+          className={`flex items-center px-3 py-2 my-0.5 rounded-lg text-sm cursor-pointer group transition-colors ${
+            isActive ? 'bg-blue-100 text-blue-700 font-medium' :
+            hasTranscriptMatch ? 'bg-yellow-50 hover:bg-yellow-100' : 'hover:bg-gray-100 text-gray-700'
+          }`}
           onClick={() => {
-            if (item.type === 'folder') {
-              toggleFolder(item.id);
-            } else {
-              setCurrentMeeting({ id: item.id, title: item.title });
-              const basePath = item.id.startsWith('intro-call') ? '/' :
-                item.id.includes('-') ? `/meeting-details?id=${item.id}` : `/notes/${item.id}`;
-              router.push(basePath);
-            }
+            setCurrentMeeting({ id: item.id, title: item.title });
+            const path = item.id.startsWith('intro-call') ? '/' : `/meeting-details?id=${item.id}`;
+            router.push(path);
           }}
         >
-          {item.type === 'folder' ? (
-            <>
-              {item.id === 'meetings' ? (
-                <Calendar className="w-4 h-4 mr-2" />
-              ) : item.id === 'notes' ? (
-                <Calendar className="w-4 h-4 mr-2" />
-              ) : null}
-              <span className={depth === 0 ? "" : "font-medium"}>{item.title}</span>
-              <div className="ml-auto">
-                {isExpanded ? (
-                  <ChevronDown className="w-4 h-4 text-gray-500" />
-                ) : (
-                  <ChevronRight className="w-4 h-4 text-gray-500" />
-                )}
-              </div>
-              {searchQuery && item.id === 'meetings' && isSearching && (
-                <span className="ml-2 text-xs text-blue-500 animate-pulse">Searching...</span>
-              )}
-            </>
-          ) : (
-            <div className="flex flex-col w-full">
-              <div className="flex items-center w-full">
-                {isMeetingItem ? (
-                  <div className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full mr-2 bg-gray-100">
-                    <File className="w-3.5 h-3.5 text-gray-600" />
-                  </div>
-                ) : (
-                  <div className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full mr-2 bg-blue-100">
-                    <Plus className="w-3.5 h-3.5 text-blue-600" />
-                  </div>
-                )}
-                <span className="flex-1 break-words">{item.title}</span>
-                {isMeetingItem && (
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleEditStart(item.id, item.title);
-                      }}
-                      className="hover:text-blue-600 p-1 rounded-md hover:bg-blue-50 flex-shrink-0"
-                      aria-label="Edit meeting title"
-                    >
-                      <Pencil className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDeleteModalState({ isOpen: true, itemId: item.id });
-                      }}
-                      className="hover:text-red-600 p-1 rounded-md hover:bg-red-50 flex-shrink-0"
-                      aria-label="Delete meeting"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* Show transcript match snippet if available */}
-              {hasTranscriptMatch && (
-                <div className="mt-1 ml-8 text-xs text-gray-500 bg-yellow-50 p-1.5 rounded border border-yellow-100 line-clamp-2">
-                  <span className="font-medium text-yellow-600">Match:</span> {matchingResult.matchContext}
-                </div>
-              )}
+          <File className="w-3.5 h-3.5 flex-shrink-0 mr-2 text-gray-400" />
+          <span className="flex-1 truncate">{item.title}</span>
+          {isMeetingItem && (
+            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+              <button
+                onClick={(e) => { e.stopPropagation(); handleEditStart(item.id, item.title); }}
+                className="hover:text-blue-600 p-1 rounded hover:bg-blue-50"
+                aria-label="Edit meeting title"
+              >
+                <Pencil className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); setDeleteModalState({ isOpen: true, itemId: item.id }); }}
+                className="hover:text-red-600 p-1 rounded hover:bg-red-50"
+                aria-label="Delete meeting"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
             </div>
           )}
         </div>
-        {item.type === 'folder' && isExpanded && item.children && (
-          <div className="ml-1">
-            {item.children.map(child => renderItem(child, depth + 1))}
+        {hasTranscriptMatch && (
+          <div className="mx-3 mb-1 text-xs text-gray-500 bg-yellow-50 p-1.5 rounded border border-yellow-100 line-clamp-2">
+            <span className="font-medium text-yellow-600">Match:</span> {matchingResult.matchContext}
           </div>
         )}
       </div>
@@ -661,160 +539,185 @@ const Sidebar: React.FC = () => {
   };
 
   return (
-    <div className="fixed top-0 left-0 h-screen z-40">
-      {/* Floating collapse button */}
-      <button
-        onClick={toggleCollapse}
-        className="absolute -right-6 top-20 z-50 p-1 bg-white hover:bg-gray-100 rounded-full shadow-lg border"
-        style={{ transform: 'translateX(50%)' }}
-      >
-        {isCollapsed ? (
-          <ChevronRightCircle className="w-6 h-6" />
-        ) : (
-          <ChevronLeftCircle className="w-6 h-6" />
-        )}
-      </button>
-
-      <div
-        className={`h-screen bg-white border-r shadow-sm flex flex-col transition-all duration-300 ${isCollapsed ? 'w-16' : 'w-64'
-          }`}
-      >
-        {/*  Header with traffic light spacing */}
-        <div className="flex-shrink-0 h-22 flex items-center">
-
-          {/* Title container */}
-
-
-
-          <div className="flex-1">
-            {!isCollapsed && (
-              <div className="p-3">
-                {/* <span className="text-lg text-center border rounded-full bg-blue-50 border-white font-semibold text-gray-700 mb-2 block items-center">
-                  <span>Meetily</span>
-                </span> */}
-                <Logo isCollapsed={isCollapsed} />
-
-                <div className="relative mb-1">
-                  <InputGroup >
-                    <InputGroupInput placeholder='Search meeting content...' value={searchQuery}
-                      onChange={(e) => handleSearchChange(e.target.value)}
-                    />
-                    <InputGroupAddon>
-                      <SearchIcon />
-                    </InputGroupAddon>
-                    {searchQuery &&
-                      <InputGroupAddon align={'inline-end'}>
-                        <InputGroupButton
-                          onClick={() => handleSearchChange('')}
-                        >
-                          <X />
-                        </InputGroupButton>
-                      </InputGroupAddon>
-                    }
-                  </InputGroup>
-                </div>
-              </div>
-            )}
-          </div>
+    <>
+    <div
+      className={`sticky top-0 h-screen flex-shrink-0 bg-white border-r shadow-sm flex flex-col transition-all duration-300 overflow-hidden z-40 ${
+        isCollapsed ? 'w-14' : 'w-56'
+      }`}
+    >
+        {/* Header: Logo + toggle button */}
+        <div className="flex items-center justify-between px-3 py-3 flex-shrink-0">
+          <Logo isCollapsed={isCollapsed} />
+          <button
+            onClick={toggleCollapse}
+            className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500 flex-shrink-0 transition-colors"
+            aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            {isCollapsed
+              ? <PanelLeftOpen className="w-4 h-4" />
+              : <PanelLeftClose className="w-4 h-4" />}
+          </button>
         </div>
 
-        {/* Main content - scrollable area */}
-        <div className="flex-1 flex flex-col min-h-0">
-          {/* Fixed navigation items */}
-          <div className="flex-shrink-0">
-            {!isCollapsed && (
-              <div
+        {/* Search */}
+        <div className="px-2 mb-1 flex-shrink-0">
+          {isCollapsed ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={toggleCollapse}
+                  className="flex items-center justify-center w-full p-2 rounded-lg hover:bg-gray-100 text-gray-500 transition-colors"
+                >
+                  <SearchIcon className="w-4 h-4" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right"><p>Search</p></TooltipContent>
+            </Tooltip>
+          ) : (
+            <InputGroup>
+              <InputGroupInput
+                placeholder='Search meeting content...'
+                value={searchQuery}
+                onChange={(e) => handleSearchChange(e.target.value)}
+              />
+              <InputGroupAddon><SearchIcon /></InputGroupAddon>
+              {searchQuery && (
+                <InputGroupAddon align={'inline-end'}>
+                  <InputGroupButton onClick={() => handleSearchChange('')}><X /></InputGroupButton>
+                </InputGroupAddon>
+              )}
+            </InputGroup>
+          )}
+        </div>
+
+        {/* Top nav items */}
+        <div className="flex-shrink-0 px-2 space-y-0.5">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
                 onClick={() => router.push('/')}
-                className="p-3  text-lg font-semibold items-center hover:bg-gray-100 h-10   flex mx-3 mt-3 rounded-lg cursor-pointer"
+                className={`flex items-center gap-3 px-3 py-2 rounded-lg w-full text-sm transition-colors ${
+                  isHomePage ? 'bg-gray-100 font-medium text-gray-900' : 'hover:bg-gray-100 text-gray-700'
+                }`}
               >
-                <Home className="w-4 h-4 mr-2" />
-                <span>Home</span>
-              </div>
-            )}
-          </div>
+                <Home className="w-4 h-4 flex-shrink-0" />
+                {!isCollapsed && <span>Home</span>}
+              </button>
+            </TooltipTrigger>
+            {isCollapsed && <TooltipContent side="right"><p>Home</p></TooltipContent>}
+          </Tooltip>
 
-          {/* Content area */}
-          <div className="flex-1 flex flex-col min-h-0">
-            {renderCollapsedIcons()}
-            {/* Meeting Notes folder header - fixed */}
-            {!isCollapsed && (
-              <div className="flex-shrink-0">
-                {filteredSidebarItems.filter(item => item.type === 'folder').map(item => (
-                  <div key={item.id}>
-                    <div
-                      className="flex items-center transition-all duration-150 p-3 text-lg font-semibold h-10 mx-3 mt-3 rounded-lg"
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={handleRecordingToggle}
+                className={`flex items-center gap-3 px-3 py-2 rounded-lg w-full text-sm transition-colors ${
+                  isRecording
+                    ? 'text-red-500 bg-red-50 hover:bg-red-100'
+                    : 'text-gray-700 hover:bg-red-50 hover:text-red-600'
+                }`}
+              >
+                {isRecording
+                  ? <Square className="w-4 h-4 flex-shrink-0" />
+                  : <Mic className="w-4 h-4 flex-shrink-0" />}
+                {!isCollapsed && (
+                  <span>{isRecording ? 'Recording in progress...' : 'Start Recording'}</span>
+                )}
+              </button>
+            </TooltipTrigger>
+            {isCollapsed && (
+              <TooltipContent side="right">
+                <p>{isRecording ? 'Recording in progress...' : 'Start Recording'}</p>
+              </TooltipContent>
+            )}
+          </Tooltip>
+        </div>
+
+        {/* Meetings section */}
+        <div className="flex-1 flex flex-col min-h-0 mt-3 overflow-hidden">
+          {isCollapsed ? (
+            // Collapsed: single Meetings icon, clicking expands sidebar + ensures meetings list is open
+            <div className="px-2">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={() => { setMeetingsExpanded(true); toggleCollapse(); }}
+                    className="flex items-center gap-3 px-3 py-2 rounded-lg w-full text-sm hover:bg-gray-100 text-gray-500 transition-colors"
+                  >
+                    <FolderOpen className="w-4 h-4 flex-shrink-0" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="right"><p>Meetings</p></TooltipContent>
+              </Tooltip>
+            </div>
+          ) : (
+            <>
+              {/* Collapsible section header */}
+              <button
+                className="flex items-center gap-1 w-full px-3 py-0.5 mb-1 rounded hover:bg-gray-50 flex-shrink-0 group"
+                onClick={() => setMeetingsExpanded(e => !e)}
+              >
+                <p className="text-xs font-medium uppercase tracking-wider text-gray-400 flex-1 text-left">
+                  Meetings
+                </p>
+                {searchQuery && isSearching && (
+                  <span className="text-xs text-blue-400 animate-pulse mr-1">Searching...</span>
+                )}
+                <ChevronDown className={`w-3 h-3 text-gray-400 transition-transform duration-200 flex-shrink-0 ${meetingsExpanded ? '' : '-rotate-90'}`} />
+              </button>
+
+              {meetingsExpanded && (
+                <div className="flex-1 overflow-y-auto custom-scrollbar min-h-0 px-2">
+                  {visibleMeetings.map(child => renderItem(child, 0))}
+                  {!showAllMeetings && meetingItems.length > MEETINGS_PREVIEW_COUNT && (
+                    <button
+                      className="w-full text-left px-3 py-1.5 text-xs text-gray-400 hover:text-gray-600 hover:bg-gray-50 rounded-lg transition-colors"
+                      onClick={() => setShowAllMeetings(true)}
                     >
-                      <NotebookPen className="w-4 h-4 mr-2 text-gray-600" />
-                      <span className="text-gray-700">{item.title}</span>
-                      {searchQuery && item.id === 'meetings' && isSearching && (
-                        <span className="ml-2 text-xs text-blue-500 animate-pulse">Searching...</span>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Scrollable meeting items */}
-            {!isCollapsed && (
-              <div className="flex-1 overflow-y-auto custom-scrollbar min-h-0">
-                {filteredSidebarItems
-                  .filter(item => item.type === 'folder' && expandedFolders.has(item.id) && item.children)
-                  .map(item => (
-                    <div key={`${item.id}-children`} className="mx-3">
-                      {item.children!.map(child => renderItem(child, 1))}
-                    </div>
-                  ))}
-              </div>
-            )}
-          </div>
+                      Show {meetingItems.length - MEETINGS_PREVIEW_COUNT} more…
+                    </button>
+                  )}
+                </div>
+              )}
+            </>
+          )}
         </div>
 
         {/* Footer */}
-        {!isCollapsed && (
-
-          <div className="flex-shrink-0 p-2 border-t border-gray-100">
-            <button
-              onClick={handleRecordingToggle}
-              disabled={isRecording}
-              className={`w-full flex items-center justify-center px-3 py-2 text-sm font-medium text-white ${isRecording ? 'bg-red-300 cursor-not-allowed' : 'bg-red-500 hover:bg-red-600'} rounded-lg transition-colors shadow-sm`}
-            >
-              {isRecording ? (
-                <>
-                  <Square className="w-4 h-4 mr-2" />
-                  <span>Recording in progress...</span>
-                </>
-              ) : (
-                <>
-                  <Mic className="w-4 h-4 mr-2" />
-                  <span>Start Recording</span>
-                </>
-              )}
-            </button>
-
-            {betaFeatures.importAndRetranscribe && (
+        <div className="flex-shrink-0 border-t border-gray-100 px-2 py-2 space-y-0.5">
+          {betaFeatures.importAndRetranscribe && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => openImportDialog()}
+                  className="flex items-center gap-3 px-3 py-2 rounded-lg w-full text-sm hover:bg-gray-100 text-gray-700 transition-colors"
+                >
+                  <Upload className="w-4 h-4 flex-shrink-0" />
+                  {!isCollapsed && <span>Import Audio</span>}
+                </button>
+              </TooltipTrigger>
+              {isCollapsed && <TooltipContent side="right"><p>Import Audio</p></TooltipContent>}
+            </Tooltip>
+          )}
+          <Tooltip>
+            <TooltipTrigger asChild>
               <button
-                onClick={() => openImportDialog()}
-                className="w-full flex items-center justify-center px-3 py-2 mt-1 text-sm font-medium text-gray-700 bg-blue-100 hover:bg-blue-200 rounded-lg transition-colors shadow-sm"
+                onClick={() => router.push('/settings')}
+                className={`flex items-center gap-3 px-3 py-2 rounded-lg w-full text-sm transition-colors ${
+                  pathname === '/settings' ? 'bg-gray-100 font-medium text-gray-900' : 'hover:bg-gray-100 text-gray-700'
+                }`}
               >
-                <Upload className="w-4 h-4 mr-2" />
-                <span>Import Audio</span>
+                <Settings className="w-4 h-4 flex-shrink-0" />
+                {!isCollapsed && <span>Settings</span>}
               </button>
-            )}
-
-            <button
-              onClick={() => router.push('/settings')}
-              className="w-full flex items-center justify-center px-3 py-1.5 mt-1 mb-1 text-sm font-medium text-gray-700 bg-gray-200 hover:bg-gray-300 rounded-lg transition-colors shadow-sm"
-            >
-              <Settings className="w-4 h-4 mr-2" />
-              <span>Settings</span>
-            </button>
-            <Info isCollapsed={isCollapsed} />
+            </TooltipTrigger>
+            {isCollapsed && <TooltipContent side="right"><p>Settings</p></TooltipContent>}
+          </Tooltip>
+          <Info isCollapsed={isCollapsed} />
             <div className="w-full flex items-center justify-center px-3 py-1 text-xs text-gray-400">
               v0.4.0
             </div>
-          </div>
-        )}
+        </div>
       </div>
 
       {/* Confirmation Modal for Delete */}
@@ -875,7 +778,7 @@ const Sidebar: React.FC = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   );
 };
 
