@@ -407,3 +407,36 @@ $env:RUST_LOG="debug"; ./clean_run_windows.bat
 
 **Whisper Integration**:
 - [frontend/src-tauri/src/whisper_engine/whisper_engine.rs](frontend/src-tauri/src/whisper_engine/whisper_engine.rs) - Whisper model management and transcription
+
+
+## Meetnola fork notes
+
+Meetnola is this fork's tester/product flavor of Meetily.
+
+- Stock app data (Meetily): `~/Library/Application Support/com.meetily.ai/`
+- Tester app data (Meetnola): `~/Library/Application Support/com.meetnola.tester/`
+- Tester bundle id: `com.meetnola.tester`
+- Packaged tester: prefer `frontend/build-meetnola.sh` / `meetnola Tester.app` for macOS system-audio permission testing (`tauri dev` is not trustworthy for TCC)
+- WIP handoffs live under `docs/wip/` (see `handoff-meetnola-current-state.md`)
+
+### Recording / UI stability debugging
+
+When the app shows an error and then all buttons stop working, treat it as a frontend state deadlock first, not a native crash.
+
+Primary log locations:
+- `frontend/logs/clean-run-*.log` — combined Next.js + Tauri dev logs from `clean_run.sh`
+- `~/Library/Application Support/com.meetnola.tester/logs/frontend-runtime.log` — tester frontend runtime logs
+- `~/Library/Application Support/com.meetily.ai/logs/frontend-runtime.log` — stock Meetily runtime logs
+
+Check these first:
+- Whether backend recording is still active via `get_recording_state` / `is_recording`
+- Whether frontend `RecordingStatus` is stuck in `starting`, `stopping`, `processing`, `saving`, or `error`
+- Whether a full-screen modal/overlay is still mounted and intercepting clicks
+- Whether the stop result was `status: "complete"` or `status: "partial"`
+
+Stop-flow contract:
+- Rust `stop_recording` returns `status`, `reason`, `chunks_remaining`, and `message`
+- Rust emits `recording-stop-result` and `recording-stopped`
+- Tray-driven stop emits `recording-stop-complete`
+- Frontend must only save meetings when stop result is `status === "complete"`
+- Partial/error stop paths should do cleanup and UI recovery, not continue waiting for save
