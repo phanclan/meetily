@@ -190,30 +190,27 @@ pub async fn initialize_fresh_database(app: AppHandle) -> Result<(), String> {
     // Set default model configuration for fresh installs
     let pool = db_manager.pool();
     
-    let default_summary_model = crate::summary::summary_engine::commands::get_recommended_summary_model_for_current_system()
-        .unwrap_or("qwen3.5:2b");
-
-    // Default Summary Model: Built-in AI (Qwen recommendation for this system)
+    // Default Summary Model: Groq
     if let Err(e) = crate::database::repositories::setting::SettingsRepository::save_model_config(
         pool,
-        "builtin-ai",
-        default_summary_model,
-        "large-v3", // Default whisper model (unused for builtin but required)
+        crate::config::DEFAULT_SUMMARY_PROVIDER,
+        crate::config::DEFAULT_GROQ_SUMMARY_MODEL,
+        crate::config::DEFAULT_WHISPER_MODEL,
         None,
     ).await {
         error!("Failed to set default summary model config: {}", e);
     }
 
-    // Default Transcription Model: Parakeet
+    // Default Transcription Model: Groq
     if let Err(e) = crate::database::repositories::setting::SettingsRepository::save_transcript_config(
         pool,
-        "parakeet",
-        crate::config::DEFAULT_PARAKEET_MODEL,
+        crate::config::DEFAULT_TRANSCRIPT_PROVIDER,
+        crate::config::DEFAULT_GROQ_TRANSCRIPT_MODEL,
     ).await {
         error!("Failed to set default transcription model config: {}", e);
     }
 
-    info!("Fresh database initialized successfully with default models");
+    info!("Fresh database initialized successfully with Groq-first default models");
 
     // Emit event to notify frontend that database is ready
     app.emit("database-initialized", ())

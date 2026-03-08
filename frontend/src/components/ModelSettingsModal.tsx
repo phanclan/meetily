@@ -16,8 +16,7 @@ import {
 } from '@/components/ui/select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Switch } from '@/components/ui/switch';
-import { Lock, Unlock, Eye, EyeOff, RefreshCw, CheckCircle2, XCircle, ChevronDown, ChevronUp, Download, ExternalLink, Check, ChevronsUpDown } from 'lucide-react';
+import { Lock, Unlock, Eye, EyeOff, RefreshCw, CheckCircle2, XCircle, ChevronDown, ChevronUp, Download, ExternalLink, Check, ChevronsUpDown, CircleHelp } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
   Command,
@@ -27,6 +26,7 @@ import {
   CommandItem,
   CommandList,
 } from '@/components/ui/command';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn, isOllamaNotInstalledError } from '@/lib/utils';
 import { toast } from 'sonner';
 
@@ -74,6 +74,12 @@ interface GroqModel {
   owned_by?: string;
 }
 
+interface GroqModelPresentation {
+  badge?: string;
+  description: string;
+  rank: number;
+}
+
 // Fallback models for when API fetch fails or no API key provided
 const OPENAI_FALLBACK_MODELS = [
   'gpt-4o',
@@ -95,11 +101,150 @@ const CLAUDE_FALLBACK_MODELS = [
 ];
 
 const GROQ_FALLBACK_MODELS = [
+  'openai/gpt-oss-120b',
+  'qwen/qwen3-32b',
   'llama-3.3-70b-versatile',
-  'llama-3.1-70b-versatile',
-  'mixtral-8x7b-32768',
-  'gemma2-9b-it',
+  'moonshotai/kimi-k2-instruct-0905',
 ];
+
+const GROQ_KEYS_URL = 'https://console.groq.com/keys';
+const GROQ_PRICING_URL = 'https://groq.com/pricing';
+
+const GROQ_SUMMARY_MODEL_PRESENTATION: Record<string, GroqModelPresentation> = {
+  'openai/gpt-oss-120b': {
+    badge: 'Recommended',
+    description: 'Best current Groq default for high-quality meeting summaries',
+    rank: 0,
+  },
+  'qwen/qwen3-32b': {
+    badge: 'Balanced',
+    description: 'Strong reasoning model with better speed and cost balance',
+    rank: 1,
+  },
+  'llama-3.3-70b-versatile': {
+    badge: 'Stable',
+    description: 'Older reliable fallback when you want a simpler non-reasoning default',
+    rank: 2,
+  },
+  'moonshotai/kimi-k2-instruct-0905': {
+    badge: 'Preview',
+    description: 'Powerful but preview-only and less suitable as the default choice',
+    rank: 3,
+  },
+  'openai/gpt-oss-20b': {
+    badge: 'Fast',
+    description: 'Smaller GPT-OSS option when you want lower latency',
+    rank: 4,
+  },
+  'llama-3.1-8b-instant': {
+    badge: 'Fastest',
+    description: 'Speed-first option with weaker summary quality',
+    rank: 5,
+  },
+  'llama-3.1-70b-versatile': {
+    badge: 'Legacy',
+    description: 'Older Groq default kept mainly as a compatibility fallback',
+    rank: 6,
+  },
+  'mixtral-8x7b-32768': {
+    badge: 'Long context',
+    description: 'Useful when prompts or transcript context get larger',
+    rank: 7,
+  },
+  'gemma2-9b-it': {
+    badge: 'Fast',
+    description: 'Lightweight option with weaker summary quality',
+    rank: 8,
+  },
+};
+
+function getGroqModelPresentation(modelId: string): GroqModelPresentation {
+  const knownModel = GROQ_SUMMARY_MODEL_PRESENTATION[modelId];
+  if (knownModel) {
+    return knownModel;
+  }
+
+  const normalized = modelId.toLowerCase();
+  if (normalized.includes('70b')) {
+    return {
+      badge: 'Quality',
+      description: 'Larger Groq model with stronger summary output',
+      rank: 30,
+    };
+  }
+
+  if (normalized.includes('gpt-oss-120b')) {
+    return {
+      badge: 'Recommended',
+      description: 'Large GPT-OSS reasoning model for stronger summaries',
+      rank: 0,
+    };
+  }
+
+  if (normalized.includes('qwen3-32b')) {
+    return {
+      badge: 'Balanced',
+      description: 'Reasoning-focused model with a strong speed and quality tradeoff',
+      rank: 1,
+    };
+  }
+
+  if (normalized.includes('kimi-k2')) {
+    return {
+      badge: 'Preview',
+      description: 'High-end preview model, better treated as an advanced option',
+      rank: 40,
+    };
+  }
+
+  if (normalized.includes('gpt-oss-20b')) {
+    return {
+      badge: 'Fast',
+      description: 'Smaller GPT-OSS model optimized for lower latency',
+      rank: 10,
+    };
+  }
+
+  if (normalized.includes('32b')) {
+    return {
+      badge: 'Balanced',
+      description: 'Mid-size Groq model for balanced speed and quality',
+      rank: 20,
+    };
+  }
+
+  if (normalized.includes('8x7b') || normalized.includes('mixtral')) {
+    return {
+      badge: 'Long context',
+      description: 'MoE model that can be useful for larger prompts',
+      rank: 40,
+    };
+  }
+
+  if (normalized.includes('9b') || normalized.includes('8b')) {
+    return {
+      badge: 'Fast',
+      description: 'Smaller Groq model with faster responses',
+      rank: 50,
+    };
+  }
+
+  return {
+    description: 'Other Groq chat model',
+    rank: 100,
+  };
+}
+
+function curateGroqSummaryModels(models: string[]): string[] {
+  return Array.from(new Set(models.filter(Boolean))).sort((left, right) => {
+    const rankDelta = getGroqModelPresentation(left).rank - getGroqModelPresentation(right).rank;
+    if (rankDelta !== 0) {
+      return rankDelta;
+    }
+
+    return left.localeCompare(right);
+  });
+}
 
 interface ModelSettingsModalProps {
   modelConfig: ModelConfig;
@@ -140,7 +285,6 @@ export function ModelSettingsModal({
   const [hasAutoFetched, setHasAutoFetched] = useState<boolean>(false);
   const hasSyncedFromParent = useRef<boolean>(false);
   const hasLoadedInitialConfig = useRef<boolean>(false);
-  const [autoGenerateEnabled, setAutoGenerateEnabled] = useState<boolean>(true); // Default to true
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isEndpointSectionCollapsed, setIsEndpointSectionCollapsed] = useState<boolean>(true); // Collapsed by default
   const [ollamaNotInstalled, setOllamaNotInstalled] = useState<boolean>(false); // Track if Ollama is not installed
@@ -226,7 +370,7 @@ export function ModelSettingsModal({
   const modelOptions: Record<string, string[]> = {
     ollama: models.map((model) => model.name),
     claude: claudeModels.length > 0 ? claudeModels : CLAUDE_FALLBACK_MODELS,
-    groq: groqModels.length > 0 ? groqModels : GROQ_FALLBACK_MODELS,
+    groq: curateGroqSummaryModels(groqModels.length > 0 ? groqModels : GROQ_FALLBACK_MODELS),
     openai: openaiModels.length > 0 ? openaiModels : OPENAI_FALLBACK_MODELS,
     openrouter: openRouterModels.map((m) => m.id),
     'builtin-ai': builtinAiModels.map((m) => m.name),
@@ -253,6 +397,26 @@ export function ModelSettingsModal({
     (requiresApiKey && (!apiKey || (typeof apiKey === 'string' && !apiKey.trim()))) ||
     (modelConfig.provider === 'ollama' && ollamaEndpointChanged) ||
     isCustomOpenAIInvalid;
+
+  const dynamicProviderModelTooltip = (() => {
+    if (!['groq', 'claude', 'openai', 'openrouter'].includes(modelConfig.provider)) {
+      return null;
+    }
+
+    if (!apiKey?.trim()) {
+      return 'Add an API key to auto-load models for this provider. Without one, the dropdown falls back to a built-in list.';
+    }
+
+    if (modelConfig.provider === 'openrouter') {
+      return 'This list loads from OpenRouter when the provider is selected. If the request fails, the current saved model stays in place.';
+    }
+
+    if (modelConfig.provider === 'groq') {
+      return 'This list loads from Groq when your API key is present, then ranks the results for meeting summaries so the strongest defaults appear first.';
+    }
+
+    return 'This list loads automatically from the provider when it is selected and your API key is present. If the request fails, the dropdown falls back to a built-in list.';
+  })();
 
   useEffect(() => {
     const fetchModelConfig = async () => {
@@ -312,22 +476,6 @@ export function ModelSettingsModal({
 
     fetchModelConfig();
   }, [skipInitialFetch]);
-
-  // Fetch auto-generate setting on mount
-  useEffect(() => {
-    const fetchAutoGenerateSetting = async () => {
-      try {
-        const enabled = (await invoke('api_get_auto_generate_setting')) as boolean;
-        setAutoGenerateEnabled(enabled);
-        console.log('Auto-generate setting loaded:', enabled);
-      } catch (err) {
-        console.error('Failed to fetch auto-generate setting:', err);
-        // Keep default value (true) on error
-      }
-    };
-
-    fetchAutoGenerateSetting();
-  }, []);
 
   // Sync ollamaEndpoint state when modelConfig.ollamaEndpoint changes from parent
   useEffect(() => {
@@ -698,6 +846,15 @@ export function ModelSettingsModal({
     }
   };
 
+  const openExternalUrl = async (url: string) => {
+    try {
+      await invoke('open_external_url', { url });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      toast.error('Failed to open link', { description: message });
+    }
+  };
+
   // Function to download recommended model
   const downloadRecommendedModel = async () => {
     const recommendedModel = 'gemma3:1b';
@@ -885,63 +1042,138 @@ export function ModelSettingsModal({
             </Select>
 
             {modelConfig.provider !== 'builtin-ai' && modelConfig.provider !== 'custom-openai' && (
-              <Popover open={modelComboboxOpen} onOpenChange={setModelComboboxOpen} modal={true}>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    role="combobox"
-                    aria-expanded={modelComboboxOpen}
-                    className="flex-1 max-w-[200px] justify-between font-normal"
-                  >
-                    <span className="truncate">
-                      {modelConfig.model || "Select model..."}
-                    </span>
-                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-[250px] p-0" align="start">
-                  <Command>
-                    <CommandInput placeholder="Search models..." />
-                    <CommandList className="max-h-[300px]">
-                      {(modelConfig.provider === 'openrouter' && isLoadingOpenRouter) ||
-                       (modelConfig.provider === 'openai' && isLoadingOpenAI) ||
-                       (modelConfig.provider === 'claude' && isLoadingClaude) ||
-                       (modelConfig.provider === 'groq' && isLoadingGroq) ? (
-                        <div className="py-6 text-center text-sm text-muted-foreground">
-                          <RefreshCw className="mx-auto h-4 w-4 animate-spin mb-2" />
-                          Loading models...
-                        </div>
-                      ) : (
-                        <>
-                          <CommandEmpty>No models found.</CommandEmpty>
-                          <CommandGroup>
-                            {modelOptions[modelConfig.provider]?.map((model) => (
-                              <CommandItem
-                                key={model}
-                                value={model}
-                                onSelect={(currentValue) => {
-                                  setModelConfig((prev: ModelConfig) => ({ ...prev, model: currentValue }));
-                                  setModelComboboxOpen(false);
-                                }}
-                              >
-                                <Check
-                                  className={cn(
-                                    "mr-2 h-4 w-4",
-                                    modelConfig.model === model ? "opacity-100" : "opacity-0"
+              <div className="flex items-center gap-2">
+                <Popover open={modelComboboxOpen} onOpenChange={setModelComboboxOpen} modal={true}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      role="combobox"
+                      aria-expanded={modelComboboxOpen}
+                      className="flex-1 max-w-[200px] justify-between font-normal"
+                    >
+                      <span className="truncate">
+                        {modelConfig.model || "Select model..."}
+                      </span>
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[250px] p-0" align="start">
+                    <Command>
+                      <CommandInput placeholder="Search models..." />
+                      <CommandList className="max-h-[300px]">
+                        {(modelConfig.provider === 'openrouter' && isLoadingOpenRouter) ||
+                         (modelConfig.provider === 'openai' && isLoadingOpenAI) ||
+                         (modelConfig.provider === 'claude' && isLoadingClaude) ||
+                         (modelConfig.provider === 'groq' && isLoadingGroq) ? (
+                          <div className="py-6 text-center text-sm text-muted-foreground">
+                            <RefreshCw className="mx-auto h-4 w-4 animate-spin mb-2" />
+                            Loading models...
+                          </div>
+                        ) : (
+                          <>
+                            <CommandEmpty>No models found.</CommandEmpty>
+                            <CommandGroup>
+                              {modelOptions[modelConfig.provider]?.map((model) => (
+                                <CommandItem
+                                  key={model}
+                                  value={modelConfig.provider === 'groq'
+                                    ? `${model} ${getGroqModelPresentation(model).badge || ''} ${getGroqModelPresentation(model).description}`
+                                    : model}
+                                  onSelect={() => {
+                                    setModelConfig((prev: ModelConfig) => ({ ...prev, model }));
+                                    setModelComboboxOpen(false);
+                                  }}
+                                >
+                                  <Check
+                                    className={cn(
+                                      "mr-2 h-4 w-4",
+                                      modelConfig.model === model ? "opacity-100" : "opacity-0"
+                                    )}
+                                  />
+                                  {modelConfig.provider === 'groq' ? (
+                                    <div className="min-w-0 flex-1">
+                                      <div className="flex items-center gap-2">
+                                        <span className="truncate">{model}</span>
+                                        {getGroqModelPresentation(model).badge && (
+                                          <span className="shrink-0 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-blue-700">
+                                            {getGroqModelPresentation(model).badge}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <p className="truncate text-xs text-muted-foreground">
+                                        {getGroqModelPresentation(model).description}
+                                      </p>
+                                    </div>
+                                  ) : (
+                                    <span className="truncate">{model}</span>
                                   )}
-                                />
-                                <span className="truncate">{model}</span>
-                              </CommandItem>
-                            ))}
-                          </CommandGroup>
-                        </>
-                      )}
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
-              </Popover>
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </>
+                        )}
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+
+                {dynamicProviderModelTooltip && (
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-input bg-background text-muted-foreground transition-colors hover:text-foreground"
+                          aria-label="How model loading works"
+                        >
+                          <CircleHelp className="h-4 w-4" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-xs leading-relaxed">
+                        {dynamicProviderModelTooltip}
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                )}
+              </div>
             )}
           </div>
+          {modelConfig.provider === 'groq' && (
+            <div className="mt-2 space-y-2">
+              <p className="text-xs text-muted-foreground">
+                Groq models are ranked here for meeting summaries, with the safest default at the top.
+              </p>
+              <Alert className="border-blue-200 bg-blue-50">
+                <AlertDescription className="space-y-3 text-blue-900">
+                  <p className="text-xs leading-relaxed">
+                    Need a Groq key? Testers can create one in Groq Console and use Groq&apos;s Free plan for evaluation, subject to Groq rate limits.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="border-blue-300 bg-white text-blue-900 hover:bg-blue-100"
+                      onClick={() => openExternalUrl(GROQ_KEYS_URL)}
+                    >
+                      <ExternalLink className="mr-2 h-4 w-4" />
+                      Get Groq API Key
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="border-blue-300 bg-white text-blue-900 hover:bg-blue-100"
+                      onClick={() => openExternalUrl(GROQ_PRICING_URL)}
+                    >
+                      <ExternalLink className="mr-2 h-4 w-4" />
+                      View Groq Free Plan
+                    </Button>
+                  </div>
+                </AlertDescription>
+              </Alert>
+            </div>
+          )}
         </div>
 
         {/* Custom OpenAI Configuration Section */}

@@ -4,7 +4,7 @@ import React, { createContext, useContext, useState, useEffect, useRef, useCallb
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type { PermissionStatus, OnboardingPermissions } from '@/types/onboarding';
-import { resolveOnboardingSummaryModelStatus } from '@/lib/onboarding-summary-model';
+import { DEFAULT_GROQ_SUMMARY_MODEL } from '@/constants/modelDefaults';
 
 const PARAKEET_MODEL = 'parakeet-tdt-0.6b-v3-int8';
 
@@ -15,7 +15,6 @@ interface OnboardingStatus {
   model_status: {
     parakeet: string;
     summary: string;
-    selected_summary_model?: string;
   };
   last_updated: string;
 }
@@ -43,7 +42,6 @@ interface OnboardingContextType {
   summaryModelProgress: number;
   summaryModelProgressInfo: SummaryModelProgressInfo;
   selectedSummaryModel: string;
-  recommendedSummaryModel: string;
   databaseExists: boolean;
   isBackgroundDownloading: boolean;
   // Permissions
@@ -61,14 +59,8 @@ interface OnboardingContextType {
   setPermissionStatus: (permission: keyof OnboardingPermissions, status: PermissionStatus) => void;
   setPermissionsSkipped: (skipped: boolean) => void;
   completeOnboarding: () => Promise<void>;
-  startBackgroundDownloads: (options: StartBackgroundDownloadsOptions) => Promise<void>;
+  startBackgroundDownloads: (includeGemma: boolean) => Promise<void>;
   retryParakeetDownload: () => Promise<void>;
-}
-
-interface StartBackgroundDownloadsOptions {
-  includeParakeet: boolean;
-  includeSummary: boolean;
-  summaryModel?: string;
 }
 
 const OnboardingContext = createContext<OnboardingContextType | undefined>(undefined);
@@ -92,8 +84,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
     totalMb: 0,
     speedMbps: 0,
   });
-  const [selectedSummaryModel, setSelectedSummaryModel] = useState<string>('');
-  const [recommendedSummaryModel, setRecommendedSummaryModel] = useState<string>('');
+  const [selectedSummaryModel, setSelectedSummaryModel] = useState<string>(DEFAULT_GROQ_SUMMARY_MODEL);
   const [databaseExists, setDatabaseExists] = useState(false);
   const [isBackgroundDownloading, setIsBackgroundDownloading] = useState(false);
 
@@ -106,45 +97,6 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
   const [permissionsSkipped, setPermissionsSkipped] = useState(false);
 
   const saveTimeoutRef = useRef<NodeJS.Timeout>();
-
-  const initializeSummaryModelSelection = async (preferredModel = selectedSummaryModel) => {
-    try {
-      const recommendedModel = await invoke<string>('builtin_ai_get_recommended_model');
-      setRecommendedSummaryModel(recommendedModel);
-      const modelToCheck = preferredModel || recommendedModel;
-      setSelectedSummaryModel(modelToCheck);
-
-      const selectedModelReady = await invoke<boolean>('builtin_ai_is_model_ready', {
-        modelName: modelToCheck,
-        refresh: true,
-      });
-      const resolved = resolveOnboardingSummaryModelStatus({
-        selectedModel: preferredModel,
-        recommendedModel,
-        selectedModelReady,
-      });
-
-      setSelectedSummaryModel(resolved.selectedSummaryModel);
-      setSummaryModelDownloaded(resolved.summaryModelDownloaded);
-      console.log('[OnboardingContext] Set recommended model:', resolved.selectedSummaryModel);
-
-      return resolved;
-    } catch (error) {
-      console.error('[OnboardingContext] Failed to initialize summary model:', error);
-      return null;
-    }
-  };
-
-  const requestSummaryModelDownload = (modelName: string) => {
-    console.log('[OnboardingContext] Starting Summary Model download');
-    invoke('builtin_ai_download_model', { modelName })
-      .catch(err => {
-        if (String(err).includes('Download already in progress')) {
-          return;
-        }
-        console.error('[OnboardingContext] Summary Model download failed:', err);
-      });
-  };
 
   // Load status on mount and initialize database
   useEffect(() => {
@@ -286,7 +238,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
       unlistenComplete.then(fn => fn());
       unlistenError.then(fn => fn());
     };
-  }, []);
+  }, [selectedSummaryModel]);
 
   // Listen to summary model (Built-in AI) download progress
   useEffect(() => {
@@ -301,7 +253,8 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
       'builtin-ai-download-progress',
       (event) => {
         const { model, progress, downloaded_mb, total_mb, speed_mbps, status } = event.payload;
-        if (selectedSummaryModel && model === selectedSummaryModel) {
+        // Optional local summary downloads can still update onboarding state if the user starts one.
+        if (model === selectedSummaryModel || model === 'gemma3:1b' || model === 'gemma3:4b') {
           setSummaryModelProgress(progress);
           setSummaryModelProgressInfo({
             percent: progress,
@@ -338,18 +291,6 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
       if (status) {
         console.log('[OnboardingContext] Loaded saved status:', status);
 
-        if (status.completed) {
-          setCurrentStep(status.current_step);
-          setCompleted(true);
-          setParakeetDownloaded(status.model_status.parakeet === 'downloaded');
-          setSummaryModelDownloaded(status.model_status.summary === 'downloaded');
-          if (status.model_status.selected_summary_model) {
-            setSelectedSummaryModel(status.model_status.selected_summary_model);
-          }
-          console.log('[OnboardingContext] Restored completed onboarding status without model verification');
-          return;
-        }
-
         // Don't trust saved status - verify actual model status on disk
         const verifiedStatus = await verifyModelStatus(status);
 
@@ -357,16 +298,11 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
         setCompleted(verifiedStatus.completed);
         setParakeetDownloaded(verifiedStatus.parakeetDownloaded);
         setSummaryModelDownloaded(verifiedStatus.summaryModelDownloaded);
-        if (verifiedStatus.selectedSummaryModel) {
-          setSelectedSummaryModel(verifiedStatus.selectedSummaryModel);
-        }
 
         console.log('[OnboardingContext] Verified status:', verifiedStatus);
 
         // Check if any downloads are active to restore isBackgroundDownloading state
         await checkActiveDownloads();
-      } else {
-        await initializeSummaryModelSelection();
       }
     } catch (error) {
       console.error('[OnboardingContext] Failed to load onboarding status:', error);
@@ -377,7 +313,6 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
   const verifyModelStatus = async (savedStatus: OnboardingStatus) => {
     let parakeetDownloaded = false;
     let summaryModelDownloaded = false;
-    let selectedSummaryModel = '';
 
     // Verify Parakeet model exists on disk
     try {
@@ -389,24 +324,11 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
       parakeetDownloaded = false;
     }
 
-    // Verify the selected/recommended Summary model exists on disk.
+    // Verify if any optional local summary model exists on disk.
     try {
-      const recommendedModel = await invoke<string>('builtin_ai_get_recommended_model');
-      setRecommendedSummaryModel(recommendedModel);
-      const savedSelectedModel = savedStatus.model_status.selected_summary_model || '';
-      const modelToCheck = savedSelectedModel || recommendedModel;
-      const selectedModelReady = await invoke<boolean>('builtin_ai_is_model_ready', {
-        modelName: modelToCheck,
-        refresh: true,
-      });
-      const resolved = resolveOnboardingSummaryModelStatus({
-        selectedModel: savedSelectedModel,
-        recommendedModel,
-        selectedModelReady,
-      });
-      selectedSummaryModel = resolved.selectedSummaryModel;
-      summaryModelDownloaded = resolved.summaryModelDownloaded;
-      console.log('[OnboardingContext] Summary model verified on disk:', summaryModelDownloaded, 'model:', selectedSummaryModel);
+      const availableModel = await invoke<string | null>('builtin_ai_get_available_summary_model');
+      summaryModelDownloaded = !!availableModel;
+      console.log('[OnboardingContext] Summary model verified on disk:', summaryModelDownloaded, 'model:', availableModel);
     } catch (error) {
       console.warn('[OnboardingContext] Failed to verify Summary model:', error);
       summaryModelDownloaded = false;
@@ -429,7 +351,6 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
       completed,
       parakeetDownloaded,
       summaryModelDownloaded,
-      selectedSummaryModel,
     };
   };
 
@@ -451,7 +372,6 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
           model_status: {
             parakeet: parakeetDownloaded ? 'downloaded' : 'not_downloaded',
             summary: summaryModelDownloaded ? 'downloaded' : 'not_downloaded',
-            selected_summary_model: selectedSummaryModel || undefined,
           },
           last_updated: new Date().toISOString(),
         },
@@ -472,27 +392,12 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
         saveTimeoutRef.current = undefined;
       }
 
-      let modelToSave = selectedSummaryModel;
-      if (!modelToSave) {
-        modelToSave = await invoke<string>('builtin_ai_get_recommended_model');
-        setSelectedSummaryModel(modelToSave);
-      }
-
-      const selectedModelReady = await invoke<boolean>('builtin_ai_is_model_ready', {
-        modelName: modelToSave,
-        refresh: true,
-      });
-      setSummaryModelDownloaded(selectedModelReady);
-      if (!selectedModelReady) {
-        requestSummaryModelDownload(modelToSave);
-      }
-
-      // Onboarding always uses builtin-ai with selected model
+      // Onboarding defaults to Groq and keeps local models opt-in.
       await invoke('complete_onboarding', {
-        model: modelToSave,
+        model: selectedSummaryModel,
       });
       setCompleted(true);
-      console.log('[OnboardingContext] Onboarding completed with model:', modelToSave);
+      console.log('[OnboardingContext] Onboarding completed with model:', selectedSummaryModel);
 
       // Reset the flag so subsequent state updates can be saved
       isCompletingRef.current = false;
@@ -503,47 +408,10 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
     }
   };
 
-  // Start background downloads for models.
-  const startBackgroundDownloads = async ({
-    includeParakeet,
-    includeSummary,
-    summaryModel,
-  }: StartBackgroundDownloadsOptions) => {
-    console.log('[OnboardingContext] Starting background downloads:', {
-      includeParakeet,
-      includeSummary,
-      summaryModel,
-    });
-
-    try {
-      const shouldStartParakeet = includeParakeet && !parakeetDownloaded;
-      const shouldStartSummary = includeSummary && !summaryModelDownloaded && !!summaryModel;
-
-      if (!shouldStartParakeet && !shouldStartSummary) {
-        if (includeSummary && !summaryModelDownloaded && !summaryModel) {
-          console.warn('[OnboardingContext] Summary Model download skipped until recommendation is loaded');
-        }
-        return;
-      }
-
-      setIsBackgroundDownloading(true);
-
-      // Start Parakeet download first (speech recognition - always required)
-      if (shouldStartParakeet) {
-        console.log('[OnboardingContext] Starting Parakeet download');
-        invoke('parakeet_download_model', { modelName: PARAKEET_MODEL })
-          .catch(err => console.error('[OnboardingContext] Parakeet download failed:', err));
-      }
-
-      // Start selected Summary Model download immediately so completion cannot race the request.
-      if (shouldStartSummary && summaryModel) {
-        requestSummaryModelDownload(summaryModel);
-      }
-    } catch (error) {
-      console.error('[OnboardingContext] Failed to start background downloads:', error);
-      setIsBackgroundDownloading(false);
-      throw error;
-    }
+  // Local model downloads are optional and no longer start during onboarding.
+  const startBackgroundDownloads = async (_includeGemma: boolean) => {
+    console.log('[OnboardingContext] Local model downloads are opt-in and skipped during onboarding');
+    setIsBackgroundDownloading(false);
   };
 
   // Check if any models are currently downloading (for re-entry)
@@ -557,7 +425,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
         setIsBackgroundDownloading(true);
       }
       
-      // Also check for Built-in AI downloads if possible (though less critical as Parakeet is the main blocker)
+      // Also check for Gemma/Built-in AI downloads if possible (though less critical as Parakeet is the main blocker)
       
     } catch (error) {
       console.warn('[OnboardingContext] Failed to check active downloads:', error);
@@ -612,7 +480,6 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
         summaryModelProgress,
         summaryModelProgressInfo,
         selectedSummaryModel,
-        recommendedSummaryModel,
         databaseExists,
         isBackgroundDownloading,
         permissions,

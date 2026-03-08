@@ -3,17 +3,22 @@ import { ModelConfig } from '@/components/ModelSettingsModal';
 import { invoke as invokeTauri } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import Analytics from '@/lib/analytics';
+import {
+  DEFAULT_GROQ_SUMMARY_MODEL,
+  DEFAULT_SUMMARY_PROVIDER,
+  DEFAULT_WHISPER_MODEL,
+} from '@/constants/modelDefaults';
 
 interface UseModelConfigurationProps {
   serverAddress: string | null;
 }
 
 export function useModelConfiguration({ serverAddress }: UseModelConfigurationProps) {
-  // Note: No hardcoded defaults - DB is the source of truth
+  // Groq-first fallbacks keep the UI coherent until the DB config loads.
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
-    provider: 'ollama',
-    model: '', // Empty until loaded from DB
-    whisperModel: 'large-v3'
+    provider: DEFAULT_SUMMARY_PROVIDER,
+    model: DEFAULT_GROQ_SUMMARY_MODEL,
+    whisperModel: DEFAULT_WHISPER_MODEL
   });
   const [isLoading, setIsLoading] = useState(true);
   const [, setError] = useState<string>('');

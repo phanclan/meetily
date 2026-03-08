@@ -7,6 +7,11 @@ import { ModelConfig, ModelSettingsModal } from '@/components/ModelSettingsModal
 import { SummaryLanguageSettings } from '@/components/SummaryLanguageSettings';
 import { Switch } from './ui/switch';
 import { useConfig } from '@/contexts/ConfigContext';
+import {
+  DEFAULT_GROQ_SUMMARY_MODEL,
+  DEFAULT_SUMMARY_PROVIDER,
+  DEFAULT_WHISPER_MODEL,
+} from '@/constants/modelDefaults';
 
 interface SummaryModelSettingsProps {
   refetchTrigger?: number; // Change this to trigger refetch
@@ -14,9 +19,9 @@ interface SummaryModelSettingsProps {
 
 export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsProps) {
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
-    provider: 'ollama',
-    model: 'llama3.2:latest',
-    whisperModel: 'large-v3',
+    provider: DEFAULT_SUMMARY_PROVIDER,
+    model: DEFAULT_GROQ_SUMMARY_MODEL,
+    whisperModel: DEFAULT_WHISPER_MODEL,
     apiKey: null,
     ollamaEndpoint: null
   });

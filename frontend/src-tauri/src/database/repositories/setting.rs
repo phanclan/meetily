@@ -1,6 +1,7 @@
 use crate::database::models::{Setting, TranscriptSetting};
 use crate::summary::CustomOpenAIConfig;
 use sqlx::SqlitePool;
+use log::info;
 
 #[derive(serde::Deserialize, Debug)]
 pub struct SaveModelConfigRequest {
@@ -29,6 +30,79 @@ pub struct SettingsRepository;
 // NOTE: Handle data exclusion in the higher layer as this is database abstraction layer(using SELECT *)
 
 impl SettingsRepository {
+    fn is_shared_provider(provider: &str) -> bool {
+        matches!(provider, "groq" | "openai")
+    }
+
+    fn settings_api_key_column(provider: &str) -> std::result::Result<Option<&'static str>, sqlx::Error> {
+        let column = match provider {
+            "openai" => Some("openaiApiKey"),
+            "claude" => Some("anthropicApiKey"),
+            "ollama" => Some("ollamaApiKey"),
+            "groq" => Some("groqApiKey"),
+            "openrouter" => Some("openRouterApiKey"),
+            "builtin-ai" => None,
+            _ => {
+                return Err(sqlx::Error::Protocol(
+                    format!("Invalid provider: {}", provider).into(),
+                ))
+            }
+        };
+
+        Ok(column)
+    }
+
+    fn transcript_api_key_column(provider: &str) -> std::result::Result<Option<&'static str>, sqlx::Error> {
+        let column = match provider {
+            "localWhisper" => Some("whisperApiKey"),
+            "parakeet" => None,
+            "deepgram" => Some("deepgramApiKey"),
+            "elevenLabs" => Some("elevenLabsApiKey"),
+            "groq" => Some("groqApiKey"),
+            "openai" => Some("openaiApiKey"),
+            _ => {
+                return Err(sqlx::Error::Protocol(
+                    format!("Invalid provider: {}", provider).into(),
+                ))
+            }
+        };
+
+        Ok(column)
+    }
+
+    async fn get_key_from_table(
+        pool: &SqlitePool,
+        table: &str,
+        column: &str,
+    ) -> std::result::Result<Option<String>, sqlx::Error> {
+        let query = format!(
+            "SELECT {} FROM {} WHERE id = '1' LIMIT 1",
+            column, table
+        );
+        sqlx::query_scalar(&query).fetch_optional(pool).await
+    }
+
+    async fn update_key_in_table(
+        pool: &SqlitePool,
+        table: &str,
+        column: &str,
+        api_key: &str,
+    ) -> std::result::Result<(), sqlx::Error> {
+        let query = format!("UPDATE {} SET {} = $1 WHERE id = '1'", table, column);
+        sqlx::query(&query).bind(api_key).execute(pool).await?;
+        Ok(())
+    }
+
+    async fn clear_key_in_table(
+        pool: &SqlitePool,
+        table: &str,
+        column: &str,
+    ) -> std::result::Result<(), sqlx::Error> {
+        let query = format!("UPDATE {} SET {} = NULL WHERE id = '1'", table, column);
+        sqlx::query(&query).execute(pool).await?;
+        Ok(())
+    }
+
     pub async fn get_model_config(
         pool: &SqlitePool,
     ) -> std::result::Result<Option<Setting>, sqlx::Error> {
@@ -79,18 +153,8 @@ impl SettingsRepository {
             ));
         }
 
-        let api_key_column = match provider {
-            "openai" => "openaiApiKey",
-            "claude" => "anthropicApiKey",
-            "ollama" => "ollamaApiKey",
-            "groq" => "groqApiKey",
-            "openrouter" => "openRouterApiKey",
-            "builtin-ai" => return Ok(()), // No API key needed
-            _ => {
-                return Err(sqlx::Error::Protocol(
-                    format!("Invalid provider: {}", provider).into(),
-                ))
-            }
+        let Some(api_key_column) = Self::settings_api_key_column(provider)? else {
+            return Ok(());
         };
 
         let query = format!(
@@ -103,6 +167,13 @@ impl SettingsRepository {
             api_key_column, api_key_column
         );
         sqlx::query(&query).bind(api_key).execute(pool).await?;
+
+        if Self::is_shared_provider(provider) {
+            if let Some(transcript_column) = Self::transcript_api_key_column(provider)? {
+                Self::update_key_in_table(pool, "transcript_settings", transcript_column, api_key)
+                    .await?;
+            }
+        }
 
         Ok(())
     }
@@ -117,26 +188,20 @@ impl SettingsRepository {
             return Ok(config.and_then(|c| c.api_key));
         }
 
-        let api_key_column = match provider {
-            "openai" => "openaiApiKey",
-            "ollama" => "ollamaApiKey",
-            "groq" => "groqApiKey",
-            "claude" => "anthropicApiKey",
-            "openrouter" => "openRouterApiKey",
-            "builtin-ai" => return Ok(None), // No API key needed
-            _ => {
-                return Err(sqlx::Error::Protocol(
-                    format!("Invalid provider: {}", provider).into(),
-                ))
-            }
+        let Some(api_key_column) = Self::settings_api_key_column(provider)? else {
+            return Ok(None);
         };
 
-        let query = format!(
-            "SELECT {} FROM settings WHERE id = '1' LIMIT 1",
-            api_key_column
-        );
-        let api_key = sqlx::query_scalar(&query).fetch_optional(pool).await?;
-        Ok(api_key)
+        let api_key = Self::get_key_from_table(pool, "settings", api_key_column).await?;
+        if api_key.is_some() || !Self::is_shared_provider(provider) {
+            return Ok(api_key);
+        }
+
+        let Some(transcript_column) = Self::transcript_api_key_column(provider)? else {
+            return Ok(None);
+        };
+
+        Self::get_key_from_table(pool, "transcript_settings", transcript_column).await
     }
 
     pub async fn get_transcript_config(
@@ -146,6 +211,7 @@ impl SettingsRepository {
             sqlx::query_as::<_, TranscriptSetting>("SELECT * FROM transcript_settings LIMIT 1")
                 .fetch_optional(pool)
                 .await?;
+        info!("[settings] get_transcript_config: {:?}", setting.as_ref().map(|s| (&s.provider, &s.model)));
         Ok(setting)
 
     }
@@ -155,6 +221,7 @@ impl SettingsRepository {
         provider: &str,
         model: &str,
     ) -> std::result::Result<(), sqlx::Error> {
+        info!("[settings] save_transcript_config: provider={} model={}", provider, model);
         sqlx::query(
             r#"
             INSERT INTO transcript_settings (id, provider, model)
@@ -177,20 +244,11 @@ impl SettingsRepository {
         provider: &str,
         api_key: &str,
     ) -> std::result::Result<(), sqlx::Error> {
-        let api_key_column = match provider {
-            "localWhisper" => "whisperApiKey",
-            "parakeet" => return Ok(()), // Parakeet doesn't need an API key, return early
-            "deepgram" => "deepgramApiKey",
-            "elevenLabs" => "elevenLabsApiKey",
-            "groq" => "groqApiKey",
-            "openai" => "openaiApiKey",
-            _ => {
-                return Err(sqlx::Error::Protocol(
-                    format!("Invalid provider: {}", provider).into(),
-                ))
-            }
+        let Some(api_key_column) = Self::transcript_api_key_column(provider)? else {
+            return Ok(());
         };
 
+        info!("[settings] save_transcript_api_key: provider={} column={}", provider, api_key_column);
         let query = format!(
             r#"
             INSERT INTO transcript_settings (id, provider, model, "{}")
@@ -202,6 +260,12 @@ impl SettingsRepository {
         );
         sqlx::query(&query).bind(api_key).execute(pool).await?;
 
+        if Self::is_shared_provider(provider) {
+            if let Some(settings_column) = Self::settings_api_key_column(provider)? {
+                Self::update_key_in_table(pool, "settings", settings_column, api_key).await?;
+            }
+        }
+
         Ok(())
     }
 
@@ -209,25 +273,22 @@ impl SettingsRepository {
         pool: &SqlitePool,
         provider: &str,
     ) -> std::result::Result<Option<String>, sqlx::Error> {
-        let api_key_column = match provider {
-            "localWhisper" => "whisperApiKey",
-            "parakeet" => return Ok(None), // Parakeet doesn't need an API key
-            "deepgram" => "deepgramApiKey",
-            "elevenLabs" => "elevenLabsApiKey",
-            "groq" => "groqApiKey",
-            "openai" => "openaiApiKey",
-            _ => {
-                return Err(sqlx::Error::Protocol(
-                    format!("Invalid provider: {}", provider).into(),
-                ))
-            }
+        let Some(api_key_column) = Self::transcript_api_key_column(provider)? else {
+            return Ok(None);
         };
 
-        let query = format!(
-            "SELECT {} FROM transcript_settings WHERE id = '1' LIMIT 1",
-            api_key_column
-        );
-        let api_key = sqlx::query_scalar(&query).fetch_optional(pool).await?;
+        let api_key = Self::get_key_from_table(pool, "transcript_settings", api_key_column).await?;
+        if api_key.is_some() || !Self::is_shared_provider(provider) {
+            info!("[settings] get_transcript_api_key: provider={} found={}", provider, api_key.is_some());
+            return Ok(api_key);
+        }
+
+        let Some(settings_column) = Self::settings_api_key_column(provider)? else {
+            return Ok(None);
+        };
+
+        let api_key = Self::get_key_from_table(pool, "settings", settings_column).await?;
+        info!("[settings] get_transcript_api_key: provider={} found={}", provider, api_key.is_some());
         Ok(api_key)
     }
 
@@ -243,25 +304,17 @@ impl SettingsRepository {
             return Ok(());
         }
 
-        let api_key_column = match provider {
-            "openai" => "openaiApiKey",
-            "ollama" => "ollamaApiKey",
-            "groq" => "groqApiKey",
-            "claude" => "anthropicApiKey",
-            "openrouter" => "openRouterApiKey",
-            "builtin-ai" => return Ok(()), // No API key needed
-            _ => {
-                return Err(sqlx::Error::Protocol(
-                    format!("Invalid provider: {}", provider).into(),
-                ))
-            }
+        let Some(api_key_column) = Self::settings_api_key_column(provider)? else {
+            return Ok(());
         };
 
-        let query = format!(
-            "UPDATE settings SET {} = NULL WHERE id = '1'",
-            api_key_column
-        );
-        sqlx::query(&query).execute(pool).await?;
+        Self::clear_key_in_table(pool, "settings", api_key_column).await?;
+
+        if Self::is_shared_provider(provider) {
+            if let Some(transcript_column) = Self::transcript_api_key_column(provider)? {
+                Self::clear_key_in_table(pool, "transcript_settings", transcript_column).await?;
+            }
+        }
 
         Ok(())
     }

@@ -10,6 +10,22 @@
 export const DEFAULT_WHISPER_MODEL = 'large-v3-turbo';
 
 /**
+ * Default Groq transcription model for fresh installs.
+ */
+export const DEFAULT_GROQ_TRANSCRIPT_MODEL = 'whisper-large-v3-turbo';
+
+/**
+ * Default Groq summary model for fresh installs.
+ */
+export const DEFAULT_GROQ_SUMMARY_MODEL = 'openai/gpt-oss-120b';
+
+/**
+ * Default providers for a fresh install.
+ */
+export const DEFAULT_SUMMARY_PROVIDER = 'groq';
+export const DEFAULT_TRANSCRIPT_PROVIDER = 'groq';
+
+/**
  * Default Parakeet model for transcription when no preference is configured.
  * This is the quantized version optimized for speed.
  */
@@ -22,4 +38,5 @@ export const MODEL_DEFAULTS = {
   whisper: DEFAULT_WHISPER_MODEL,
   localWhisper: DEFAULT_WHISPER_MODEL,
   parakeet: DEFAULT_PARAKEET_MODEL,
+  groq: DEFAULT_GROQ_TRANSCRIPT_MODEL,
 } as const;

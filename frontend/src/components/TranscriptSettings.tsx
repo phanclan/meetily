@@ -1,13 +1,19 @@
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { toast } from 'sonner';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Input } from './ui/input';
 import { Button } from './ui/button';
 import { Label } from './ui/label';
-import { Eye, EyeOff, Lock, Unlock } from 'lucide-react';
+import { Alert, AlertDescription } from './ui/alert';
+import { Eye, EyeOff, Lock, Unlock, Check, CircleHelp, ExternalLink } from 'lucide-react';
 import { ModelManager } from './WhisperModelManager';
 import { ParakeetModelManager } from './ParakeetModelManager';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
+import { useOptionalConfig } from '@/contexts/ConfigContext';
 
+const GROQ_KEYS_URL = 'https://console.groq.com/keys';
+const GROQ_PRICING_URL = 'https://groq.com/pricing';
 
 export interface TranscriptModelProps {
     provider: 'localWhisper' | 'parakeet' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai';
@@ -22,29 +28,44 @@ export interface TranscriptSettingsProps {
 }
 
 export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelConfig, onModelSelect }: TranscriptSettingsProps) {
+    const configContext = useOptionalConfig();
+    const updateProviderApiKey = configContext?.updateProviderApiKey;
     const [apiKey, setApiKey] = useState<string | null>(transcriptModelConfig.apiKey || null);
     const [showApiKey, setShowApiKey] = useState<boolean>(false);
-    const [isApiKeyLocked, setIsApiKeyLocked] = useState<boolean>(true);
+    const [isApiKeyLocked, setIsApiKeyLocked] = useState<boolean>(!!transcriptModelConfig.apiKey);
     const [isLockButtonVibrating, setIsLockButtonVibrating] = useState<boolean>(false);
     const [uiProvider, setUiProvider] = useState<TranscriptModelProps['provider']>(transcriptModelConfig.provider);
+    const [isSaved, setIsSaved] = useState<boolean>(false);
 
     // Sync uiProvider when backend config changes (e.g., after model selection or initial load)
     useEffect(() => {
         setUiProvider(transcriptModelConfig.provider);
     }, [transcriptModelConfig.provider]);
 
+    // Sync apiKey from config when it changes (e.g., after async DB load on mount)
+    useEffect(() => {
+        setApiKey(transcriptModelConfig.apiKey || null);
+        setIsApiKeyLocked(!!transcriptModelConfig.apiKey);
+    }, [transcriptModelConfig.apiKey]);
+
     useEffect(() => {
         if (transcriptModelConfig.provider === 'localWhisper' || transcriptModelConfig.provider === 'parakeet') {
             setApiKey(null);
         }
+        // Lock only if a key is already saved for this provider
+        setIsApiKeyLocked(!!transcriptModelConfig.apiKey);
     }, [transcriptModelConfig.provider]);
+
+    const isSharedProvider = (provider: string) => provider === 'groq' || provider === 'openai';
 
     const fetchApiKey = async (provider: string) => {
         try {
-
-            const data = await invoke('api_get_transcript_api_key', { provider }) as string;
-
-            setApiKey(data || '');
+            const data = await invoke('api_get_transcript_api_key', { provider }) as string | null;
+            const normalizedApiKey = data || null;
+            setApiKey(normalizedApiKey);
+            if (updateProviderApiKey && isSharedProvider(provider)) {
+                updateProviderApiKey(provider, normalizedApiKey);
+            }
         } catch (err) {
             console.error('Error fetching API key:', err);
             setApiKey(null);
@@ -55,10 +76,22 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
         parakeet: [], // Model selection handled by ParakeetModelManager component
         deepgram: ['nova-2-phonecall'],
         elevenLabs: ['eleven_multilingual_v2'],
-        groq: ['llama-3.3-70b-versatile'],
+        groq: ['whisper-large-v3-turbo', 'whisper-large-v3'],
         openai: ['gpt-4o'],
     };
-    const requiresApiKey = transcriptModelConfig.provider === 'deepgram' || transcriptModelConfig.provider === 'elevenLabs' || transcriptModelConfig.provider === 'openai' || transcriptModelConfig.provider === 'groq';
+    const requiresApiKey = uiProvider === 'deepgram' || uiProvider === 'elevenLabs' || uiProvider === 'openai' || uiProvider === 'groq';
+    const modelListTooltip = uiProvider === 'groq'
+        ? "Groq transcript models use the built-in supported list in this screen. This dropdown does not auto-refresh from Groq's API."
+        : null;
+
+    const openExternalUrl = async (url: string) => {
+        try {
+            await invoke('open_external_url', { url });
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            toast.error('Failed to open link', { description: message });
+        }
+    };
 
     const handleInputClick = () => {
         if (isApiKeyLocked) {
@@ -95,6 +128,32 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
         }
     };
 
+    const handleSaveApiKey = async () => {
+        const normalizedApiKey = typeof apiKey === 'string' ? apiKey.trim() || null : null;
+        const payload = { provider: uiProvider, model: transcriptModelConfig.model, apiKey: normalizedApiKey };
+        console.log('[TranscriptSettings] Saving transcript config:', { provider: payload.provider, model: payload.model, hasKey: !!payload.apiKey });
+        try {
+            await invoke('api_save_transcript_config', {
+                provider: payload.provider,
+                model: payload.model,
+                apiKey: payload.apiKey,
+            });
+            console.log('[TranscriptSettings] Save succeeded');
+            setTranscriptModelConfig({ ...transcriptModelConfig, provider: uiProvider, apiKey: normalizedApiKey });
+            if (updateProviderApiKey && isSharedProvider(uiProvider)) {
+                updateProviderApiKey(uiProvider, normalizedApiKey);
+            }
+            setIsApiKeyLocked(true);
+            setIsSaved(true);
+            setTimeout(() => setIsSaved(false), 2000);
+            toast.success('API key saved');
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            console.error('[TranscriptSettings] Error saving API key:', err);
+            toast.error('Failed to save API key', { description: message });
+        }
+    };
+
     return (
         <div>
             <div>
@@ -115,6 +174,9 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                     if (provider !== 'localWhisper' && provider !== 'parakeet') {
                                         fetchApiKey(provider);
                                     }
+                                    if (provider === 'groq') {
+                                        setTranscriptModelConfig({ ...transcriptModelConfig, provider, model: 'whisper-large-v3-turbo' });
+                                    }
                                 }}
                             >
                                 <SelectTrigger className='focus:ring-1 focus:ring-blue-500 focus:border-blue-500'>
@@ -123,33 +185,90 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 <SelectContent>
                                     <SelectItem value="parakeet">⚡ Parakeet (Recommended - Real-time / Accurate)</SelectItem>
                                     <SelectItem value="localWhisper">🏠 Local Whisper (High Accuracy)</SelectItem>
+                                    <SelectItem value="groq">☁️ Groq Whisper (Cloud - Fast)</SelectItem>
                                     {/* <SelectItem value="deepgram">☁️ Deepgram (Backup)</SelectItem>
                                     <SelectItem value="elevenLabs">☁️ ElevenLabs</SelectItem>
-                                    <SelectItem value="groq">☁️ Groq</SelectItem>
                                     <SelectItem value="openai">☁️ OpenAI</SelectItem> */}
                                 </SelectContent>
                             </Select>
 
                             {uiProvider !== 'localWhisper' && uiProvider !== 'parakeet' && (
-                                <Select
-                                    value={transcriptModelConfig.model}
-                                    onValueChange={(value) => {
-                                        const model = value as TranscriptModelProps['model'];
-                                        setTranscriptModelConfig({ ...transcriptModelConfig, provider: uiProvider, model });
-                                    }}
-                                >
-                                    <SelectTrigger className='focus:ring-1 focus:ring-blue-500 focus:border-blue-500'>
-                                        <SelectValue placeholder="Select model" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {modelOptions[uiProvider].map((model) => (
-                                            <SelectItem key={model} value={model}>{model}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+                                <div className="flex items-center gap-2">
+                                    <Select
+                                        value={transcriptModelConfig.model}
+                                        onValueChange={(value) => {
+                                            const model = value as TranscriptModelProps['model'];
+                                            setTranscriptModelConfig({ ...transcriptModelConfig, provider: uiProvider, model });
+                                        }}
+                                    >
+                                        <SelectTrigger className='focus:ring-1 focus:ring-blue-500 focus:border-blue-500'>
+                                            <SelectValue placeholder="Select model" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {modelOptions[uiProvider].map((model) => (
+                                                <SelectItem key={model} value={model}>{model}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+
+                                    {modelListTooltip && (
+                                        <TooltipProvider>
+                                            <Tooltip>
+                                                <TooltipTrigger asChild>
+                                                    <button
+                                                        type="button"
+                                                        className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-input bg-background text-muted-foreground transition-colors hover:text-foreground"
+                                                        aria-label="How transcript model loading works"
+                                                    >
+                                                        <CircleHelp className="h-4 w-4" />
+                                                    </button>
+                                                </TooltipTrigger>
+                                                <TooltipContent className="max-w-xs leading-relaxed">
+                                                    {modelListTooltip}
+                                                </TooltipContent>
+                                            </Tooltip>
+                                        </TooltipProvider>
+                                    )}
+                                </div>
                             )}
 
                         </div>
+                        {uiProvider === 'groq' && (
+                            <div className="mt-2 mx-1 space-y-2">
+                                <p className="text-xs text-amber-600">
+                                    Audio is sent to Groq&apos;s servers for transcription and permanently deleted after processing. See groq.com/privacy.
+                                </p>
+                                <Alert className="border-blue-200 bg-blue-50">
+                                    <AlertDescription className="space-y-3 text-blue-900">
+                                        <p className="text-xs leading-relaxed">
+                                            Need a Groq key? Testers can create one in Groq Console and use Groq&apos;s Free plan for evaluation, subject to Groq rate limits.
+                                        </p>
+                                        <div className="flex flex-wrap gap-2">
+                                            <Button
+                                                type="button"
+                                                size="sm"
+                                                variant="outline"
+                                                className="border-blue-300 bg-white text-blue-900 hover:bg-blue-100"
+                                                onClick={() => openExternalUrl(GROQ_KEYS_URL)}
+                                            >
+                                                <ExternalLink className="mr-2 h-4 w-4" />
+                                                Get Groq API Key
+                                            </Button>
+                                            <Button
+                                                type="button"
+                                                size="sm"
+                                                variant="outline"
+                                                className="border-blue-300 bg-white text-blue-900 hover:bg-blue-100"
+                                                onClick={() => openExternalUrl(GROQ_PRICING_URL)}
+                                            >
+                                                <ExternalLink className="mr-2 h-4 w-4" />
+                                                View Groq Free Plan
+                                            </Button>
+                                        </div>
+                                    </AlertDescription>
+                                </Alert>
+                            </div>
+                        )}
                     </div>
 
                     {uiProvider === 'localWhisper' && (
@@ -217,6 +336,17 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                     </Button>
                                 </div>
                             </div>
+                            {!isApiKeyLocked && (
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    onClick={handleSaveApiKey}
+                                    className="mt-2 mx-1"
+                                    disabled={!apiKey}
+                                >
+                                    {isSaved ? <><Check className="h-4 w-4 mr-1" />Saved</> : 'Save API Key'}
+                                </Button>
+                            )}
                         </div>
                     )}
                 </div>
@@ -224,9 +354,6 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
         </div >
     )
 }
-
-
-
 
 
 

@@ -7,6 +7,13 @@ import { configService, ModelConfig } from '@/services/configService';
 import { invoke } from '@tauri-apps/api/core';
 import Analytics from '@/lib/analytics';
 import { BetaFeatures, BetaFeatureKey, loadBetaFeatures, saveBetaFeatures } from '@/types/betaFeatures';
+import {
+  DEFAULT_GROQ_SUMMARY_MODEL,
+  DEFAULT_GROQ_TRANSCRIPT_MODEL,
+  DEFAULT_SUMMARY_PROVIDER,
+  DEFAULT_TRANSCRIPT_PROVIDER,
+  DEFAULT_WHISPER_MODEL,
+} from '@/constants/modelDefaults';
 
 export interface OllamaModel {
   name: string;
@@ -95,20 +102,33 @@ interface ConfigContextType {
 
 const ConfigContext = createContext<ConfigContextType | undefined>(undefined);
 
+const SHARED_PROVIDER_API_KEYS = new Set(['groq', 'openai']);
+const CLOUD_PROVIDER_KEYS = ['claude', 'groq', 'openai', 'openrouter'] as const;
+type CloudProviderKey = (typeof CLOUD_PROVIDER_KEYS)[number];
+const CLOUD_PROVIDER_KEY_SET = new Set<string>(CLOUD_PROVIDER_KEYS);
+
+interface PersistedRecordingPreferences {
+  save_folder: string;
+  auto_save: boolean;
+  file_format: string;
+  preferred_mic_device: string | null;
+  preferred_system_device: string | null;
+  system_audio_backend?: string | null;
+}
 
 export function ConfigProvider({ children }: { children: ReactNode }) {
   // Model configuration state
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
-    provider: 'ollama',
-    model: 'llama3.2:latest',
-    whisperModel: 'large-v3',
+    provider: DEFAULT_SUMMARY_PROVIDER,
+    model: DEFAULT_GROQ_SUMMARY_MODEL,
+    whisperModel: DEFAULT_WHISPER_MODEL,
     ollamaEndpoint: null
   });
 
   // Transcript model configuration state
   const [transcriptModelConfig, setTranscriptModelConfig] = useState<TranscriptModelProps>({
-    provider: 'parakeet',
-    model: 'parakeet-tdt-0.6b-v3-int8',
+    provider: DEFAULT_TRANSCRIPT_PROVIDER,
+    model: DEFAULT_GROQ_TRANSCRIPT_MODEL,
     apiKey: null
   });
 
@@ -131,7 +151,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string>('');
 
   // Device configuration state
-  const [selectedDevices, setSelectedDevices] = useState<SelectedDevices>({
+  const [selectedDevices, setSelectedDevicesState] = useState<SelectedDevices>({
     micDevice: null,
     systemDevice: null
   });
@@ -174,41 +194,78 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   const [isLoadingPreferences, setIsLoadingPreferences] = useState(false);
   const preferencesLoadedRef = useRef(false);
   const isLoadingRef = useRef(false);
+  const loadedProviderApiKeysRef = useRef<Set<CloudProviderKey>>(new Set());
+  const [hasLoadedModelConfig, setHasLoadedModelConfig] = useState(false);
+  const [hasLoadedTranscriptConfig, setHasLoadedTranscriptConfig] = useState(false);
 
-  // Load Ollama models (uses saved endpoint, re-runs when endpoint changes after config load)
+  // Load Ollama models only when Ollama is the active summary provider.
   useEffect(() => {
+    if (modelConfig.provider !== 'ollama') {
+      return;
+    }
+
+    let cancelled = false;
+
     const loadModels = async () => {
       try {
         const endpoint = modelConfig.ollamaEndpoint || null;
         const modelList = await invoke<OllamaModel[]>('get_ollama_models', { endpoint });
+        if (cancelled) {
+          return;
+        }
         setModels(modelList);
         setError('');
       } catch (err) {
+        if (cancelled) {
+          return;
+        }
         setError(err instanceof Error ? err.message : 'Failed to load Ollama models');
         console.error('Error loading models:', err);
       }
     };
-    loadModels();
-  }, [modelConfig.ollamaEndpoint]);
+
+    void loadModels();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [modelConfig.provider, modelConfig.ollamaEndpoint]);
 
   // Load transcript configuration on mount
   useEffect(() => {
+    let cancelled = false;
+
     const loadTranscriptConfig = async () => {
       try {
         const config = await configService.getTranscriptConfig();
+        if (cancelled) {
+          return;
+        }
         if (config) {
-          console.log('[ConfigContext] Loaded saved transcript config:', config);
+          console.log('[ConfigContext] Loaded saved transcript config:', { provider: config.provider, model: config.model, hasKey: !!config.apiKey });
           setTranscriptModelConfig({
-            provider: config.provider || 'parakeet',
-            model: config.model || 'parakeet-tdt-0.6b-v3-int8',
+            provider: config.provider || DEFAULT_TRANSCRIPT_PROVIDER,
+            model: config.model || DEFAULT_GROQ_TRANSCRIPT_MODEL,
             apiKey: config.apiKey || null
           });
         }
       } catch (error) {
+        if (cancelled) {
+          return;
+        }
         console.error('[ConfigContext] Failed to load transcript config:', error);
+      } finally {
+        if (!cancelled) {
+          setHasLoadedTranscriptConfig(true);
+        }
       }
     };
-    loadTranscriptConfig();
+
+    void loadTranscriptConfig();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Sync language preference to Rust on mount (fixes startup desync bug)
@@ -226,14 +283,22 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
 
   // Load model configuration on mount
   useEffect(() => {
+    let cancelled = false;
+
     const fetchModelConfig = async () => {
       try {
         const data = await configService.getModelConfig();
+        if (cancelled) {
+          return;
+        }
         if (data && data.provider) {
           // If provider is custom-openai, fetch the additional config
           if (data.provider === 'custom-openai') {
             try {
               const customConfig = await configService.getCustomOpenAIConfig();
+              if (cancelled) {
+                return;
+              }
               if (customConfig) {
                 // Merge custom config fields into modelConfig
                 console.log('[ConfigContext] Loading custom OpenAI config:', {
@@ -264,6 +329,9 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
                 return; // Early return
               }
             } catch (err) {
+              if (cancelled) {
+                return;
+              }
               console.error('[ConfigContext] Failed to fetch custom OpenAI config:', err);
             }
           }
@@ -285,38 +353,93 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
           }
         }
       } catch (error) {
+        if (cancelled) {
+          return;
+        }
         console.error('Failed to fetch saved model config in ConfigContext:', error);
+      } finally {
+        if (!cancelled) {
+          setHasLoadedModelConfig(true);
+        }
       }
     };
-    fetchModelConfig();
+
+    void fetchModelConfig();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  // Load all provider API keys on mount
+  const activeApiKeyProviders = useMemo(() => {
+    if (!hasLoadedModelConfig || !hasLoadedTranscriptConfig) {
+      return [] as CloudProviderKey[];
+    }
+
+    const providers = new Set<CloudProviderKey>();
+    for (const provider of [modelConfig.provider, transcriptModelConfig.provider]) {
+      if (CLOUD_PROVIDER_KEY_SET.has(provider)) {
+        providers.add(provider as CloudProviderKey);
+      }
+    }
+
+    return Array.from(providers).sort();
+  }, [
+    hasLoadedModelConfig,
+    hasLoadedTranscriptConfig,
+    modelConfig.provider,
+    transcriptModelConfig.provider,
+  ]);
+
+  // Load only the API keys needed by the active providers.
   useEffect(() => {
-    const loadAllApiKeys = async () => {
+    const providersToLoad = activeApiKeyProviders.filter(
+      (provider) => !loadedProviderApiKeysRef.current.has(provider),
+    );
+
+    if (providersToLoad.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadActiveApiKeys = async () => {
       try {
-        const providers = ['claude', 'groq', 'openai', 'openrouter'];
         const keys = await Promise.all(
-          providers.map(p =>
-            invoke<string>('api_get_api_key', { provider: p })
-              .catch(() => null) // Gracefully handle missing keys
-          )
+          providersToLoad.map(async (provider) => [
+            provider,
+            await invoke<string>('api_get_api_key', { provider }).catch(() => null),
+          ] as const),
         );
 
-        setProviderApiKeys({
-          claude: keys[0],
-          groq: keys[1],
-          openai: keys[2],
-          openrouter: keys[3],
+        if (cancelled) {
+          return;
+        }
+
+        setProviderApiKeys((prev) => {
+          const next = { ...prev };
+          for (const [provider, apiKey] of keys) {
+            next[provider] = apiKey;
+          }
+          return next;
         });
-        console.log('[ConfigContext] Loaded provider API keys');
+
+        providersToLoad.forEach((provider) => {
+          loadedProviderApiKeysRef.current.add(provider);
+        });
+
+        console.log('[ConfigContext] Loaded active provider API keys:', providersToLoad);
       } catch (error) {
         console.error('[ConfigContext] Failed to load provider API keys:', error);
       }
     };
 
-    loadAllApiKeys();
-  }, []);
+    void loadActiveApiKeys();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeApiKeyProviders]);
 
   // Listen for model config updates from other components
   useEffect(() => {
@@ -348,7 +471,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       try {
         const prefs = await configService.getRecordingPreferences();
         if (prefs && (prefs.preferred_mic_device || prefs.preferred_system_device)) {
-          setSelectedDevices({
+          setSelectedDevicesState({
             micDevice: prefs.preferred_mic_device,
             systemDevice: prefs.preferred_system_device
           });
@@ -408,6 +531,59 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   // Update individual provider API key
   const updateProviderApiKey = useCallback((provider: string, apiKey: string | null) => {
     setProviderApiKeys(prev => ({ ...prev, [provider]: apiKey }));
+    if (CLOUD_PROVIDER_KEY_SET.has(provider)) {
+      loadedProviderApiKeysRef.current.add(provider as CloudProviderKey);
+    }
+    if (!SHARED_PROVIDER_API_KEYS.has(provider)) {
+      return;
+    }
+
+    setTranscriptModelConfig(prev => {
+      if (prev.provider !== provider) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        apiKey,
+      };
+    });
+  }, []);
+
+  const handleSetSelectedDevices = useCallback((devices: SelectedDevices) => {
+    setSelectedDevicesState((prev) => {
+      if (
+        prev.micDevice === devices.micDevice &&
+        prev.systemDevice === devices.systemDevice
+      ) {
+        return prev;
+      }
+
+      return devices;
+    });
+
+    void (async () => {
+      try {
+        const currentPreferences = await invoke<PersistedRecordingPreferences>('get_recording_preferences');
+
+        if (
+          currentPreferences.preferred_mic_device === devices.micDevice &&
+          currentPreferences.preferred_system_device === devices.systemDevice
+        ) {
+          return;
+        }
+
+        await invoke('set_recording_preferences', {
+          preferences: {
+            ...currentPreferences,
+            preferred_mic_device: devices.micDevice,
+            preferred_system_device: devices.systemDevice,
+          },
+        });
+      } catch (error) {
+        console.error('[ConfigContext] Failed to persist selected audio devices:', error);
+      }
+    })();
   }, []);
 
   // Lazy load preference settings (only loads if not already cached)
@@ -492,7 +668,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     transcriptModelConfig,
     setTranscriptModelConfig,
     selectedDevices,
-    setSelectedDevices,
+    setSelectedDevices: handleSetSelectedDevices,
     selectedLanguage,
     setSelectedLanguage: handleSetSelectedLanguage,
     showConfidenceIndicator,
@@ -515,6 +691,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     updateProviderApiKey,
     transcriptModelConfig,
     selectedDevices,
+    handleSetSelectedDevices,
     selectedLanguage,
     handleSetSelectedLanguage,
     showConfidenceIndicator,
@@ -544,4 +721,8 @@ export function useConfig() {
     throw new Error('useConfig must be used within a ConfigProvider');
   }
   return context;
+}
+
+export function useOptionalConfig() {
+  return useContext(ConfigContext);
 }

@@ -7,6 +7,16 @@
 /// This is the recommended balance of accuracy and speed.
 pub const DEFAULT_WHISPER_MODEL: &str = "large-v3-turbo";
 
+/// Default Groq transcription model for fresh installs.
+pub const DEFAULT_GROQ_TRANSCRIPT_MODEL: &str = "whisper-large-v3-turbo";
+
+/// Default Groq summary model for fresh installs.
+pub const DEFAULT_GROQ_SUMMARY_MODEL: &str = "openai/gpt-oss-120b";
+
+/// Default providers for a fresh install.
+pub const DEFAULT_SUMMARY_PROVIDER: &str = "groq";
+pub const DEFAULT_TRANSCRIPT_PROVIDER: &str = "groq";
+
 /// Default Parakeet model for transcription when no preference is configured.
 /// This is the quantized version optimized for speed.
 pub const DEFAULT_PARAKEET_MODEL: &str = "parakeet-tdt-0.6b-v3-int8";

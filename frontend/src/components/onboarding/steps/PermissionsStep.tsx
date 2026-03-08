@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { OnboardingContainer } from '../OnboardingContainer';
 import { PermissionRow } from '../shared';
 import { useOnboarding } from '@/contexts/OnboardingContext';
+import { getPostOnboardingRoute } from '@/lib/postOnboardingNavigation';
 
 export function PermissionsStep() {
   const { setPermissionStatus, setPermissionsSkipped, permissions, completeOnboarding } = useOnboarding();
@@ -72,18 +73,17 @@ export function PermissionsStep() {
     setIsPending(true);
     try {
       console.log('[PermissionsStep] Triggering Audio Capture permission...');
-      // Backend creates Core Audio tap, captures audio, and verifies it's not silence
-      // Returns true if permission granted and audio verified, false if denied (silence)
+      // Backend currently verifies that a Core Audio tap can be created.
+      // It does not prove that live system audio is non-silent yet.
       const granted = await invoke<boolean>('trigger_system_audio_permission_command');
       console.log('[PermissionsStep] System audio permission result:', granted);
 
       if (granted) {
         setPermissionStatus('systemAudio', 'authorized');
-        console.log('[PermissionsStep] Audio Capture permission verified - audio is not silence');
+        console.log('[PermissionsStep] Audio Capture tap created successfully');
       } else {
-        // Permission was denied (audio is silence)
         setPermissionStatus('systemAudio', 'denied');
-        console.log('[PermissionsStep] Audio Capture permission denied - audio is silence');
+        console.log('[PermissionsStep] Audio Capture permission was not confirmed');
       }
     } catch (err) {
       console.error('[PermissionsStep] Failed to request system audio permission:', err);
@@ -96,7 +96,8 @@ export function PermissionsStep() {
   const handleFinish = async () => {
     try {
       await completeOnboarding();
-      window.location.reload();
+      const nextRoute = await getPostOnboardingRoute();
+      window.location.assign(nextRoute);
     } catch (error) {
       console.error('Failed to complete onboarding:', error);
     }
@@ -114,7 +115,7 @@ export function PermissionsStep() {
   return (
     <OnboardingContainer
       title="Grant Permissions"
-      description="Meetily needs access to your microphone and system audio to record meetings"
+      description="Meetnola needs access to your microphone and system audio to record meetings"
       step={4}
       hideProgress={true}
       showNavigation={allPermissionsGranted}

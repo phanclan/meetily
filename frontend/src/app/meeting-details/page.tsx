@@ -9,6 +9,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { LoaderIcon } from "lucide-react";
 import { useConfig } from "@/contexts/ConfigContext";
 import { usePaginatedTranscripts } from "@/hooks/usePaginatedTranscripts";
+import {
+  DEFAULT_GROQ_SUMMARY_MODEL,
+  DEFAULT_SUMMARY_PROVIDER,
+  DEFAULT_WHISPER_MODEL,
+} from "@/constants/modelDefaults";
 
 interface MeetingDetailsResponse {
   id: string;
@@ -18,6 +23,8 @@ interface MeetingDetailsResponse {
   transcripts: Transcript[];
   folder_path?: string;
 }
+
+const PROVIDERS_REQUIRING_API_KEY = new Set(['groq', 'openai', 'claude', 'openrouter']);
 
 function MeetingDetailsContent() {
   const searchParams = useSearchParams();
@@ -48,19 +55,6 @@ function MeetingDetailsContent() {
     error: transcriptError,
   } = usePaginatedTranscripts({ meetingId: meetingId || '' });
 
-  // Check if gemma3:1b model is available in Ollama
-  const checkForGemmaModel = useCallback(async (): Promise<boolean> => {
-    try {
-      const models = await invoke('get_ollama_models', { endpoint: null }) as any[];
-      const hasGemma = models.some((m: any) => m.name === 'gemma3:1b');
-      console.log('🔍 Checked for gemma3:1b:', hasGemma);
-      return hasGemma;
-    } catch (error) {
-      console.error('❌ Failed to check Ollama models:', error);
-      return false;
-    }
-  }, []);
-
   // Set up auto-generation - respects DB as source of truth
   const setupAutoGeneration = useCallback(async () => {
     if (hasCheckedAutoGen) return; // Only check once
@@ -82,39 +76,47 @@ function MeetingDetailsContent() {
     try {
       // Check what's currently in database
       const currentConfig = await invoke('api_get_model_config') as any;
+      const provider = currentConfig?.provider;
+      const model = currentConfig?.model;
 
       // If DB already has a model, use it (never override!)
-      if (currentConfig && currentConfig.model) {
-        console.log('Using existing model from DB:', currentConfig.model);
+      if (provider && model) {
+        if (PROVIDERS_REQUIRING_API_KEY.has(provider) && !currentConfig.apiKey) {
+          const apiKey = await invoke<string | null>('api_get_api_key', { provider });
+          if (!apiKey?.trim()) {
+            console.log('Auto-summary skipped until an API key is configured for provider:', provider);
+            setHasCheckedAutoGen(true);
+            return;
+          }
+        }
+
+        console.log('Using existing model from DB:', model);
         setShouldAutoGenerate(true);
         setHasCheckedAutoGen(true);
         return;
       }
 
-      // DB is empty - check if gemma3:1b exists as fallback
-      const hasGemma = await checkForGemmaModel();
+      console.log('💾 DB empty, applying Groq default summary config');
+      await invoke('api_save_model_config', {
+        provider: DEFAULT_SUMMARY_PROVIDER,
+        model: DEFAULT_GROQ_SUMMARY_MODEL,
+        whisperModel: DEFAULT_WHISPER_MODEL,
+        apiKey: null,
+        ollamaEndpoint: null,
+      });
 
-      if (hasGemma) {
-        console.log('💾 DB empty, using gemma3:1b as initial default');
-
-        await invoke('api_save_model_config', {
-          provider: 'ollama',
-          model: '',
-          whisperModel: 'large-v3',
-          apiKey: null,
-          ollamaEndpoint: null,
-        });
-
+      const defaultApiKey = await invoke<string | null>('api_get_api_key', { provider: DEFAULT_SUMMARY_PROVIDER });
+      if (defaultApiKey?.trim()) {
         setShouldAutoGenerate(true);
       } else {
-        console.log('⚠️ No model configured and gemma3:1b not found');
+        console.log('Groq default saved, but auto-summary is waiting for an API key');
       }
     } catch (error) {
       console.error('❌ Failed to setup auto-generation:', error);
     }
 
     setHasCheckedAutoGen(true);
-  }, [hasCheckedAutoGen, checkForGemmaModel, source, isAutoSummary]);
+  }, [hasCheckedAutoGen, source, isAutoSummary]);
 
   // Sync meeting metadata from pagination hook to meeting details state
   useEffect(() => {
@@ -209,7 +211,7 @@ function MeetingDetailsContent() {
 
         // Check if the summary request failed with 404 or error status, or if no summary exists yet (idle)
         // Note: 'cancelled' and 'failed' statuses can still have data if backup was restored
-        if (summary.status === 'idle' || (!summary.data && summary.status === 'error')) {
+        if (!summary || summary.status === 'idle' || (!summary.data && summary.status === 'error')) {
           console.warn('Meeting summary not found or no summary generated yet:', summary.error || 'idle');
           setMeetingSummary(null);
           return;
@@ -352,10 +354,27 @@ function MeetingDetailsContent() {
   }
 
   // Show loading spinner while initial data loads
-  if ((isLoading || isLoadingTranscripts) || !meetingDetails) {
+  if (isLoading || isLoadingTranscripts) {
     return <div className="flex items-center justify-center h-screen">
       <LoaderIcon className="animate-spin size-6 " />
     </div>;
+  }
+
+  // Meeting not found after loading completed
+  if (!meetingDetails) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center">
+          <p className="text-muted-foreground mb-4">Meeting not found.</p>
+          <button
+            onClick={() => router.push('/')}
+            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+          >
+            Go Back
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return <PageContent
