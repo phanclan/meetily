@@ -53,7 +53,7 @@ pub mod import;
 
 pub use devices::{
     default_input_device, default_output_device, get_device_and_config, list_audio_devices,
-    parse_audio_device, trigger_audio_permission,
+    parse_audio_device, parse_audio_device_with_default_type, trigger_audio_permission,
     AudioDevice, AudioTranscriptionEngine, DeviceControl, DeviceType,
     LAST_AUDIO_CAPTURE,
 };
@@ -118,4 +118,3 @@ pub use decoder::{decode_audio_file, DecodedAudio};
 
 // Export audio constants
 pub use constants::AUDIO_EXTENSIONS;
-

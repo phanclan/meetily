@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Info } from 'lucide-react';
+import { toast } from 'sonner';
 
 export interface BackendInfo {
   id: string;
@@ -24,6 +25,7 @@ export function AudioBackendSelector({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showTooltip, setShowTooltip] = useState(false);
+  const [requestingPermission, setRequestingPermission] = useState(false);
 
   // Load available backends and current selection
   useEffect(() => {
@@ -73,6 +75,32 @@ export function AudioBackendSelector({
     }
   };
 
+  const handleRequestAudioCapturePermission = async () => {
+    try {
+      setRequestingPermission(true);
+      setError(null);
+
+      const granted = await invoke<boolean>('trigger_system_audio_permission_command');
+
+      if (granted) {
+        toast.success('Audio Capture check completed', {
+          description: 'If macOS did not show a prompt, verify Meetnola in System Settings -> Privacy & Security -> Audio Capture.'
+        });
+        return;
+      }
+
+      await invoke('request_screen_recording_permission_command');
+      toast.error('Audio Capture permission still needs approval', {
+        description: 'System Settings was opened. Enable Meetnola under Privacy & Security -> Audio Capture, then restart the app.'
+      });
+    } catch (err) {
+      console.error('Failed to request audio capture permission:', err);
+      setError('Failed to request Audio Capture permission');
+    } finally {
+      setRequestingPermission(false);
+    }
+  };
+
   // Only show selector if there are multiple backends
   if (loading) {
     return (
@@ -114,7 +142,7 @@ export function AudioBackendSelector({
                 ))}
               </ul>
               <p className="mt-2 text-gray-300">
-                Try different backends to find which works best for your system.
+                Core Audio captures the selected playback output directly. ScreenCaptureKit mode requires a loopback input such as BlackHole or Loopback.
               </p>
             </div>
           )}
@@ -129,9 +157,8 @@ export function AudioBackendSelector({
 
       <div className="space-y-2">
         {backends.map((backend) => {
-          // Disable Core Audio option
-          const isCoreAudio = backend.id === 'screencapturekit';
-          const isDisabled = disabled || isCoreAudio;
+          const isScreenCaptureKit = backend.id === 'screencapturekit';
+          const isDisabled = disabled;
 
           return (
             <label
@@ -161,9 +188,9 @@ export function AudioBackendSelector({
                       Active
                     </span>
                   )}
-                  {isCoreAudio && (
+                  {isScreenCaptureKit && (
                     <span className="text-xs font-medium text-gray-500 bg-gray-100 px-2 py-0.5 rounded">
-                      Disabled
+                      Loopback
                     </span>
                   )}
                 </div>
@@ -178,7 +205,24 @@ export function AudioBackendSelector({
         <p>• Backend selection only affects system audio capture</p>
         <p>• Microphone always uses the default method</p>
         <p>• Changes apply to new recording sessions</p>
+        <p>• ScreenCaptureKit mode requires a loopback device such as BlackHole, Loopback, or Microsoft Teams Audio</p>
       </div>
+
+      {currentBackend === 'coreaudio' && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-2">
+          <p className="text-xs text-amber-900">
+            Core Audio needs macOS <strong>Audio Capture</strong> permission. If system audio records silence, request the permission here and verify it in System Settings.
+          </p>
+          <button
+            type="button"
+            onClick={handleRequestAudioCapturePermission}
+            disabled={disabled || requestingPermission}
+            className="inline-flex items-center rounded-md border border-amber-300 bg-white px-3 py-2 text-xs font-medium text-amber-900 transition-colors hover:bg-amber-100 disabled:pointer-events-none disabled:opacity-50"
+          >
+            {requestingPermission ? 'Checking Audio Capture...' : 'Request Audio Capture Permission'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

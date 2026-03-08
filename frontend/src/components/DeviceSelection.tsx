@@ -7,6 +7,7 @@ import { AudioBackendSelector } from './AudioBackendSelector';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import Analytics from '@/lib/analytics';
+import { safelyUnlisten } from '@/lib/tauriEvents';
 
 export interface AudioDevice {
   name: string;
@@ -96,9 +97,7 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
 
     // Cleanup function
     return () => {
-      if (unlisten) {
-        unlisten();
-      }
+      safelyUnlisten(unlisten, 'device-selection:audio-levels');
       // Stop monitoring when component unmounts
       if (isMonitoring) {
         stopAudioLevelMonitoring();

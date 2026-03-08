@@ -55,21 +55,79 @@ struct AudioContext {
 impl CoreAudioCapture {
     /// Create a new Core Audio capture for system audio
     pub fn new() -> Result<Self> {
-        info!("🎙️ CoreAudio: Starting Core Audio capture initialization...");
+        info!("🎙️ CoreAudio: Resolving default output device for capture...");
 
-        // Note: Audio Capture permission (NSAudioCaptureUsageDescription) is required for macOS 14.4+
-        // The permission dialog is automatically triggered when creating the Core Audio tap.
-        // If permission is denied, the tap will return silence (all zeros).
-
-        // Get default output device
-        info!("🎙️ CoreAudio: Getting default output device...");
         let output_device = ca::System::default_output_device()
             .map_err(|e| {
                 error!("❌ CoreAudio: Failed to get default output device: {:?}", e);
                 anyhow::anyhow!("Failed to get default output device: {:?}", e)
             })?;
 
-        info!("✅ CoreAudio: Got default output device");
+        let device_name = output_device
+            .name()
+            .map(|name| name.to_string())
+            .unwrap_or_else(|_| "Unknown".to_string());
+
+        Self::new_for_output_device(&device_name)
+    }
+
+    /// Create a new Core Audio capture targeting a specific output device.
+    pub fn new_for_output_device(requested_output_device_name: &str) -> Result<Self> {
+        info!(
+            "🎙️ CoreAudio: Starting Core Audio capture initialization for requested output device: '{}'",
+            requested_output_device_name
+        );
+
+        // Note: Audio Capture permission (NSAudioCaptureUsageDescription) is required for macOS 14.4+
+        // The permission dialog is automatically triggered when creating the Core Audio tap.
+        // If permission is denied, the tap will return silence (all zeros).
+
+        // Resolve the requested output device from the Core Audio device list.
+        // Fallback to the system default only if the requested device is unavailable.
+        info!(
+            "🎙️ CoreAudio: Resolving requested output device '{}'...",
+            requested_output_device_name
+        );
+        let output_device = match ca::System::devices() {
+            Ok(devices) => devices
+                .into_iter()
+                .find(|device| {
+                    device
+                        .name()
+                        .ok()
+                        .map(|name| name.to_string())
+                        .as_deref()
+                        == Some(requested_output_device_name)
+                }),
+            Err(e) => {
+                warn!(
+                    "⚠️ CoreAudio: Failed to enumerate Core Audio devices while resolving '{}': {:?}",
+                    requested_output_device_name,
+                    e
+                );
+                None
+            }
+        };
+
+        let output_device = match output_device {
+            Some(device) => {
+                info!(
+                    "✅ CoreAudio: Found requested output device '{}'",
+                    requested_output_device_name
+                );
+                device
+            }
+            None => {
+                warn!(
+                    "⚠️ CoreAudio: Requested output device '{}' not found, falling back to default output device",
+                    requested_output_device_name
+                );
+                ca::System::default_output_device().map_err(|e| {
+                    error!("❌ CoreAudio: Failed to get default output device: {:?}", e);
+                    anyhow::anyhow!("Failed to get default output device: {:?}", e)
+                })?
+            }
+        };
 
         let output_uid = output_device.uid()
             .map_err(|e| {
@@ -79,7 +137,12 @@ impl CoreAudioCapture {
 
         // Get device name for better debugging
         let device_name = output_device.name().unwrap_or_else(|_| cf::String::from_str("Unknown"));
-        info!("✅ CoreAudio: Default output device: '{}' (UID: {:?})", device_name, output_uid);
+        info!(
+            "✅ CoreAudio: Using output device: '{}' (requested: '{}', UID: {:?})",
+            device_name,
+            requested_output_device_name,
+            output_uid
+        );
 
         // IMPORTANT: We do NOT create a sub_device dictionary here
         // When using a tap, the tap provides all the audio we need

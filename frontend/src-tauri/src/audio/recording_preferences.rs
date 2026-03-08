@@ -10,6 +10,8 @@ use log::error;
 
 #[cfg(target_os = "macos")]
 use crate::audio::capture::AudioCaptureBackend;
+#[cfg(target_os = "macos")]
+use crate::audio::devices::is_macos_system_capture_input;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct RecordingPreferences {
@@ -110,11 +112,38 @@ pub async fn load_recording_preferences<R: Runtime>(
         match serde_json::from_value::<RecordingPreferences>(value.clone()) {
             Ok(mut p) => {
                 info!("Loaded recording preferences from store");
-                // Update macOS backend to current value if needed
+
                 #[cfg(target_os = "macos")]
                 {
-                    let backend = crate::audio::capture::get_current_backend();
+                    let mut backend = p
+                        .system_audio_backend
+                        .as_deref()
+                        .and_then(AudioCaptureBackend::from_string)
+                        .unwrap_or_else(|| {
+                            warn!(
+                                "Unknown or missing stored audio backend '{:?}', falling back to default",
+                                p.system_audio_backend
+                            );
+                            crate::audio::capture::AudioCaptureBackend::default()
+                        });
+
+                    let stored_loopback_selection = p
+                        .preferred_system_device
+                        .as_deref()
+                        .map(is_macos_system_capture_input)
+                        .unwrap_or(false);
+
+                    if backend == AudioCaptureBackend::ScreenCaptureKit
+                        && (!stored_loopback_selection || !has_loopback_system_audio_device())
+                    {
+                        warn!(
+                            "Stored ScreenCaptureKit backend does not have an explicit loopback system-audio selection; switching to Core Audio"
+                        );
+                        backend = AudioCaptureBackend::CoreAudio;
+                    }
+
                     p.system_audio_backend = Some(backend.to_string());
+                    crate::audio::capture::set_current_backend(backend);
                 }
                 p
             }
@@ -132,6 +161,25 @@ pub async fn load_recording_preferences<R: Runtime>(
           prefs.save_folder, prefs.auto_save, prefs.file_format,
           prefs.preferred_mic_device, prefs.preferred_system_device);
     Ok(prefs)
+}
+
+#[cfg(target_os = "macos")]
+fn has_loopback_system_audio_device() -> bool {
+    use cpal::traits::{DeviceTrait, HostTrait};
+
+    let host = cpal::default_host();
+    host
+        .input_devices()
+        .map(|devices| {
+            devices.into_iter().any(|device| {
+                device
+                    .name()
+                    .ok()
+                    .map(|name| is_macos_system_capture_input(&name))
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false)
 }
 
 /// Save recording preferences to store
@@ -289,7 +337,10 @@ pub async fn get_current_audio_backend() -> Result<String, String> {
 
 /// Set audio capture backend
 #[tauri::command]
-pub async fn set_audio_backend(backend: String) -> Result<(), String> {
+pub async fn set_audio_backend<R: Runtime>(
+    app: AppHandle<R>,
+    backend: String,
+) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         use crate::audio::capture::AudioCaptureBackend;
@@ -329,6 +380,15 @@ pub async fn set_audio_backend(backend: String) -> Result<(), String> {
 
         info!("Setting audio backend to: {:?}", backend_enum);
         crate::audio::capture::set_current_backend(backend_enum);
+
+        let mut preferences = load_recording_preferences(&app)
+            .await
+            .map_err(|e| format!("Failed to load recording preferences: {}", e))?;
+        preferences.system_audio_backend = Some(backend_enum.to_string());
+        save_recording_preferences(&app, &preferences)
+            .await
+            .map_err(|e| format!("Failed to persist audio backend: {}", e))?;
+
         Ok(())
     }
 
@@ -384,4 +444,3 @@ pub async fn get_audio_backend_info() -> Result<Vec<BackendInfo>, String> {
         }])
     }
 }
-

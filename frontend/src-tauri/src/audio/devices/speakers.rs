@@ -3,13 +3,31 @@ use cpal::traits::{HostTrait, DeviceTrait};
 use log::{info, warn};
 
 use super::configuration::{AudioDevice, DeviceType};
+#[cfg(target_os = "macos")]
+use super::configuration::is_macos_system_capture_input;
+#[cfg(target_os = "macos")]
+use crate::audio::capture::{get_current_backend, AudioCaptureBackend};
 
 /// Get the default output (speaker/system audio) device for the system
 pub fn default_output_device() -> Result<AudioDevice> {
     #[cfg(target_os = "macos")]
     {
-        // Use default host for all macOS devices
-        // Core Audio backend uses direct cidre API for system capture, not cpal
+        if get_current_backend() == AudioCaptureBackend::ScreenCaptureKit {
+            let host = cpal::default_host();
+
+            for device in host.input_devices()? {
+                if let Ok(name) = device.name() {
+                    if is_macos_system_capture_input(&name) {
+                        return Ok(AudioDevice::new(name, DeviceType::Output));
+                    }
+                }
+            }
+
+            return Err(anyhow!(
+                "No loopback system-audio device found. Select the Core Audio backend or install a loopback device such as BlackHole."
+            ));
+        }
+
         let host = cpal::default_host();
         let device = host
             .default_output_device()

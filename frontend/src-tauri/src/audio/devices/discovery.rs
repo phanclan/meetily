@@ -2,7 +2,9 @@ use anyhow::Result;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use log::error;
 
-use super::configuration::{AudioDevice, DeviceType};
+use super::configuration::AudioDevice;
+#[cfg(not(target_os = "macos"))]
+use super::configuration::DeviceType;
 use super::platform;
 
 /// List all available audio devices on the system
@@ -10,7 +12,7 @@ pub async fn list_audio_devices() -> Result<Vec<AudioDevice>> {
     let host = cpal::default_host();
 
     // Platform-specific device enumeration
-    let mut devices = {
+    let devices = {
         #[cfg(target_os = "windows")]
         {
             platform::configure_windows_audio(&host)?
@@ -27,18 +29,33 @@ pub async fn list_audio_devices() -> Result<Vec<AudioDevice>> {
         }
     };
 
+    #[cfg(target_os = "macos")]
+    {
+        return Ok(devices);
+    }
+
+    #[cfg(not(target_os = "macos"))]
     // Add any additional devices from the default host
     if let Ok(other_devices) = host.devices() {
+        let mut devices = devices;
         for device in other_devices {
             if let Ok(name) = device.name() {
-                if !devices.iter().any(|d| d.name == name) {
-                    devices.push(AudioDevice::new(name, DeviceType::Output));
+                let output_device = AudioDevice::new(name.clone(), DeviceType::Output);
+                if !devices
+                    .iter()
+                    .any(|d| d.name == output_device.name && d.device_type == output_device.device_type)
+                {
+                    devices.push(output_device);
                 }
             }
         }
+        return Ok(devices);
     }
 
-    Ok(devices)
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(devices)
+    }
 }
 
 /// Trigger audio permission request on platforms that require it

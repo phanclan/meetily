@@ -8,8 +8,7 @@ use log::info;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AudioCaptureBackend {
-    /// ScreenCaptureKit backend (macOS default)
-    /// Uses CPAL with ScreenCaptureKit host for system audio
+    /// Loopback-device backend for macOS system audio
     ScreenCaptureKit,
 
     /// Core Audio backend (macOS only)
@@ -32,11 +31,11 @@ impl AudioCaptureBackend {
     pub fn description(&self) -> &'static str {
         match self {
             AudioCaptureBackend::ScreenCaptureKit => {
-                "Apple's ScreenCaptureKit framework - Higher level API with good compatibility"
+                "Loopback-device capture path. Requires a loopback input such as BlackHole, Loopback, or Microsoft Teams Audio."
             }
             #[cfg(target_os = "macos")]
             AudioCaptureBackend::CoreAudio => {
-                "Direct Core Audio API - Lower latency, more control over audio pipeline"
+                "Direct Core Audio output capture. Records the selected macOS playback device and requires Audio Capture permission."
             }
         }
     }

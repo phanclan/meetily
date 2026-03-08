@@ -4,6 +4,7 @@ import { FolderOpen } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { DeviceSelection, SelectedDevices } from '@/components/DeviceSelection';
 import Analytics from '@/lib/analytics';
+import { useConfig } from '@/contexts/ConfigContext';
 import { toast } from 'sonner';
 
 export interface RecordingPreferences {
@@ -19,6 +20,7 @@ interface RecordingSettingsProps {
 }
 
 export function RecordingSettings({ onSave }: RecordingSettingsProps) {
+  const { setSelectedDevices } = useConfig();
   const [preferences, setPreferences] = useState<RecordingPreferences>({
     save_folder: '',
     auto_save: true,
@@ -86,6 +88,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
       preferred_system_device: devices.systemDevice
     };
     setPreferences(newPreferences);
+    setSelectedDevices(devices);
     await savePreferences(newPreferences);
 
     // Track default device preference changes

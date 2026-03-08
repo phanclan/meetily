@@ -9,6 +9,8 @@ use super::devices::{AudioDevice, get_device_and_config};
 use super::pipeline::AudioCapture;
 use super::recording_state::{RecordingState, DeviceType};
 use super::capture::{AudioCaptureBackend, get_current_backend};
+#[cfg(target_os = "macos")]
+use super::devices::is_macos_system_capture_input;
 
 #[cfg(target_os = "macos")]
 use super::capture::CoreAudioCapture;
@@ -87,6 +89,17 @@ impl AudioStream {
             return Self::create_core_audio_stream(device, state, device_type, recording_sender).await;
         }
 
+        #[cfg(target_os = "macos")]
+        if device_type == DeviceType::System
+            && backend_type == AudioCaptureBackend::ScreenCaptureKit
+            && !is_macos_system_capture_input(&device.name)
+        {
+            return Err(anyhow::anyhow!(
+                "System audio device '{}' is a playback output. On macOS, the ScreenCaptureKit backend requires a loopback input such as BlackHole, Loopback, or Microsoft Teams Audio.",
+                device.name
+            ));
+        }
+
         // Default path: use CPAL
         #[cfg(target_os = "macos")]
         let backend_name = if backend_type == AudioCaptureBackend::ScreenCaptureKit {
@@ -151,10 +164,13 @@ impl AudioStream {
         info!("🔊 Stream: Creating Core Audio stream for device: {}", device.name);
 
         // Create Core Audio capture
-        info!("🔊 Stream: Calling CoreAudioCapture::new()...");
-        let capture_impl = CoreAudioCapture::new()
+        info!(
+            "🔊 Stream: Calling CoreAudioCapture::new_for_output_device() for requested device: {}",
+            device.name
+        );
+        let capture_impl = CoreAudioCapture::new_for_output_device(&device.name)
             .map_err(|e| {
-                error!("❌ Stream: CoreAudioCapture::new() failed: {}", e);
+                error!("❌ Stream: CoreAudioCapture::new_for_output_device() failed: {}", e);
                 anyhow::anyhow!("Failed to create Core Audio capture: {}", e)
             })?;
 

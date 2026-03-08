@@ -107,6 +107,46 @@ pub fn parse_audio_device(name: &str) -> Result<AudioDevice> {
     AudioDevice::from_name(name)
 }
 
+/// Parse a saved device name that may omit the legacy `(input)` / `(output)` suffix.
+pub fn parse_audio_device_with_default_type(
+    name: &str,
+    default_type: DeviceType,
+) -> Result<AudioDevice> {
+    match AudioDevice::from_name(name) {
+        Ok(device) => Ok(device),
+        Err(_) => {
+            let trimmed = name.trim();
+            if trimmed.is_empty() {
+                Err(anyhow!("Device name cannot be empty"))
+            } else {
+                Ok(AudioDevice::new(trimmed.to_string(), default_type))
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub fn is_macos_system_capture_input(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    let patterns = [
+        "blackhole",
+        "loopback",
+        "soundflower",
+        "background music",
+        "vb-audio",
+        "vbaudio",
+        "i show u",
+        "ishowu",
+        "rogue amoeba",
+        "zoomaudio",
+        "microsoft teams audio",
+        "monitor",
+        "loopback audio",
+    ];
+
+    patterns.iter().any(|pattern| lower.contains(pattern))
+}
+
 /// Get device and config for audio operations
 pub async fn get_device_and_config(
     audio_device: &AudioDevice,
@@ -138,8 +178,19 @@ pub async fn get_device_and_config(
             DeviceType::Output => {
                 #[cfg(target_os = "macos")]
                 {
-                    // Use default host for all macOS output devices
-                    // Core Audio backend uses direct cidre API for system capture, not cpal
+                    if is_macos_system_capture_input(&audio_device.name) {
+                        for device in host.input_devices()? {
+                            if let Ok(name) = device.name() {
+                                if name == audio_device.name {
+                                    let default_config = device
+                                        .default_input_config()
+                                        .map_err(|e| anyhow!("Failed to get default input config: {}", e))?;
+                                    return Ok((device, default_config));
+                                }
+                            }
+                        }
+                    }
+
                     for device in host.output_devices()? {
                         if let Ok(name) = device.name() {
                             if name == audio_device.name {
