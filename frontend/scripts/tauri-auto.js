@@ -14,6 +14,7 @@ if (!command || !['dev', 'build'].includes(command)) {
   console.error('Usage: node tauri-auto.js [dev|build]');
   process.exit(1);
 }
+const extraArgs = process.argv.slice(3);
 
 // Detect GPU feature
 let feature = '';
@@ -39,6 +40,42 @@ console.log(''); // Empty line for spacing
 // Platform-specific environment variables
 const platform = os.platform();
 const env = { ...process.env };
+const testerConfig = extraArgs.some(
+  (arg) => typeof arg === 'string' && arg.includes('tauri.meetnola.tester.conf.json')
+);
+
+function timestampBuildId() {
+  const now = new Date();
+  const pad = (value) => String(value).padStart(2, '0');
+  return [
+    now.getFullYear(),
+    pad(now.getMonth() + 1),
+    pad(now.getDate()),
+    '-',
+    pad(now.getHours()),
+    pad(now.getMinutes()),
+  ].join('');
+}
+
+function gitShortSha() {
+  try {
+    return execSync('git rev-parse --short HEAD', {
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'ignore'],
+    }).trim();
+  } catch (_err) {
+    return '';
+  }
+}
+
+const shortSha = gitShortSha();
+const defaultBuildId = [timestampBuildId(), shortSha].filter(Boolean).join('-');
+env.MEETNOLA_BUILD_ID = env.MEETNOLA_BUILD_ID || defaultBuildId;
+env.MEETNOLA_BUILD_CHANNEL = env.MEETNOLA_BUILD_CHANNEL || (command === 'build' ? 'bundle' : 'dev');
+env.MEETNOLA_BUILD_FLAVOR = env.MEETNOLA_BUILD_FLAVOR || (testerConfig ? 'meetnola-tester' : 'meetily');
+
+console.log(`🏷️  Build identity: ${env.MEETNOLA_BUILD_FLAVOR} ${env.MEETNOLA_BUILD_CHANNEL} ${env.MEETNOLA_BUILD_ID}`);
+console.log('');
 
 if (platform === 'linux' && feature === 'cuda') {
   console.log('🐧 Linux/CUDA detected: Setting CMAKE flags for NVIDIA GPU');
@@ -49,6 +86,10 @@ if (platform === 'linux' && feature === 'cuda') {
 
 // Build the tauri command
 let tauriCmd = `tauri ${command}`;
+if (extraArgs.length > 0) {
+  tauriCmd += ` ${extraArgs.map((arg) => JSON.stringify(arg)).join(' ')}`;
+  console.log(`🧩 Extra Tauri args: ${extraArgs.join(' ')}`);
+}
 if (feature && feature !== 'none') {
   tauriCmd += ` -- --features ${feature}`;
   console.log(`🚀 Running: tauri ${command} with features: ${feature}`);

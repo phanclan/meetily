@@ -2,6 +2,8 @@
 mod ffmpeg;
 
 fn main() {
+    emit_build_metadata();
+
     // GPU Acceleration Detection and Build Guidance
     detect_and_report_gpu_capabilities();
 
@@ -19,6 +21,20 @@ fn main() {
     ffmpeg::ensure_ffmpeg_binary();
 
     tauri_build::build()
+}
+
+fn emit_build_metadata() {
+    println!("cargo:rerun-if-env-changed=MEETNOLA_BUILD_ID");
+    println!("cargo:rerun-if-env-changed=MEETNOLA_BUILD_CHANNEL");
+    println!("cargo:rerun-if-env-changed=MEETNOLA_BUILD_FLAVOR");
+
+    let build_id = std::env::var("MEETNOLA_BUILD_ID").unwrap_or_else(|_| "local-dev".to_string());
+    let channel = std::env::var("MEETNOLA_BUILD_CHANNEL").unwrap_or_else(|_| "dev".to_string());
+    let flavor = std::env::var("MEETNOLA_BUILD_FLAVOR").unwrap_or_else(|_| "meetily".to_string());
+
+    println!("cargo:rustc-env=MEETNOLA_BUILD_ID={}", build_id);
+    println!("cargo:rustc-env=MEETNOLA_BUILD_CHANNEL={}", channel);
+    println!("cargo:rustc-env=MEETNOLA_BUILD_FLAVOR={}", flavor);
 }
 
 /// Detects GPU acceleration capabilities and provides build guidance

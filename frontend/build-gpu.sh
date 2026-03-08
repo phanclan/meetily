@@ -65,6 +65,8 @@ else
   exit 1
 fi
 
+TAURI_BUILD_SCRIPT="${TAURI_BUILD_SCRIPT:-tauri:build}"
+
 # Detect GPU feature if not already set
 if [ -z "$TAURI_GPU_FEATURE" ]; then
     echo -e "${BLUE}🔍 Detecting GPU features...${NC}"
@@ -175,7 +177,7 @@ echo -e "${BLUE}Building complete Tauri application...${NC}"
 echo ""
 
 # NO_STRIP true due to issues with bundling appImage
-NO_STRIP=true $PKG_MGR run tauri:build
+NO_STRIP=true $PKG_MGR run "$TAURI_BUILD_SCRIPT"
 
 if [ $? -eq 0 ]; then
   echo ""
@@ -187,4 +189,3 @@ else
   echo -e "${RED}❌ Build failed${NC}"
   exit 1
 fi
-

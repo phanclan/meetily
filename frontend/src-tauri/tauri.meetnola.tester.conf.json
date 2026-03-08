@@ -1,0 +1,7 @@
+{
+  "productName": "meetnola Tester",
+  "identifier": "com.meetnola.tester",
+  "bundle": {
+    "createUpdaterArtifacts": false
+  }
+}

@@ -29,7 +29,9 @@ macro_rules! perf_trace {
 }
 
 // Make these macros available to other modules
+#[allow(unused_imports)]
 pub(crate) use perf_debug;
+#[allow(unused_imports)]
 pub(crate) use perf_trace;
 
 // Re-export async logging macros for external use (removed due to macro conflicts)
@@ -38,9 +40,14 @@ pub(crate) use perf_trace;
 pub mod analytics;
 pub mod api;
 pub mod audio;
+pub mod automation;
 pub mod config;
 pub mod console_utils;
 pub mod database;
+pub mod frontend_logging;
+pub mod live_query;
+pub mod meeting_detection;
+pub mod notes_commands;
 pub mod notifications;
 pub mod ollama;
 pub mod onboarding;
@@ -58,11 +65,15 @@ pub mod whisper_engine;
 use audio::{list_audio_devices, AudioDevice, trigger_audio_permission};
 use log::{error as log_error, info as log_info};
 use notifications::commands::NotificationManagerState;
+use std::time::Duration;
 use std::sync::Arc;
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::{AppHandle, Emitter, LogicalSize, Manager, Runtime, Size, WebviewWindow, WindowEvent};
+use tauri_plugin_store::StoreExt;
 use tokio::sync::RwLock;
 
 static RECORDING_FLAG: AtomicBool = AtomicBool::new(false);
+const WINDOW_STATE_STORE: &str = "window-state.json";
+const MAIN_WINDOW_STATE_KEY: &str = "main";
 
 // Global language preference storage (default to "auto-translate" for automatic translation to English)
 static LANGUAGE_PREFERENCE: std::sync::LazyLock<StdMutex<String>> =
@@ -73,12 +84,128 @@ struct RecordingArgs {
     save_path: String,
 }
 
-#[derive(Debug, Serialize, Clone)]
-struct TranscriptionStatus {
-    chunks_in_queue: usize,
-    is_processing: bool,
-    last_activity_ms: u64,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PersistedWindowState {
+    width: f64,
+    height: f64,
+    maximized: bool,
 }
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BuildInfo {
+    version: String,
+    build_id: String,
+    channel: String,
+    flavor: String,
+    display_name: String,
+}
+
+#[tauri::command]
+fn get_build_info() -> BuildInfo {
+    let version = env!("CARGO_PKG_VERSION").to_string();
+    let build_id = env!("MEETNOLA_BUILD_ID").to_string();
+    let channel = env!("MEETNOLA_BUILD_CHANNEL").to_string();
+    let flavor = env!("MEETNOLA_BUILD_FLAVOR").to_string();
+
+    let flavor_label = match flavor.as_str() {
+        "meetnola-tester" => "meetnola Tester",
+        _ => "Meetily",
+    };
+
+    let display_name = format!("{} v{} ({}, {})", flavor_label, version, channel, build_id);
+
+    BuildInfo {
+        version,
+        build_id,
+        channel,
+        flavor,
+        display_name,
+    }
+}
+
+fn load_main_window_state<R: Runtime>(app: &AppHandle<R>) -> Option<PersistedWindowState> {
+    let store = app.store(WINDOW_STATE_STORE).ok()?;
+    let value = store.get(MAIN_WINDOW_STATE_KEY)?;
+    serde_json::from_value(value.clone()).ok()
+}
+
+fn persist_main_window_state<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), String> {
+    if window.label() != "main" {
+        return Ok(());
+    }
+
+    let size = window
+        .inner_size()
+        .map_err(|e| format!("Failed to read window size: {}", e))?;
+    if size.width == 0 || size.height == 0 {
+        return Ok(());
+    }
+
+    let state = PersistedWindowState {
+        width: size.width as f64,
+        height: size.height as f64,
+        maximized: window.is_maximized().unwrap_or(false),
+    };
+
+    let store = window
+        .app_handle()
+        .store(WINDOW_STATE_STORE)
+        .map_err(|e| format!("Failed to access window state store: {}", e))?;
+
+    let value = serde_json::to_value(state)
+        .map_err(|e| format!("Failed to serialize window state: {}", e))?;
+    store.set(MAIN_WINDOW_STATE_KEY, value);
+    store
+        .save()
+        .map_err(|e| format!("Failed to save window state: {}", e))?;
+
+    Ok(())
+}
+
+fn restore_main_window_state<R: Runtime>(window: &WebviewWindow<R>) {
+    let Some(state) = load_main_window_state(&window.app_handle()) else {
+        return;
+    };
+
+    if !state.maximized {
+        if let Err(e) = window.set_size(Size::Logical(LogicalSize::new(state.width, state.height))) {
+            log::warn!("Failed to restore main window size: {}", e);
+        }
+    }
+
+    if state.maximized {
+        if let Err(e) = window.maximize() {
+            log::warn!("Failed to restore maximized window state: {}", e);
+        }
+    }
+}
+
+#[tauri::command]
+fn frontend_bootstrap_complete<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "Main window not found".to_string())?;
+
+    match window.is_visible() {
+        Ok(true) => {}
+        Ok(false) => {
+            window
+                .show()
+                .map_err(|e| format!("Failed to show main window: {}", e))?;
+        }
+        Err(e) => {
+            return Err(format!("Failed to inspect main window visibility: {}", e));
+        }
+    }
+
+    if let Err(e) = window.set_focus() {
+        log::warn!("Failed to focus main window after frontend bootstrap: {}", e);
+    }
+
+    Ok(())
+}
+
 
 #[tauri::command]
 async fn start_recording<R: Runtime>(
@@ -142,13 +269,18 @@ async fn start_recording<R: Runtime>(
 }
 
 #[tauri::command]
-async fn stop_recording<R: Runtime>(app: AppHandle<R>, args: RecordingArgs) -> Result<(), String> {
+async fn stop_recording<R: Runtime>(
+    app: AppHandle<R>,
+    args: RecordingArgs,
+) -> Result<audio::recording_commands::StopRecordingResult, String> {
     log_info!("Attempting to stop recording...");
 
     // Check the actual audio recording system state instead of the flag
     if !audio::recording_commands::is_recording().await {
         log_info!("Recording is already stopped");
-        return Ok(());
+        return Ok(audio::recording_commands::StopRecordingResult::complete(
+            "Recording was already stopped",
+        ));
     }
 
     // Call the actual audio recording system to stop
@@ -160,7 +292,7 @@ async fn stop_recording<R: Runtime>(app: AppHandle<R>, args: RecordingArgs) -> R
     )
     .await
     {
-        Ok(_) => {
+        Ok(stop_result) => {
             RECORDING_FLAG.store(false, Ordering::SeqCst);
             tray::update_tray_menu(&app);
 
@@ -193,7 +325,7 @@ async fn stop_recording<R: Runtime>(app: AppHandle<R>, args: RecordingArgs) -> R
                 log_info!("Successfully showed recording stopped notification");
             }
 
-            Ok(())
+            Ok(stop_result)
         }
         Err(e) => {
             log_error!("Failed to stop audio recording: {}", e);
@@ -211,12 +343,8 @@ async fn is_recording() -> bool {
 }
 
 #[tauri::command]
-fn get_transcription_status() -> TranscriptionStatus {
-    TranscriptionStatus {
-        chunks_in_queue: 0,
-        is_processing: false,
-        last_activity_ms: 0,
-    }
+async fn get_transcription_status() -> audio::recording_commands::TranscriptionStatus {
+    audio::recording_commands::get_transcription_status().await
 }
 
 #[tauri::command]
@@ -382,6 +510,20 @@ async fn set_language_preference(language: String) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+async fn request_recording_start<R: Runtime>(
+    app: AppHandle<R>,
+    source: Option<String>,
+) -> Result<(), String> {
+    let source = source.unwrap_or_else(|| "unknown".to_string());
+
+    app.emit(
+        "request-recording-start",
+        serde_json::json!({ "source": source }),
+    )
+    .map_err(|e| e.to_string())
+}
+
 // Internal helper function to get language preference (for use within Rust code)
 pub fn get_language_preference_internal() -> Option<String> {
     LANGUAGE_PREFERENCE.lock().ok().map(|lang| lang.clone())
@@ -415,10 +557,50 @@ pub fn run() {
         .manage(Arc::new(RwLock::new(
             None::<notifications::manager::NotificationManager<tauri::Wry>>,
         )) as NotificationManagerState<tauri::Wry>)
+        .manage(state::MeetingSessionState::default())
         .manage(audio::init_system_audio_state())
         .manage(summary::summary_engine::ModelManagerState(Arc::new(tokio::sync::Mutex::new(None))))
         .setup(|_app| {
             log::info!("Application setup complete");
+
+            if let Some(window) = _app.get_webview_window("main") {
+                restore_main_window_state(&window);
+
+                let window_for_bootstrap_timeout = window.clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(Duration::from_secs(15)).await;
+
+                    match window_for_bootstrap_timeout.is_visible() {
+                        Ok(true) => {}
+                        Ok(false) => {
+                            log::warn!(
+                                "Frontend bootstrap did not complete within 15s; showing main window as fallback"
+                            );
+                            if let Err(e) = window_for_bootstrap_timeout.show() {
+                                log::warn!("Failed to show fallback main window: {}", e);
+                            }
+                        }
+                        Err(e) => {
+                            log::warn!("Failed to inspect fallback main window visibility: {}", e);
+                        }
+                    }
+                });
+
+                let window_for_events = window.clone();
+                window.on_window_event(move |event| {
+                    if matches!(
+                        event,
+                        WindowEvent::Resized(_)
+                            | WindowEvent::Moved(_)
+                            | WindowEvent::CloseRequested { .. }
+                            | WindowEvent::Destroyed
+                    ) {
+                        if let Err(e) = persist_main_window_state(&window_for_events) {
+                            log::warn!("Failed to persist main window state: {}", e);
+                        }
+                    }
+                });
+            }
 
             // Initialize system tray
             if let Err(e) = tray::create_tray(_app.handle()) {
@@ -509,6 +691,19 @@ pub fn run() {
                 log::warn!("Failed to resolve resource directory for templates");
             }
 
+            // Start automation HTTP server if MEETILY_AUTOMATION=1
+            if std::env::var("MEETILY_AUTOMATION").as_deref() == Ok("1") {
+                if let Some(app_state) = _app.try_state::<state::AppState>() {
+                    let db = app_state.db_manager.clone();
+                    tauri::async_runtime::spawn(automation::start(db));
+                } else {
+                    log::warn!("[automation] AppState not available; server not started");
+                }
+            }
+
+            // Start call detection background poller. Emission is gated by user preference.
+            meeting_detection::start_detection(_app.handle().clone());
+
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -596,6 +791,7 @@ pub fn run() {
             whisper_engine::parallel_commands::test_parallel_processing_setup,
             get_audio_devices,
             trigger_microphone_permission,
+            request_recording_start,
             start_recording_with_devices,
             start_recording_with_devices_and_meeting,
             start_audio_level_monitoring,
@@ -610,6 +806,9 @@ pub fn run() {
             // Reload sync commands (retrieve transcript history and meeting name)
             audio::recording_commands::get_transcript_history,
             audio::recording_commands::get_recording_meeting_name,
+            state::get_meeting_session,
+            state::update_meeting_session_title,
+            state::clear_meeting_session_command,
             // Device monitoring commands (AirPods/Bluetooth disconnect/reconnect)
             audio::recording_commands::poll_audio_device_events,
             audio::recording_commands::get_reconnection_status,
@@ -732,6 +931,8 @@ pub fn run() {
             whisper_engine::commands::open_models_folder,
             // Onboarding commands
             onboarding::get_onboarding_status,
+            frontend_bootstrap_complete,
+            get_build_info,
             onboarding::save_onboarding_status_cmd,
             onboarding::reset_onboarding_status_cmd,
             onboarding::complete_onboarding,
@@ -748,6 +949,18 @@ pub fn run() {
             audio::import::start_import_audio_command,
             audio::import::cancel_import_command,
             audio::import::is_import_in_progress_command,
+            frontend_logging::append_frontend_log,
+            // Live meeting AI chat
+            live_query::live_query,
+            // Call detection commands
+            meeting_detection::start_call_detection,
+            meeting_detection::stop_call_detection,
+            meeting_detection::set_call_detection_enabled,
+            meeting_detection::get_call_detection_enabled,
+            // Meeting notes commands
+            notes_commands::save_meeting_notes,
+            notes_commands::get_meeting_notes,
+            notes_commands::move_meeting_notes,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
