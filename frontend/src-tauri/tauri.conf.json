@@ -12,13 +12,15 @@
     "app": {
         "windows": [
             {
-                "title": "meetily",
+                "title": "meetnola",
                 "width": 1100,
                 "height": 700,
+                "visible": false,
                 "resizable": true,
                 "fullscreen": false,
                 "theme": "Light",
-                "decorations": true
+                "decorations": true,
+                "backgroundColor": [246, 242, 234, 255]
             }
         ],
         "macOSPrivateApi": true,
@@ -107,7 +109,7 @@
             "hardenedRuntime": true
         },
         "windows": {
-            "signCommand": "powershell -ExecutionPolicy Bypass -File scripts/sign-windows.ps1 -FilePath %1"
+            "signCommand": "powershell -ExecutionPolicy Bypass -File ../archive/windows/src-tauri/scripts/sign-windows.ps1 -FilePath %1"
         }
     },
     "plugins": {

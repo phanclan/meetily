@@ -177,9 +177,19 @@ echo -e "${BLUE}Building complete Tauri application...${NC}"
 echo ""
 
 # NO_STRIP true due to issues with bundling appImage
+set +e
 NO_STRIP=true $PKG_MGR run "$TAURI_BUILD_SCRIPT"
+BUILD_EXIT_CODE=$?
+set -e
 
-if [ $? -eq 0 ]; then
+if [[ "$OSTYPE" == "darwin"* ]] && [ -d "$WORKSPACE_ROOT/target/release/bundle/macos" ]; then
+  echo ""
+  echo -e "${BLUE}🔧 Normalizing macOS app bundle permissions...${NC}"
+  find "$WORKSPACE_ROOT/target/release/bundle/macos" -path "*.app/Contents/MacOS/*" -type f -exec chmod 755 {} \;
+  echo -e "${GREEN}✅ macOS bundle executable bits normalized${NC}"
+fi
+
+if [ $BUILD_EXIT_CODE -eq 0 ]; then
   echo ""
   echo -e "${GREEN}✅ Build completed successfully!${NC}"
   echo ""
@@ -187,5 +197,5 @@ if [ $? -eq 0 ]; then
 else
   echo ""
   echo -e "${RED}❌ Build failed${NC}"
-  exit 1
+  exit $BUILD_EXIT_CODE
 fi

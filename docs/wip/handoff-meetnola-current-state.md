@@ -1,6 +1,6 @@
 # Meetnola Current State Handoff
 
-Last updated: 2026-03-08
+Last updated: 2026-03-09
 
 ## Purpose
 
@@ -14,7 +14,7 @@ This handoff captures the latest product, packaging, routing, UI, and macOS test
 - Tester app data folder: `~/Library/Application Support/com.meetnola.tester/`
 - Tester DB: `~/Library/Application Support/com.meetnola.tester/meeting_minutes.sqlite`
 - The latest packaged build used during this pass showed an on-screen build badge:
-  - `meetnola Tester v0.3.0 (bundle, 20260308-1053-91b0c09)`
+  - `meetnola Tester v0.3.2 (bundle, 20260309-0932-c796cf6)`
 
 ## Why packaged builds matter on macOS
 
@@ -77,8 +77,29 @@ Primary files:
 Current state:
 
 - The hierarchy is flatter and quieter than before
-- The UI is still not at Granola polish yet
-- Remaining work is mostly visual compression and control reduction, not route architecture
+- The saved quick-note stop screen and reopened meeting screen are closer than before, but still not fully shared
+- Both now support a top-right overflow action surface instead of diverging on basic meeting actions
+- Saved-note bottom controls are anchored more like Granola and the transcript control uses a waveform-style glyph
+- Remaining work is mostly visual compression and shared-shell extraction, not route architecture
+
+## Notes-driven title fallback
+
+Meeting titles are no longer dependent only on transcript/summary output.
+
+Current behavior:
+
+- If a meeting still has a generated or placeholder title such as `Meeting 2026-...` or `New note`
+- and the saved notes contain meaningful content
+- the app derives a title from the first useful note line and persists it
+
+This now happens through the native note-save path, not only through summary generation.
+
+Key files:
+
+- `frontend/src-tauri/src/notes_commands.rs`
+- `frontend/src/lib/suggestMeetingTitle.ts`
+- `frontend/src/app/quick-note/page.tsx`
+- `frontend/src/app/meeting-details/page-content.tsx`
 
 ## Build identity
 
@@ -141,6 +162,27 @@ Practical implication:
 - For local validation, the `.app` bundle is sufficient
 - DMG failure does not necessarily mean the app bundle is invalid
 
+## Tester distribution / launch reality
+
+The tester README is now the operational source for peer setup:
+
+- `docs/meetnola-tester-readme.md`
+
+Important current facts:
+
+- The `.app` bundle works
+- The `.dmg` step still fails
+- The app is ad-hoc signed, not notarized
+- Some transfer/extraction paths may strip executable permissions from binaries inside the bundle
+- `frontend/build-gpu.sh` now normalizes executable bits on `Contents/MacOS/*` after build, even if DMG bundling fails later
+
+If a tester reports launch failures like error `111`, `permission denied`, or `Launch failed`, the README now includes:
+
+- `chmod +x .../Contents/MacOS/meetily`
+- `chmod +x .../Contents/MacOS/ffmpeg`
+- `chmod +x .../Contents/MacOS/llama-helper`
+- quarantine removal with `xattr -r -d com.apple.quarantine`
+
 ## Key docs already present in `docs/wip/`
 
 - `logging-overhaul-plan.md`
@@ -157,6 +199,6 @@ Practical implication:
 ## Recommended next steps
 
 1. Continue visual simplification of saved-note / saved-meeting surfaces.
-2. Reduce top-right control prominence further, likely by collapsing secondary actions.
+2. Extract a shared saved-meeting shell if quick-note and meeting-details continue to drift.
 3. Keep validating macOS system audio only in the packaged `meetnola Tester.app`.
-4. Make a curated commit for the tester/build/routing/UI work instead of a broad worktree commit.
+4. Fix remaining macOS branding leakage (`Meetily` identity in menu bar / app switcher).

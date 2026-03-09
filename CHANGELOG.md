@@ -23,6 +23,9 @@ All notable changes to this project should be documented in this file.
 - Groq and OpenAI API keys are now shared between transcript and summary settings.
 - `New note`, sidebar `Start Recording`, and call-detection entry now route into the same quick-note recording workflow.
 - Saved quick notes and saved meeting details now use the same transcript-hidden, AI-composer-bottom, document-first interaction model.
+- Saved notes now expose a top-right overflow menu for copy/open-folder/save/delete actions, bringing the stop screen closer to the reopened meeting screen.
+- Homepage meetings are now grouped into `This week`, `Last week`, and `Older`, with all sessions visible in the browser instead of only a short implicit slice.
+- Version bumped to `0.3.2` for the latest tester build.
 
 ### Fixed
 - Prevented BlockNote from crashing when mounted with empty initial note content.
@@ -31,6 +34,10 @@ All notable changes to this project should be documented in this file.
 - Fixed quick-note auto-restart after stop and aligned stop handling around structured stop results.
 - Fixed several macOS system-audio issues around backend selection, stale backend persistence, selected-output handling, and packaged-app permission validation.
 - Fixed transcript sidecar persistence so saved meeting folders no longer drift from the SQLite transcript state after save.
+- Fixed homepage recent-meeting over-fetching caused by unstable context rebuild triggers.
+- Fixed duplicate homepage hover tooltips by keeping the native tooltip only.
+- Fixed notes-only meetings keeping generated timestamp titles by deriving a title from meaningful saved notes.
+- Hardened the macOS build script so executable permissions are normalized on bundle binaries even when the DMG step fails afterward.
 
 ### Docs
 - Split developer guidance into a getting-started flow and detailed build instructions.

@@ -74,6 +74,24 @@ The archived FastAPI service had unauthenticated, development-oriented CORS beha
 
 The current app does not require a separate FastAPI tier. Meeting persistence, local transcription, and summary orchestration are handled through the Rust/Tauri core.
 
+### Current Architecture Source of Truth
+
+For the current packaged-app behavior and critical runtime boundaries, prefer:
+
+- [docs/architecture-current-state.md](docs/architecture-current-state.md)
+
+Use that document when reasoning about:
+
+- which runtime is authoritative for a feature
+- current startup / onboarding behavior
+- recording -> transcript -> save flow
+- summary generation flow
+- homepage AI context flow
+
+The older high-level architecture sections in this file are still useful orientation, but
+`docs/architecture-current-state.md` should be treated as the practical source of truth for
+how the app works today.
+
 ### Audio Processing Pipeline (Critical Understanding)
 
 The audio system has **two parallel paths** with different purposes:
@@ -378,6 +396,10 @@ $env:RUST_LOG="debug"; ./clean_run_windows.bat
 
 7. **Audio Permissions**: Request permissions early. macOS requires both microphone AND screen recording for system audio.
 
+17. **BlockNote CSS overrides must be outside `@layer`**: `@blocknote/shadcn/style.css` is unlayered CSS. Any overrides placed inside `@layer base` in `globals.css` will silently lose to BlockNote's rules — even with `!important`. This is per the CSS cascade spec: unlayered styles always beat `@layer` styles. All BlockNote overrides live after the `@layer base` closing brace in `globals.css`. If you add new BlockNote CSS overrides, place them there.
+
+18. **Native title bar with warm tint**: `backgroundColor: [246, 242, 234, 255]` (`#f6f2ea`) in `tauri.conf.json` tints the native macOS title bar. Custom title bar (`titleBarStyle: "Overlay"`) was tried but reverted — drag didn't work reliably when the app had focus.
+
 ## Repository-Specific Conventions
 
 - **Logging Format**: Rust logs should include enough module context to diagnose app behavior
@@ -440,3 +462,97 @@ Stop-flow contract:
 - Tray-driven stop emits `recording-stop-complete`
 - Frontend must only save meetings when stop result is `status === "complete"`
 - Partial/error stop paths should do cleanup and UI recovery, not continue waiting for save
+
+### Browser Testing Mode (Next.js without Tauri)
+
+Run the UI in a regular browser without building the Tauri desktop app:
+
+```bash
+cd frontend
+BROWSER_TESTING=1 pnpm run dev   # http://localhost:3118
+```
+
+When `BROWSER_TESTING=1`, webpack aliases redirect all `@tauri-apps/api/*` imports to
+mock shims in `frontend/src/lib/tauri-shim/`. Edit `core.ts` in that directory to add
+or modify mock responses for `invoke()` calls during browser development.
+
+> **WARNING — `BROWSER_TESTING=1` in `.env.local`**: If `frontend/.env.local` contains
+> `BROWSER_TESTING=1`, the shim is active even when running the real Tauri app. All
+> `invoke()` calls will hit mock functions instead of Rust — no data will be written to
+> SQLite. **Always clear this file before running the Tauri app**:
+> ```bash
+> echo "" > frontend/.env.local
+> ```
+
+### Debugging the Tauri App (with log capture)
+
+The recommended way to run the app when debugging, especially for Rust-side issues:
+
+```bash
+cd frontend
+MEETILY_AUTOMATION=1 RUST_LOG=debug ./clean_run.sh 2>&1 | tee /tmp/meetily-dev.log
+```
+
+- `2>&1 | tee` captures both stdout and stderr (Rust logs) to a file you can inspect
+- `MEETILY_AUTOMATION=1` starts the automation HTTP server on port 21734 (see below)
+- `RUST_LOG=debug` is now respected — the hardcoded `LevelFilter::Info` clamp was removed
+- `clean_run.sh` now **pre-warms Next.js** before starting Tauri: it starts `pnpm dev`, polls `localhost:3118` until the home page compiles (~6s), kills it, then starts Tauri. This prevents the ChunkLoadError on first webview load caused by on-demand compilation timing.
+- Use `--no-clean` only when iterating quickly and you have NOT changed `layout.tsx` or other Next.js files. After any layout change, delete `.next/` first or run without `--no-clean`.
+
+**Logging Phase 1 (implemented)** — frontend console output now appears in the terminal:
+- All `console.log/warn/error` calls in React components are forwarded to Rust via `append_frontend_log` (queue-based, non-dropping)
+- These appear in terminal as `INFO app_lib::frontend_logging [frontend] <message>`
+- DB-layer transcript config reads/writes log at `info` level — look for `[settings]` prefix
+- `frontend-runtime.log` is also written to `~/Library/Application Support/com.meetily.ai/logs/`
+
+### Meetnola Tester Build (Preferred for macOS audio / peer testing)
+
+Use the packaged tester app when validating macOS permissions, startup behavior, or peer-ready flows:
+
+```bash
+cd frontend
+./build-meetnola.sh
+open -n '../target/release/bundle/macos/meetnola Tester.app'
+```
+
+Important paths:
+- Packaged app: `target/release/bundle/macos/meetnola Tester.app`
+- Bundle id: `com.meetnola.tester`
+- Tester app data: `~/Library/Application Support/com.meetnola.tester/`
+- Tester DB: `~/Library/Application Support/com.meetnola.tester/meeting_minutes.sqlite`
+
+Why this matters:
+- `tauri dev` is not reliable for macOS TCC / System Audio Recording permission validation
+- The packaged bundle identity is what macOS actually grants permissions to
+- Use the packaged tester app for system audio capture checks and peer-test validation
+
+Tester builds also expose a visible build badge in the UI. Use it to confirm the running app is the expected bundle/build before comparing screenshots or behavior.
+
+Operational note:
+- The `.app` bundle is currently the peer-test artifact; the `.dmg` step still fails in this branch.
+- `docs/meetnola-tester-readme.md` is the current setup/troubleshooting guide for testers.
+- `frontend/build-gpu.sh` now normalizes executable bits on `*.app/Contents/MacOS/*` after build so the packaged bundle is less fragile if DMG bundling fails later.
+
+### Automation HTTP API (Testing & Scripting)
+
+An opt-in HTTP API for programmatic testing, bound to `127.0.0.1:21734` only.
+Enable by setting `MEETILY_AUTOMATION=1` before launching the app.
+
+**Endpoints**:
+- `GET  /health` — returns `{"status":"ok","version":"..."}`
+- `GET  /v1/config/transcript` — returns current provider/model/apiKey from DB
+- `PUT  /v1/config/transcript` — writes provider/model/apiKey to DB (requires Bearer token)
+
+**Token**: printed to stderr on startup. Override with `MEETILY_AUTOMATION_TOKEN=mytoken`.
+
+**Test scripts** (in `scripts/`):
+```bash
+# Direct SQLite inspection (no app needed)
+./scripts/test-transcript-config.sh read
+./scripts/test-transcript-config.sh write groq whisper-large-v3-turbo gsk_yourkey
+./scripts/test-transcript-config.sh reset
+./scripts/test-transcript-config.sh test-groq   # full write/verify/restore cycle
+
+# End-to-end HTTP API test (app must be running with MEETILY_AUTOMATION=1)
+MEETILY_AUTOMATION_TOKEN=<token-from-stderr> ./scripts/test-automation-api.sh
+```
