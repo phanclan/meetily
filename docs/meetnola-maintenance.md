@@ -5,12 +5,12 @@ Decision: 2026-09-05. Meetnola is maintained as an independent product fork with
 ## Branch policy
 
 - `origin` is the personal fork. `upstream` is the original Meetily repository.
-- Develop features from the fork's `main`, using committed branches and separate worktrees.
+- Work directly on the fork's local `main`. Create a branch or separate worktree only when Peter explicitly requests it.
 - Do not routinely rebase the product branch onto upstream releases. Stashes are temporary conveniences, not release handoffs.
 - Review upstream security, platform, audio, and transcription fixes. Adopt product/UI changes only when wanted.
-- Integrate selected changes on a branch. Use `git cherry-pick -x` for self-contained commits; port changes explicitly when their dependencies do not fit. Preserve source attribution and existing license notices.
+- Integrate approved upstream changes into local `main`. Use `git cherry-pick -x` for self-contained commits; port changes explicitly when their dependencies do not fit. Preserve source attribution and existing license notices.
 - Meetnola tester builds disable the upstream updater feed. Distribute a verified fork build manually until a dedicated signed release feed is established.
-- Promote a branch only after the checks below pass. Publishing/pushing is a separate operation.
+- Validate changes with the checks below before committing. Publishing/pushing is a separate operation.
 
 ## Supported baseline
 

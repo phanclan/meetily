@@ -2,6 +2,8 @@
 
 Last updated: 2026-09-05
 
+Current checkout: local `main`, including visual polish `42c9976` and title persistence `09859c3` by fast-forward. Continue work directly on `main`; branches and worktrees require an explicit request. Nothing was pushed. Earlier branch references below describe historical validation state.
+
 ## Visual consistency pass
 
 Scope: address the six visual-review findings using the existing editor, navigation, Radix controls, and installed Markdown renderer. Keep a warm neutral surface with compact document controls; no provider, storage, or recording redesign.
