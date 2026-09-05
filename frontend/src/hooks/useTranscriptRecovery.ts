@@ -183,7 +183,8 @@ export function useTranscriptRecovery(): UseTranscriptRecoveryReturn {
       const saveResponse = await storageService.saveMeeting(
         metadata.title,
         formattedTranscripts,
-        folderPath ?? null
+        folderPath ?? null,
+        meetingId,
       );
 
       const savedMeetingId = saveResponse.meeting_id;
@@ -204,13 +205,18 @@ export function useTranscriptRecovery(): UseTranscriptRecoveryReturn {
         });
       }
 
+      // Keep the recovery entry and checkpoints available when audio reconstruction failed.
+      if (audioRecoveryStatus?.status === 'failed' || audioRecoveryStatus?.status === 'partial') {
+        throw new Error('Notes and transcripts were saved, but audio recovery failed. Audio checkpoints were retained; retry recovery to restore the audio.');
+      }
+
       // 7. Mark as saved in IndexedDB
       await indexedDBService.markMeetingSaved(meetingId);
       clearLiveMeetingNotes(meetingId);
 
 
       // 8. Clean up checkpoint files
-      if (folderPath) {
+      if (folderPath && audioRecoveryStatus?.status === 'success') {
         try {
           await invoke('cleanup_checkpoints', { meetingFolder: folderPath });
         } catch (error) {

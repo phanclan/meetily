@@ -17,7 +17,7 @@ pub async fn live_query<R: Runtime>(
     user_message: String,
     transcript_context: String,
 ) -> Result<String, String> {
-    info!("live_query called: {}", &user_message[..user_message.len().min(80)]);
+    info!("live_query called: {}", user_message.chars().take(80).collect::<String>());
     let pool = state.db_manager.pool();
 
     // Load LLM settings

@@ -15,8 +15,12 @@ impl TranscriptsRepository {
         meeting_title: &str,
         transcripts: &[TranscriptSegment],
         folder_path: Option<String>,
+        source_recording_id: Option<&str>,
     ) -> Result<String, SqlxError> {
-        let meeting_id = format!("meeting-{}", Uuid::new_v4());
+        // A stable source ID makes retries safe after a lost IPC response or failed notes save.
+        let meeting_id = source_recording_id
+            .map(|id| format!("meeting-recording-{}", id))
+            .unwrap_or_else(|| format!("meeting-{}", Uuid::new_v4()));
 
         let mut conn = pool.acquire().await?;
         let mut transaction = conn.begin().await?;
@@ -25,7 +29,7 @@ impl TranscriptsRepository {
 
         // 1. Create the new meeting
         let result = sqlx::query(
-            "INSERT INTO meetings (id, title, created_at, updated_at, folder_path) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO meetings (id, title, created_at, updated_at, folder_path) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING",
         )
         .bind(&meeting_id)
         .bind(meeting_title)
@@ -35,10 +39,10 @@ impl TranscriptsRepository {
         .execute(&mut *transaction)
         .await;
 
-        if let Err(e) = result {
-            error!("Failed to create meeting '{}': {}", meeting_title, e);
-            transaction.rollback().await?;
-            return Err(e);
+        let inserted = result?;
+        if inserted.rows_affected() == 0 {
+            transaction.commit().await?;
+            return Ok(meeting_id);
         }
 
         info!("Successfully created meeting with id: {}", meeting_id);
@@ -142,5 +146,50 @@ impl TranscriptsRepository {
             }
             None => transcript.chars().take(200).collect(), // Fallback to the start of the transcript
         }
+    }
+}
+
+#[cfg(test)]
+mod quality_tests {
+    use super::*;
+
+    async fn database() -> SqlitePool {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1).connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        pool
+    }
+
+    fn segment() -> TranscriptSegment {
+        TranscriptSegment {
+            id: "synthetic".into(), text: "Synthetic transcript".into(), timestamp: "00:01".into(),
+            audio_start_time: Some(1.0), audio_end_time: Some(2.0), duration: Some(1.0),
+        }
+    }
+
+    #[tokio::test]
+    async fn quality_save_retry_reuses_meeting_without_duplicate_transcripts() {
+        let pool = database().await;
+        let first = TranscriptsRepository::save_transcript(&pool, "Synthetic", &[segment()], None, Some("meeting-123")).await.unwrap();
+        // Simulate a retry after notes failed or the successful IPC reply was lost.
+        let retry = TranscriptsRepository::save_transcript(&pool, "Synthetic", &[segment()], None, Some("meeting-123")).await.unwrap();
+        assert_eq!(first, retry);
+        let counts: (i64, i64) = sqlx::query_as("SELECT (SELECT COUNT(*) FROM meetings), (SELECT COUNT(*) FROM transcripts)")
+            .fetch_one(&pool).await.unwrap();
+        assert_eq!(counts, (1, 1));
+        let other = TranscriptsRepository::save_transcript(&pool, "Other", &[], None, Some("meeting-124")).await.unwrap();
+        assert_ne!(first, other);
+    }
+
+    #[tokio::test]
+    async fn quality_failed_transcript_write_rolls_back_and_can_retry() {
+        let pool = database().await;
+        sqlx::raw_sql("CREATE TRIGGER reject_transcript BEFORE INSERT ON transcripts BEGIN SELECT RAISE(ABORT, 'synthetic disk failure'); END;")
+            .execute(&pool).await.unwrap();
+        assert!(TranscriptsRepository::save_transcript(&pool, "Synthetic", &[segment()], None, Some("meeting-123")).await.is_err());
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM meetings").fetch_one(&pool).await.unwrap();
+        assert_eq!(count, 0);
+        sqlx::raw_sql("DROP TRIGGER reject_transcript").execute(&pool).await.unwrap();
+        assert!(TranscriptsRepository::save_transcript(&pool, "Synthetic", &[segment()], None, Some("meeting-123")).await.is_ok());
     }
 }

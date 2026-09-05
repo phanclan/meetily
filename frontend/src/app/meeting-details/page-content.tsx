@@ -170,6 +170,7 @@ export default function PageContent({
   const summaryGeneration = useSummaryGeneration({
     meeting,
     transcripts: meetingData.transcripts,
+    notesText,
     modelConfig,
     isModelConfigLoading: false,
     selectedTemplate: templates.selectedTemplate,
@@ -421,7 +422,7 @@ export default function PageContent({
                         availableTemplates={templates.availableTemplates}
                         selectedTemplate={templates.selectedTemplate}
                         onTemplateSelect={templates.handleTemplateSelection}
-                        hasTranscripts={meetingData.transcripts.length > 0}
+                        hasTranscripts={meetingData.transcripts.length > 0 || !isNotesEmpty}
                         isModelConfigLoading={false}
                         onOpenModelSettings={handleRegisterModalOpen}
                         showPrimaryAction={Boolean(meetingData.aiSummary) || isSummaryGenerating}

@@ -67,7 +67,7 @@ fn derive_title_from_notes(notes_markdown: &str) -> Option<String> {
 
         let mut title = candidate;
         if title.len() > 96 {
-            title = title[..96].trim().to_string();
+            title = title.chars().take(96).collect::<String>().trim().to_string();
             if let Some(last_space) = title.rfind(' ') {
                 title.truncate(last_space);
             }
@@ -139,4 +139,18 @@ pub async fn move_meeting_notes<R: Runtime>(
     NotesRepository::move_notes(pool, &from_meeting_id, &to_meeting_id)
         .await
         .map_err(|e| format!("Failed to move notes: {}", e))
+}
+
+#[cfg(test)]
+mod quality_tests {
+    use super::derive_title_from_notes;
+
+    #[test]
+    fn quality_unicode_note_titles_are_truncated_at_character_boundaries() {
+        for text in [format!("{}é", "a".repeat(95)), "界".repeat(100), "🙂".repeat(100)] {
+            let title = derive_title_from_notes(&text).unwrap();
+            assert!(title.chars().count() <= 96);
+            assert!(text.starts_with(&title));
+        }
+    }
 }

@@ -13,7 +13,6 @@ import {
   Copy,
   Loader2,
   Mic,
-  Pause,
   Send,
   Sparkles,
   Square,
@@ -209,6 +208,18 @@ export default function QuickNotePage() {
   const autoStartRequestedRef = useRef(false);
   const consumedFreshTokenRef = useRef<string | null>(null);
   const titleSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const titleWritesRef = useRef<Promise<unknown>>(Promise.resolve());
+  const handleTitleChange = (title: string) => {
+    setNoteTitle(title);
+    if (!savedMeetingId) return;
+    const meetingId = savedMeetingId;
+    titleWritesRef.current = titleWritesRef.current.catch(() => {}).then(() =>
+      invoke('api_save_meeting_title', { meetingId, title: title.trim() || 'New note' })
+    ).catch(error => {
+      console.error('Failed to save meeting title:', error);
+      toast.error('Could not save the meeting title. Please retry.');
+    });
+  };
   const preSessionDraftRef = useRef<{ title: string; content: string } | null>(null);
   const noopSetRecording = () => {};
   const noopSetDisabled = () => {};
@@ -473,6 +484,7 @@ export default function QuickNotePage() {
   const summaryGeneration = useSummaryGeneration({
     meeting: summaryMeeting,
     transcripts: [],
+    notesText: noteText,
     modelConfig,
     isModelConfigLoading: false,
     selectedTemplate: templates.selectedTemplate,
@@ -635,7 +647,14 @@ export default function QuickNotePage() {
     }
   };
 
-  const handleResumeSession = async () => {
+  const handleNewRecording = async () => {
+    try {
+      await flushPendingSave(false);
+      await titleWritesRef.current;
+    } catch {
+      return;
+    }
+    clearMessages();
     const currentText = noteText;
     const normalizedTitle = noteTitle.trim() || 'New note';
     saveQuickNoteDraft(normalizedTitle, currentText);
@@ -650,10 +669,10 @@ export default function QuickNotePage() {
     setIsTranscriptOpen(true);
 
     try {
-      await invoke('request_recording_start', { source: 'quick_note_resume' });
+      await invoke('request_recording_start', { source: 'quick_note_new_recording' });
     } catch (error) {
-      console.error('Failed to resume quick note recording:', error);
-      toast.error('Failed to resume recording');
+      console.error('Failed to start new quick note recording:', error);
+      toast.error('Failed to start new recording');
     }
   };
 
@@ -770,10 +789,10 @@ export default function QuickNotePage() {
             {isPostRecording && (
               <Button
                 className="rounded-full bg-stone-900 text-white hover:bg-stone-800"
-                onClick={handleResumeSession}
+                onClick={handleNewRecording}
               >
-                <Pause className="h-4 w-4" />
-                Resume
+                <Mic className="h-4 w-4" />
+                New recording
               </Button>
             )}
           </div>
@@ -791,7 +810,7 @@ export default function QuickNotePage() {
                   <textarea
                     ref={titleRef}
                     value={noteTitle}
-                    onChange={(event) => setNoteTitle(event.target.value)}
+                    onChange={(event) => handleTitleChange(event.target.value)}
                     placeholder="New note"
                     rows={1}
                     className={`w-full resize-none overflow-hidden border-0 bg-transparent px-0 font-semibold tracking-tight text-stone-900 outline-none placeholder:text-stone-400 ${titleSizeClass}`}
@@ -854,7 +873,7 @@ export default function QuickNotePage() {
                         availableTemplates={templates.availableTemplates}
                         selectedTemplate={templates.selectedTemplate}
                         onTemplateSelect={templates.handleTemplateSelection}
-                        hasTranscripts={savedTranscriptCount > 0}
+                        hasTranscripts={savedTranscriptCount > 0 || !isNoteEmpty}
                         isModelConfigLoading={false}
                         onOpenModelSettings={handleRegisterModalOpen}
                         showPrimaryAction={Boolean(aiSummary) || isSummaryGenerating}
@@ -1086,7 +1105,7 @@ export default function QuickNotePage() {
                   <textarea
                     ref={titleRef}
                     value={noteTitle}
-                    onChange={(event) => setNoteTitle(event.target.value)}
+                    onChange={(event) => handleTitleChange(event.target.value)}
                     placeholder="New note"
                     rows={1}
                     className={`w-full resize-none overflow-hidden border-0 bg-transparent px-0 font-semibold tracking-tight text-stone-900 outline-none placeholder:text-stone-400 ${titleSizeClass}`}

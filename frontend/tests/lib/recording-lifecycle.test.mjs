@@ -55,7 +55,7 @@ function stopFixture({ failNotes = false } = {}) {
     '@/components/Sidebar/SidebarProvider': { useSidebar: () => ({ refetchMeetings: async () => {}, setCurrentMeeting: noop, setMeetings: noop, meetings: [], setIsMeetingActive: noop }) },
     '@/contexts/RecordingStateContext': { useRecordingState: () => ({ setStatus: noop }), RecordingStatus: { STOPPING: 'stopping', IDLE: 'idle', COMPLETED: 'completed', SAVING: 'saving', ERROR: 'error', PROCESSING_TRANSCRIPTS: 'processing' } },
     '@/services/transcriptService': { transcriptService: { getTranscriptionStatus: async () => ({ is_processing: false, chunks_in_queue: 0 }) } },
-    '@/services/storageService': { storageService: { saveMeeting: async (_title, received) => { assert.equal(received.length, 1); saves++; events.push('meeting'); return { meeting_id: 'meeting-a5ce2dc0-f470-485c-b35d-1b2bd0b49059' }; }, getMeeting: async () => ({ id: 'meeting-a5ce2dc0-f470-485c-b35d-1b2bd0b49059', title: 'Synthetic meeting' }) } },
+    '@/services/storageService': { storageService: { saveMeeting: async (_title, received, _folder, sourceId) => { assert.equal(sourceId, 'meeting-1'); assert.equal(received.length, 1); saves++; events.push('meeting'); return { meeting_id: 'meeting-a5ce2dc0-f470-485c-b35d-1b2bd0b49059' }; }, getMeeting: async () => ({ id: 'meeting-a5ce2dc0-f470-485c-b35d-1b2bd0b49059', title: 'Synthetic meeting' }) } },
     '@/lib/analytics': { default: new Proxy({}, { get: () => async () => {} }), __esModule: true },
     '@/lib/summary-language-preferences': { applyPinnedSummaryLanguageToMeeting: async () => true },
     '@/meetnola/ipc': { saveMeetingNotes: async args => { events.push('notes'); if (failNotes) throw new Error('disk full'); assert.equal(args.meetingId, 'meeting-a5ce2dc0-f470-485c-b35d-1b2bd0b49059'); assert.match(args.notesMarkdown, /Synthetic recovery note/); } },
@@ -207,3 +207,77 @@ test('Meetnola never checks or installs an upstream application update', async (
   assert.equal((await updateService.checkForUpdates(true)).available, false);
   await assert.rejects(updateService.downloadAndInstall({ download: unexpected, install: unexpected }), /verified fork build/);
 });
+
+
+for (const audioStatus of ['failed', 'partial', 'success']) {
+  test(`audio recovery ${audioStatus} preserves retry data unless completely recovered`, async () => {
+    const localStorage = storage();
+    const events = [];
+    const load = loader({
+      react: quietReact,
+      sonner: { toast: { error: noop, warning: noop } },
+      '@tauri-apps/api/core': { invoke: async cmd => {
+        events.push(cmd);
+        return { status: audioStatus };
+      } },
+      '@/services/indexedDBService': { indexedDBService: {
+        getMeetingMetadata: async () => ({ title: 'Synthetic', folderPath: '/synthetic/checkpoints' }),
+        getTranscripts: async () => [{ text: 'Synthetic transcript' }],
+        markMeetingSaved: async () => events.push('marked'),
+      } },
+      '@/services/storageService': { storageService: { saveMeeting: async (_t, _s, _p, sourceId) => {
+        assert.equal(sourceId, 'meeting-1'); return { meeting_id: 'meeting-recording-meeting-1' };
+      } } },
+      '@/lib/summary-language-preferences': { applyPinnedSummaryLanguageToMeeting: async () => {} },
+      '@/meetnola/ipc': { saveMeetingNotes: async () => {} },
+    }, { localStorage });
+    const notes = load('@/lib/liveMeetingNotes');
+    notes.writeLiveMeetingNotes('meeting-1', blocks);
+    const recovery = load('@/hooks/useTranscriptRecovery').useTranscriptRecovery();
+    if (audioStatus === 'success') {
+      await recovery.recoverMeeting('meeting-1');
+      assert.ok(events.includes('cleanup_checkpoints'));
+      assert.ok(events.includes('marked'));
+      assert.equal(notes.readLiveMeetingNotes('meeting-1'), null);
+    } else {
+      await assert.rejects(recovery.recoverMeeting('meeting-1'), /checkpoints were retained/);
+      assert.ok(!events.includes('cleanup_checkpoints'));
+      assert.ok(!events.includes('marked'));
+      assert.notEqual(notes.readLiveMeetingNotes('meeting-1'), null);
+    }
+  });
+}
+
+for (const source of ['notes', 'empty', 'fetch-error']) {
+  test(`summary generation handles ${source} without inventing transcript content`, async () => {
+    const requests = [];
+    const load = loader({
+      react: quietReact,
+      sonner: { toast: { error: noop, warning: noop, info: noop } },
+      '@/components/Sidebar/SidebarProvider': { useSidebar: () => ({ startSummaryPolling: noop }) },
+      '@tauri-apps/api/core': { invoke: async (cmd, args) => {
+        if (cmd === 'api_get_meeting_transcripts') {
+          if (source === 'fetch-error') throw new Error('synthetic unavailable database');
+          return { total_count: 0, transcripts: [] };
+        }
+        if (cmd === 'api_process_transcript') { requests.push(args); return { process_id: 'synthetic' }; }
+      } },
+      '@/lib/analytics': { default: new Proxy({}, { get: () => async () => {} }), __esModule: true },
+      '@/lib/utils': { isOllamaNotInstalledError: () => false },
+      '@/lib/summary-language-preferences': { readMeetingSummaryLanguage: async () => ({ language: 'en' }) },
+    });
+    const hook = load('@/hooks/meeting-details/useSummaryGeneration').useSummaryGeneration({
+      meeting: { id: 'synthetic', created_at: new Date().toISOString() }, transcripts: [],
+      notesText: source === 'empty' ? '' : 'Synthetic action: check the report.',
+      modelConfig: { provider: 'groq', model: 'synthetic', apiKey: 'synthetic' },
+      isModelConfigLoading: false, selectedTemplate: 'default', updateMeetingTitle: noop, setAiSummary: noop,
+    });
+    await hook.handleGenerateSummary('Enhance these notes');
+    await hook.handleRegenerateSummary();
+    if (source === 'notes') {
+      assert.equal(requests.length, 2);
+      assert.match(requests[0].text, /Meeting notes \(no transcript available\)/);
+      assert.match(requests[0].text, /check the report/);
+    } else assert.equal(requests.length, 0);
+  });
+}

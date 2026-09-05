@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { PartialBlock, Block } from "@blocknote/core";
 import { useCreateBlockNote } from "@blocknote/react";
 import { BlockNoteView } from "@blocknote/shadcn";
@@ -20,17 +20,36 @@ export default function Editor({ initialContent, onChange, editable = true }: Ed
     editable
   });
 
+  const lastContentRef = useRef(initialContent);
+  const replacingRef = useRef(false);
   const editor = useCreateBlockNote({
     initialContent: initialContent?.length ? initialContent as PartialBlock[] : undefined,
   });
 
   console.log('📝 EDITOR: BlockNote editor created successfully');
 
+  // Parent replacements (such as Clear) must update the mounted editor too.
+  useEffect(() => {
+    if (initialContent === lastContentRef.current) return;
+    lastContentRef.current = initialContent;
+    if (JSON.stringify(initialContent) === JSON.stringify(editor.document)) return;
+    replacingRef.current = true;
+    try {
+      editor.replaceBlocks(editor.document, initialContent?.length
+        ? initialContent as PartialBlock[]
+        : [{ type: "paragraph", content: [] }]);
+    } finally {
+      replacingRef.current = false;
+    }
+  }, [editor, initialContent]);
+
   // Handle content changes
   useEffect(() => {
     if (!onChange) return;
 
     const handleChange = () => {
+      if (replacingRef.current) return;
+      lastContentRef.current = editor.document;
       console.log('📝 EDITOR: Content changed, notifying parent...', {
         blocksCount: editor.document.length
       });

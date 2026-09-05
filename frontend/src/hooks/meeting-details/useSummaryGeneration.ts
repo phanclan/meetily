@@ -53,6 +53,7 @@ type SummaryStatus = 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'c
 interface UseSummaryGenerationProps {
   meeting: any;
   transcripts: Transcript[];
+  notesText?: string;
   modelConfig: ModelConfig;
   isModelConfigLoading: boolean;
   selectedTemplate: string;
@@ -65,6 +66,7 @@ interface UseSummaryGenerationProps {
 export function useSummaryGeneration({
   meeting,
   transcripts,
+  notesText = '',
   modelConfig,
   isModelConfigLoading,
   selectedTemplate,
@@ -429,7 +431,7 @@ export function useSummaryGeneration({
     } catch (error) {
       console.error('❌ Error fetching all transcripts:', error);
       toast.error('Failed to fetch transcripts for summary generation');
-      return [];
+      throw error;
     }
   }, []);
 
@@ -463,10 +465,12 @@ export function useSummaryGeneration({
 
     // CHANGE: Fetch ALL transcripts from database, not from pagination state
     console.log('📊 Fetching all transcripts for summary generation...');
-    const allTranscripts = await fetchAllTranscripts(meeting.id);
+    let allTranscripts: Transcript[];
+    try { allTranscripts = await fetchAllTranscripts(meeting.id); }
+    catch { return; }
 
-    if (!allTranscripts.length) {
-      const error_msg = 'No transcripts available for summary';
+    if (!allTranscripts.length && !notesText.trim()) {
+      const error_msg = 'No transcripts or notes available for summary';
       console.log(error_msg);
       toast.error(error_msg);
       return;
@@ -608,29 +612,37 @@ export function useSummaryGeneration({
       }
     }
 
-    const summaryPayload = buildSummaryTranscriptPayload(allTranscripts);
+    const summaryPayload = allTranscripts.length ? buildSummaryTranscriptPayload(allTranscripts) : {
+      transcriptText: `Meeting notes (no transcript available):\n${notesText.trim()}`,
+      transcriptTexts: [notesText.trim()],
+    };
 
     await processSummary({
       ...summaryPayload,
       customPrompt,
     });
-  }, [meeting.id, fetchAllTranscripts, buildSummaryTranscriptPayload, processSummary, modelConfig, isModelConfigLoading, selectedTemplate]);
+  }, [meeting.id, notesText, fetchAllTranscripts, buildSummaryTranscriptPayload, processSummary, modelConfig, isModelConfigLoading, selectedTemplate]);
 
   // Public API: Regenerate summary from the current saved transcript
   const handleRegenerateSummary = useCallback(async () => {
-    const allTranscripts = await fetchAllTranscripts(meeting.id);
+    let allTranscripts: Transcript[];
+    try { allTranscripts = await fetchAllTranscripts(meeting.id); }
+    catch { return; }
 
-    if (!allTranscripts.length) {
-      console.error('No transcripts available for regeneration');
-      toast.error('No transcripts available for summary regeneration');
+    if (!allTranscripts.length && !notesText.trim()) {
+      console.error('No transcripts or notes available for regeneration');
+      toast.error('No transcripts or notes available for summary regeneration');
       return;
     }
 
     await processSummary({
-      ...buildSummaryTranscriptPayload(allTranscripts),
+      ...(allTranscripts.length ? buildSummaryTranscriptPayload(allTranscripts) : {
+        transcriptText: `Meeting notes (no transcript available):\n${notesText.trim()}`,
+        transcriptTexts: [notesText.trim()],
+      }),
       isRegeneration: true
     });
-  }, [meeting.id, fetchAllTranscripts, buildSummaryTranscriptPayload, processSummary]);
+  }, [meeting.id, notesText, fetchAllTranscripts, buildSummaryTranscriptPayload, processSummary]);
 
   // Public API: Stop ongoing summary generation
   const handleStopGeneration = useCallback(async () => {

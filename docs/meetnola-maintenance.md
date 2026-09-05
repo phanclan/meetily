@@ -18,7 +18,9 @@ The Tauri app and Rust core remain authoritative. Meetnola's plugin owns notes, 
 
 Transcription uses local Parakeet or Whisper. Cloud transcription is unavailable in this recovery baseline; the Meetnola selector disables Groq and explains the limitation for existing cloud configurations. Stored credentials are retained. Summary providers remain separate from transcription; their live network behavior is not established by an offline recording test.
 
-Live notes are stored locally under the temporary IndexedDB recording ID (`meeting-<timestamp>`). The shared stop handler saves them to SQLite under the persisted meeting ID (`meeting-<UUID>`) before marking the recording saved. Interrupted recordings retain their draft for the existing recovery flow. Saved-note edits use the native notes API.
+Live notes are stored locally under the temporary IndexedDB recording ID (`meeting-<timestamp>`). The shared stop handler saves them to SQLite under a stable persisted meeting ID (`meeting-recording-<source ID>` for new recordings; older meetings retain their UUIDs) before marking the recording saved. Interrupted recordings retain their draft for the existing recovery flow. Saved-note edits use the native notes API. Save retries reuse the source recording ID instead of creating another meeting. Failed audio recovery keeps its recovery entry and checkpoints for another attempt.
+
+**New recording** starts a separate meeting carrying the current notes; it does not append to the previous transcript. Post-stop title edits persist immediately. **Enhance notes** can use notes alone when no transcript exists.
 
 ## Validation before promotion
 
@@ -36,6 +38,7 @@ From the repository root:
 
 ```sh
 cargo check --offline -p meetily --features meetnola
+cargo test --offline -p meetily --lib --features meetnola quality_
 git diff --check
 ```
 

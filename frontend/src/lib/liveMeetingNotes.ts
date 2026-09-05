@@ -1,6 +1,6 @@
 import type { Block } from '@blocknote/core';
 
-// IndexedDB uses meeting-<timestamp>; SQLite uses meeting-<UUID>.
+// IndexedDB uses meeting-<timestamp>; SQLite uses meeting-<UUID> or meeting-recording-<source ID>.
 export function isLiveMeetingId(id: string) {
   return /^meeting-\d+$/.test(id) || id.startsWith('session-');
 }

@@ -274,10 +274,12 @@ export function useRecordingStop(
         });
 
         try {
+          const liveId = currentMeetingId || sessionStorage.getItem('indexeddb_current_meeting_id');
           const responseData = await storageService.saveMeeting(
             meetingTitle || savedMeetingName || 'New Meeting',
             freshTranscripts,
-            folderPath
+            folderPath,
+            liveId,
           );
 
           const meetingId = responseData.meeting_id;
@@ -286,7 +288,6 @@ export function useRecordingStop(
             throw new Error('No meeting ID received from save operation');
           }
 
-          const liveId = currentMeetingId || sessionStorage.getItem('indexeddb_current_meeting_id');
           const liveNotes = liveId ? readLiveMeetingNotes(liveId) : null;
           if (liveNotes !== null) {
             await saveMeetingNotes({
