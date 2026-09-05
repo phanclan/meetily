@@ -676,6 +676,16 @@ export default function QuickNotePage() {
     }
   };
 
+  const handleGoHome = async () => {
+    try {
+      await flushPendingSave(false);
+      await titleWritesRef.current;
+      router.push('/');
+    } catch {
+      // Keep the editor open so a failed note save can be retried.
+    }
+  };
+
   const handleEnhanceNotes = () => {
     if (!savedMeetingId) return;
     setActiveSavedView('summary');
@@ -717,7 +727,7 @@ export default function QuickNotePage() {
         <div className="flex flex-wrap items-center justify-between gap-4">
           <button
             type="button"
-            onClick={() => router.push('/')}
+            onClick={() => void handleGoHome()}
             className="inline-flex items-center gap-2 rounded-full border border-stone-200/80 bg-white/65 px-4 py-2 text-sm font-medium text-stone-600 transition-colors hover:border-stone-300 hover:bg-white/80"
           >
             <ArrowLeft className="h-4 w-4" />

@@ -64,6 +64,10 @@ export default function Home() {
     Analytics.trackPageView('home');
   }, []);
 
+  useEffect(() => {
+    void refetchMeetings();
+  }, [refetchMeetings]);
+
   // Startup recovery check
   useEffect(() => {
     const performStartupChecks = async () => {
