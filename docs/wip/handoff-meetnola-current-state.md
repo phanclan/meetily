@@ -14,7 +14,7 @@ Scope: make drafting, recording entry, and reopened note editing predictable wit
 | Enhanced-note editing and explicit summary save | Preserve in this batch |
 | Recovery, transcript persistence, Parakeet, and Qwen | Preserve |
 
-Implemented on `codex/meetnola-note-workflow`. The existing local draft remains a single scratchpad; this batch does not introduce a separate note collection. The build badge was also moved to the bottom edge because it obscured **Start recording**.
+Implemented on `codex/meetnola-note-workflow` and consolidated into local `main` by fast-forward through `c5a3d78` on 2026-09-05. Nothing was pushed. The existing local draft remains a single scratchpad; this batch does not introduce a separate note collection. The build badge was also moved to the bottom edge because it obscured **Start recording**.
 
 Passed: TypeScript, 21 recording/workflow regression tests, 3 markdown tests, and native dev checks for **New note** / **Draft → Open** without recording, draft persistence, explicit recording with draft seeding, stop, post-stop editing, reopening, and immediate Home navigation after editing the reopened note/title. Synthetic evidence is **Meetnola reopened edit verified**. The build badge no longer overlaps the tested Home, recording, or saved-meeting actions. Tested at the current desktop window size; narrow layouts and packaged builds were not retested. Parakeet transcription and local Qwen enhancement settings are unchanged.
 
@@ -22,7 +22,7 @@ The follow-up batch adds notes-aware meeting questions/recipes, stored dates in 
 
 Navigation accessibility is implemented: named collapsed controls, a navigation landmark, selected/expanded states, keyboard-operable meeting rows, visible focus and row actions, focused search/meeting expansion, and focus return after closing the title dialog. TypeScript and all 22 workflow regression tests passed. Native dev checks passed for Tab/Enter meeting navigation, Escape from the title dialog, Space to collapse meetings with hidden rows removed from the tab order, and search expansion/clearing. This closes the six findings from the bounded design review; a full VoiceOver audit remains outside the verified coverage. Narrow-window checks are recorded below. Enhanced-note editing still uses its explicit save action.
 
-Current dev build: `20260905-1329-discovery` in `/private/tmp/meetnola Dev.app`, with frontend hot reload on port 3118, including the layout changes through `ae4bd26`. The temporary app contains its helper binaries and resources; strict ad-hoc signature verification passed. The design changes have not been merged into local `main` or pushed.
+Current dev build: `20260905-1329-discovery` in `/private/tmp/meetnola Dev.app`, with frontend hot reload on port 3118, including the timestamp fix through `c5a3d78`. The temporary app contains its helper binaries and resources; strict ad-hoc signature verification passed. This checkout is now on local `main`; the packaged tester remains at `20260905-ae4bd26`. Earlier no-merge statements below describe the state at each validation pass.
 
 ## Compact-window and package verification
 
