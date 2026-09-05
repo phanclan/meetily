@@ -80,9 +80,9 @@ export default function SettingsPage() {
   }, [activeTab]);
 
   return (
-    <div className="h-screen bg-[#fafaf8] flex flex-col">
+    <div className="h-screen bg-background flex flex-col">
       {/* Fixed Header */}
-      <div className="sticky top-0 z-10 bg-[#fafaf8] border-b border-stone-200">
+      <div className="sticky top-0 z-10 bg-background border-b border-stone-200">
         <div className="max-w-5xl mx-auto px-5 py-5 md:px-8">
           <div className="flex items-center gap-4">
             <button

@@ -563,7 +563,7 @@ const Sidebar: React.FC = () => {
     <>
     <nav
       aria-label="Main navigation"
-      className={`sticky top-0 h-screen flex-shrink-0 bg-white border-r border-stone-200 flex flex-col transition-all duration-300 overflow-hidden z-40 [&_button:focus-visible]:outline [&_button:focus-visible]:outline-2 [&_button:focus-visible]:outline-stone-700 [&_button:focus-visible]:-outline-offset-2 ${
+      className={`sticky top-0 h-screen flex-shrink-0 bg-background border-r border-stone-200 flex flex-col transition-all duration-300 overflow-hidden z-40 [&_button:focus-visible]:outline [&_button:focus-visible]:outline-2 [&_button:focus-visible]:outline-stone-700 [&_button:focus-visible]:-outline-offset-2 ${
         isCollapsed ? 'w-14' : 'w-64'
       }`}
     >

@@ -4,6 +4,14 @@ Last updated: 2026-09-05
 
 Current checkout: local `main`, including visual polish `42c9976` and title persistence `09859c3` by fast-forward. Continue work directly on `main`; branches and worktrees require an explicit request. Nothing was pushed. Earlier branch references below describe historical validation state.
 
+## Uniform surfaces and faster local Qwen
+
+The shell, Home, Settings, loading screen, and shared document page now use the existing white `bg-background` token; the native window background is white too. This supersedes the earlier warm-center treatment and removes the sidebar/title-bar mismatch. Navigation, editing, and semantic model-selection colors are preserved. Native Settings, Home, and saved-note views were checked after hot reload and native restart.
+
+Downloaded and selected `qwen3.5:4b-mlx` (4.0 GB download, NVFP4) in the existing Ollama provider. Selection persisted after restart. A synthetic three-bullet prompt through the app's OpenAI-compatible API took 45.02 seconds with default reasoning and 0.53 seconds with reasoning disabled; the existing `qwen3.6:35b-mlx` took 16.26 and 0.80 seconds respectively. These are individual short-prompt observations, not controlled throughput or long-meeting benchmarks. The shared native client now disables reasoning for canonical Ollama Qwen 3.5/3.6 requests. The in-app enhancement completed within the 9.4-second observation interval, but expanded sparse source notes with unsupported detail; summary grounding remains a quality follow-up, not a passed check. A focused in-app question correctly answered that the custom meeting title must be preserved.
+
+TypeScript, all 31 frontend workflow tests, the native provider/request serialization regression, native dev build, and strict ad-hoc signature verification passed. Regenerated stale Tauri dev-cache artifacts that referenced the removed recovery worktree. Current dev build is `20260905-1612-fast-qwen` in `/private/tmp/meetnola Dev.app`, with hot reload on port 3118. Local Parakeet is unchanged and recording is stopped. The standalone tester has not been rebuilt. Work remains on local `main`; nothing was pushed.
+
 ## Visual consistency pass
 
 Scope: address the six visual-review findings using the existing editor, navigation, Radix controls, and installed Markdown renderer. Keep a warm neutral surface with compact document controls; no provider, storage, or recording redesign.

@@ -214,7 +214,7 @@
 }
 /* Shared document surfaces for drafting, recording, and saved meetings. */
 @layer components {
-  .document-page { @apply h-screen overflow-y-auto bg-[#fafaf8] text-stone-900; }
+  .document-page { @apply h-screen overflow-y-auto bg-background text-stone-900; }
   .document-shell { @apply mx-auto flex min-h-full w-full max-w-6xl flex-col px-5 py-5 md:px-8; }
   .document-header { @apply w-full border-b border-stone-200 pb-4 pt-2; }
   .document-title { @apply w-full resize-none overflow-hidden border-0 bg-transparent px-0 text-2xl font-semibold leading-tight tracking-tight text-stone-900 outline-none placeholder:text-stone-400 md:text-3xl; }

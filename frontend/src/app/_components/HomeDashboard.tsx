@@ -151,7 +151,7 @@ export function HomeDashboard({
   });
 
   return (
-    <div className="flex-1 overflow-y-auto bg-[#fafaf8]">
+    <div className="flex-1 overflow-y-auto bg-background">
       <div className="mx-auto flex w-full max-w-5xl flex-col px-8 py-6">
 
         {/* Header */}

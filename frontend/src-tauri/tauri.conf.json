@@ -21,9 +21,9 @@
                 "theme": "Light",
                 "decorations": true,
                 "backgroundColor": [
-                    246,
-                    242,
-                    234,
+                    255,
+                    255,
+                    255,
                     255
                 ]
             }

@@ -25,6 +25,8 @@ pub struct ChatRequest {
     pub temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top_p: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<&'static str>,
 }
 
 // Generic structure for OpenAI-compatible API chat responses
@@ -240,6 +242,7 @@ pub async fn generate_summary(
             max_tokens: max_tokens_val,
             temperature: temperature_val,
             top_p: top_p_val,
+            reasoning_effort: meeting_reasoning_effort(provider, model_name),
         })
     } else {
         serde_json::json!(ClaudeRequest {
@@ -329,6 +332,47 @@ pub async fn generate_summary(
             .content
             .trim();
         Ok(content.to_string())
+    }
+}
+
+// Meeting summaries and questions need direct answers. Qwen enables reasoning by
+// default in Ollama; omitting this field can add thousands of hidden tokens.
+fn meeting_reasoning_effort(provider: &LLMProvider, model: &str) -> Option<&'static str> {
+    if provider == &LLMProvider::Ollama
+        && matches!(model.split(':').next(), Some("qwen3.5" | "qwen3.6"))
+    {
+        Some("none")
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod request_tests {
+    use super::*;
+
+    #[test]
+    fn meeting_requests_disable_qwen_reasoning_only_for_ollama() {
+        for (provider, model, expected) in [
+            (LLMProvider::Ollama, "qwen3.5:4b-mlx", Some("none")),
+            (LLMProvider::Ollama, "qwen3.6:35b-mlx", Some("none")),
+            (LLMProvider::Ollama, "llama3.2:3b", None),
+            (LLMProvider::CustomOpenAI, "qwen3.5:4b-mlx", None),
+            (LLMProvider::OpenAI, "gpt-4o", None),
+        ] {
+            let body = serde_json::to_value(ChatRequest {
+                model: model.into(),
+                messages: vec![],
+                max_tokens: None,
+                temperature: None,
+                top_p: None,
+                reasoning_effort: meeting_reasoning_effort(&provider, model),
+            }).unwrap();
+            assert_eq!(body.get("reasoning_effort").and_then(|v| v.as_str()), expected);
+            if expected.is_none() {
+                assert!(body.get("reasoning_effort").is_none());
+            }
+        }
     }
 }
 
