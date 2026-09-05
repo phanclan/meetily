@@ -8,6 +8,19 @@ import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateCon
 import { storageService } from '@/services/storageService';
 import { transcriptService } from '@/services/transcriptService';
 import Analytics from '@/lib/analytics';
+import { readLiveMeetingNotes, clearLiveMeetingNotes } from '@/lib/liveMeetingNotes';
+import { blocksToPlainText } from '@/lib/meetingNotes';
+import { saveMeetingNotes } from '@/meetnola/ipc';
+
+// The quick-note page and global tray handler both use this hook.
+let stopProcessing = false;
+
+interface RecordingStopOptions {
+  autoNavigate?: boolean;
+  showToast?: boolean;
+  onSaved?: (meetingId: string) => Promise<void> | void;
+}
+
 import {
   applyPinnedSummaryLanguageToMeeting,
   detectAndCacheSummaryLanguage,
@@ -16,7 +29,7 @@ import {
 type SummaryStatus = 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
 
 interface UseRecordingStopReturn {
-  handleRecordingStop: (callApi: boolean) => Promise<void>;
+  handleRecordingStop: (callApi: boolean, options?: RecordingStopOptions) => Promise<string | undefined>;
   isStopping: boolean;
   isProcessingTranscript: boolean;
   isSavingTranscript: boolean;
@@ -52,6 +65,7 @@ export function useRecordingStop(
   } = recordingState;
 
   const {
+    currentMeetingId,
     transcriptsRef,
     flushBuffer,
     clearTranscripts,
@@ -70,7 +84,7 @@ export function useRecordingStop(
   const router = useRouter();
 
   // Guard to prevent duplicate/concurrent stop calls (e.g., from UI and tray simultaneously)
-  const stopInProgressRef = useRef(false);
+  // Coordination is shared across hook instances through stopProcessing.
 
   // Promise to track recording-stopped event data (fixes race condition with recording-stop-complete)
   const recordingStoppedDataRef = useRef<Promise<void> | null>(null);
@@ -118,16 +132,17 @@ export function useRecordingStop(
   }, [router]);
 
   // Main recording stop handler
-  const handleRecordingStop = useCallback(async (isCallApi: boolean) => {
+  const handleRecordingStop = useCallback(async (isCallApi: boolean, options: RecordingStopOptions = {}) => {
+    let savedId: string | undefined;
     if (recordingStoppedDataRef.current) {
       await recordingStoppedDataRef.current;
     }
 
     // Guard: prevent duplicate/concurrent stop calls
-    if (stopInProgressRef.current) {
+    if (stopProcessing) {
       return;
     }
-    stopInProgressRef.current = true;
+    stopProcessing = true;
 
     // Set status to STOPPING immediately
     setStatus(RecordingStatus.STOPPING);
@@ -136,6 +151,12 @@ export function useRecordingStop(
     const stopStartTime = Date.now();
 
     try {
+      if (!isCallApi) {
+        setStatus(RecordingStatus.IDLE);
+        setIsMeetingActive(false);
+        setIsRecordingDisabled(false);
+        return;
+      }
       console.log('Post-stop processing (new implementation)...', {
         stop_initiated_at: new Date(stopStartTime).toISOString(),
         current_transcript_count: transcriptsRef.current.length
@@ -254,7 +275,7 @@ export function useRecordingStop(
 
         try {
           const responseData = await storageService.saveMeeting(
-            savedMeetingName || meetingTitle || 'New Meeting',  // PREFER savedMeetingName (backend source)
+            meetingTitle || savedMeetingName || 'New Meeting',
             freshTranscripts,
             folderPath
           );
@@ -264,6 +285,19 @@ export function useRecordingStop(
             console.error('No meeting_id in response:', responseData);
             throw new Error('No meeting ID received from save operation');
           }
+
+          const liveId = currentMeetingId || sessionStorage.getItem('indexeddb_current_meeting_id');
+          const liveNotes = liveId ? readLiveMeetingNotes(liveId) : null;
+          if (liveNotes !== null) {
+            await saveMeetingNotes({
+              meetingId,
+              notesMarkdown: blocksToPlainText(liveNotes),
+              notesJson: JSON.stringify(liveNotes),
+            });
+          }
+          await options.onSaved?.(meetingId);
+          if (liveId) clearLiveMeetingNotes(liveId);
+          savedId = meetingId;
 
           let shouldDetectSummaryLanguage = false;
           try {
@@ -323,7 +357,7 @@ export function useRecordingStop(
           setStatus(RecordingStatus.COMPLETED);
 
           // Show success toast with navigation option
-          toast.success('Recording saved successfully!', {
+          if (options.showToast !== false) toast.success('Recording saved successfully!', {
             description: `${freshTranscripts.length} transcript segments saved.`,
             action: {
               label: 'View Meeting',
@@ -336,7 +370,7 @@ export function useRecordingStop(
           });
 
           // Auto-navigate after a short delay with source parameter
-          setTimeout(() => {
+          if (options.autoNavigate !== false) setTimeout(() => {
             router.push(`/meeting-details?id=${meetingId}&source=recording`);
             clearTranscripts()
             Analytics.trackPageView('meeting_details');
@@ -411,6 +445,7 @@ export function useRecordingStop(
       setIsMeetingActive(false);
       // isRecording already set to false at function start
       setIsRecordingDisabled(false);
+      return savedId;
     } catch (error) {
       console.error('Error in handleRecordingStop:', error);
       setStatus(RecordingStatus.ERROR, error instanceof Error ? error.message : 'Unknown error');
@@ -418,12 +453,13 @@ export function useRecordingStop(
       setIsRecordingDisabled(false);
     } finally {
       // Always reset the guard flag when done
-      stopInProgressRef.current = false;
+      stopProcessing = false;
     }
   }, [
     setIsRecording,
     setIsRecordingDisabled,
     setStatus,
+    currentMeetingId,
     transcriptsRef,
     flushBuffer,
     clearTranscripts,
@@ -436,23 +472,6 @@ export function useRecordingStop(
     setIsMeetingActive,
     router,
   ]);
-
-  // Expose handleRecordingStop function to window for Rust callbacks
-  const handleRecordingStopRef = useRef(handleRecordingStop);
-  useEffect(() => {
-    handleRecordingStopRef.current = handleRecordingStop;
-  });
-
-  useEffect(() => {
-    (window as any).handleRecordingStop = (callApi: boolean = true) => {
-      handleRecordingStopRef.current(callApi);
-    };
-
-    // Cleanup on unmount
-    return () => {
-      delete (window as any).handleRecordingStop;
-    };
-  }, []);
 
   // Derive summaryStatus from RecordingStatus for backward compatibility
   const summaryStatus: SummaryStatus = status === RecordingStatus.PROCESSING_TRANSCRIPTS ? 'processing' : 'idle';

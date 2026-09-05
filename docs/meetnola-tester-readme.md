@@ -28,7 +28,7 @@ On first launch, the app will:
 6. Route you to **Settings → Summary** if no Gateway API key is present
 
 Recording works without a Gateway key. Summaries/Enhance need your Gateway API key (never baked into the build).
-Existing installs that already chose Groq keep that choice.
+Existing installs retain their settings and keys, but this recovery baseline supports local transcription only. If an existing install has Groq selected for transcription, choose **Parakeet** or **Local Whisper** and download a model before recording. Groq summary settings are separate.
 
 ## What You Need To Do
 1. Fix executable permissions if launch fails
@@ -117,3 +117,7 @@ If you used older internal builds that referenced `meetily-recordings`, the app 
 
 ## Where To Find Build Info
 Open **About** in the app to see the current channel and build ID.
+
+## Maintenance
+
+See [Meetnola maintenance](meetnola-maintenance.md) for the fork policy and validation required before promoting changes.

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
+import { isMeetnola } from '@/flavor';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Input } from './ui/input';
 import { Button } from './ui/button';
@@ -161,6 +162,11 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                     <h3 className="text-lg font-semibold text-gray-900">Transcript Settings</h3>
                 </div> */}
                 <div className="space-y-4 pb-6">
+                    {isMeetnola && !['localWhisper', 'parakeet'].includes(uiProvider) && (
+                        <Alert><AlertDescription>
+                            This build supports local transcription. Choose Parakeet or Local Whisper to record. Your saved cloud settings are retained.
+                        </AlertDescription></Alert>
+                    )}
                     <div>
                         <Label className="block text-sm font-medium text-gray-700 mb-1">
                             Transcript Model
@@ -185,7 +191,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 <SelectContent>
                                     <SelectItem value="parakeet">⚡ Parakeet (Recommended - Real-time / Accurate)</SelectItem>
                                     <SelectItem value="localWhisper">🏠 Local Whisper (High Accuracy)</SelectItem>
-                                    <SelectItem value="groq">☁️ Groq Whisper (Cloud - Fast)</SelectItem>
+                                    <SelectItem value="groq" disabled={isMeetnola}>☁️ Groq Whisper{isMeetnola ? " (Unavailable in this build)" : " (Cloud - Fast)"}</SelectItem>
                                     {/* <SelectItem value="deepgram">☁️ Deepgram (Backup)</SelectItem>
                                     <SelectItem value="elevenLabs">☁️ ElevenLabs</SelectItem>
                                     <SelectItem value="openai">☁️ OpenAI</SelectItem> */}

@@ -1,9 +1,13 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, describe, mock as nodeMock, test } from "node:test";
+import assert from "node:assert/strict";
+const mock = nodeMock.fn.bind(nodeMock);
+const originalConsoleError = console.error;
 import { blocksToMarkdownSafely } from "../../src/lib/blocknote-markdown";
 
 describe("blocksToMarkdownSafely", () => {
   afterEach(() => {
-    mock.restore();
+    nodeMock.restoreAll();
+    console.error = originalConsoleError;
   });
 
   test("returns markdown when conversion succeeds", async () => {
@@ -15,11 +19,11 @@ describe("blocksToMarkdownSafely", () => {
       source: "test-success",
     });
 
-    expect(result).toEqual({
+    assert.deepEqual(result, {
       markdown: "# Summary",
       ok: true,
     });
-    expect(editor.blocksToMarkdownLossy).toHaveBeenCalledTimes(1);
+    assert.equal(editor.blocksToMarkdownLossy.mock.callCount(), 1);
   });
 
   test("returns fallback markdown when conversion throws", async () => {
@@ -37,19 +41,19 @@ describe("blocksToMarkdownSafely", () => {
       fallbackMarkdown: "existing markdown",
     });
 
-    expect(result).toEqual({
+    assert.deepEqual(result, {
       markdown: "existing markdown",
       ok: false,
     });
-    expect(consoleError).toHaveBeenCalledTimes(1);
-    expect(consoleError).toHaveBeenCalledWith(
+    assert.equal(consoleError.mock.callCount(), 1);
+    assert.deepEqual(consoleError.mock.calls[0].arguments, [
       "Failed to convert BlockNote blocks to markdown",
       {
         source: "test-fallback",
         blocksCount: 1,
         error,
       },
-    );
+    ]);
   });
 
   test("omits markdown when conversion throws without fallback", async () => {
@@ -64,7 +68,7 @@ describe("blocksToMarkdownSafely", () => {
       source: "test-empty-fallback",
     });
 
-    expect(result).toEqual({
+    assert.deepEqual(result, {
       markdown: undefined,
       ok: false,
     });

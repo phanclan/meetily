@@ -26,9 +26,7 @@ export default function Home() {
   const recordingState = useRecordingState();
   const { status } = recordingState;
 
-  const { hasMicrophone, hasSystemAudio, isChecking: isCheckingPermissions } = usePermissionCheck({
-    deferMs: 1200,
-  });
+  const { hasMicrophone, hasSystemAudio, isChecking: isCheckingPermissions } = usePermissionCheck();
   const { refetchMeetings, meetings } = useSidebar();
   const { modals, messages, hideModal } = useModalState(transcriptModelConfig);
   const { openImportDialog } = useImportDialog();

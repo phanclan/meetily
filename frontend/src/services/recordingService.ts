@@ -16,6 +16,19 @@ export interface RecordingState {
   active_duration: number | null;
 }
 
+export interface StopRecordingResult {
+  status: 'complete' | 'partial';
+  reason: string | null;
+  chunks_remaining: number;
+  message: string;
+}
+
+export interface MeetingSession {
+  session_id: string;
+  title: string;
+  status: 'recording' | 'paused' | 'stopping' | 'processing_transcripts' | 'saving' | 'stopped' | 'saved' | 'partial' | 'error';
+}
+
 export interface RecordingStoppedPayload {
   message: string;
   folder_path?: string;
@@ -83,8 +96,8 @@ export class RecordingService {
    * @param savePath - Path to save audio file
    * @returns Promise<void>
    */
-  async stopRecording(savePath: string): Promise<void> {
-    return invoke('stop_recording', {
+  async stopRecording(savePath: string): Promise<StopRecordingResult> {
+    return invoke<StopRecordingResult>('stop_recording', {
       args: { save_path: savePath }
     });
   }
@@ -103,6 +116,14 @@ export class RecordingService {
    */
   async resumeRecording(): Promise<void> {
     return invoke('resume_recording');
+  }
+
+  async getMeetingSession(): Promise<MeetingSession | null> {
+    return invoke<MeetingSession | null>('get_meeting_session');
+  }
+
+  async updateMeetingSessionTitle(title: string): Promise<void> {
+    return invoke('update_meeting_session_title', { title });
   }
 
   // Event Listeners

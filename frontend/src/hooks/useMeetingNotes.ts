@@ -3,10 +3,13 @@ import { getMeetingNotes, saveMeetingNotes } from '@/meetnola/ipc';
 import type { Block } from '@blocknote/core';
 import { blocksToPlainText, parseStoredMeetingNotesJson } from '@/lib/meetingNotes';
 
+import { isLiveMeetingId, readLiveMeetingNotes, writeLiveMeetingNotes } from '@/lib/liveMeetingNotes';
+import { toast } from 'sonner';
+
 const DEBOUNCE_MS = 2000;
 
 function isPersistedMeetingId(meetingId: string | null) {
-  return Boolean(meetingId && !meetingId.startsWith('session-'));
+  return Boolean(meetingId && !isLiveMeetingId(meetingId));
 }
 
 export function useMeetingNotes(meetingId: string | null) {
@@ -16,6 +19,7 @@ export function useMeetingNotes(meetingId: string | null) {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestBlocksRef = useRef<Block[]>([]);
   const hasPendingSaveRef = useRef(false);
+  const writesRef = useRef<Promise<void>>(Promise.resolve());
 
   const flushSave = useCallback(async (
     blocksToSave: Block[],
@@ -23,6 +27,7 @@ export function useMeetingNotes(meetingId: string | null) {
     trackState = true,
   ) => {
     if (!isPersistedMeetingId(meetingIdToSave)) {
+      writeLiveMeetingNotes(meetingIdToSave, blocksToSave);
       return;
     }
 
@@ -30,13 +35,18 @@ export function useMeetingNotes(meetingId: string | null) {
       setIsSaving(true);
     }
     try {
-      await saveMeetingNotes({
+      const write = writesRef.current.catch(() => {}).then(() => saveMeetingNotes({
         meetingId: meetingIdToSave,
         notesMarkdown: blocksToPlainText(blocksToSave),
         notesJson: JSON.stringify(blocksToSave),
-      });
+      }));
+      writesRef.current = write;
+      await write;
+      if (latestBlocksRef.current === blocksToSave) hasPendingSaveRef.current = false;
     } catch (err) {
       console.error('Failed to save notes:', err);
+      toast.error('Notes could not be saved. Please retry before leaving.');
+      throw err;
     } finally {
       if (trackState) {
         setIsSaving(false);
@@ -55,6 +65,9 @@ export function useMeetingNotes(meetingId: string | null) {
     }
 
     if (!isPersistedMeetingId(meetingId)) {
+      const restored = readLiveMeetingNotes(meetingId) ?? [];
+      setBlocks(restored);
+      latestBlocksRef.current = restored;
       setIsReady(true);
       hasPendingSaveRef.current = false;
       return;
@@ -78,8 +91,8 @@ export function useMeetingNotes(meetingId: string | null) {
       })
       .catch(() => {
         if (cancelled) return;
-        setBlocks([]);
-        setIsReady(true);
+        toast.error('Could not load saved notes. Reopen this meeting to retry.');
+        setIsReady(false);
       });
 
     return () => {
@@ -93,23 +106,25 @@ export function useMeetingNotes(meetingId: string | null) {
 
       setBlocks(updatedBlocks);
       latestBlocksRef.current = updatedBlocks;
+      if (isLiveMeetingId(meetingId)) {
+        writeLiveMeetingNotes(meetingId, updatedBlocks);
+        return;
+      }
 
       if (debounceRef.current) {
         clearTimeout(debounceRef.current);
         debounceRef.current = null;
       }
 
+      hasPendingSaveRef.current = true;
       if (immediate) {
-        hasPendingSaveRef.current = false;
-        void flushSave(updatedBlocks, meetingId);
+        void flushSave(updatedBlocks, meetingId).catch(() => {});
         return;
       }
 
-      hasPendingSaveRef.current = true;
       debounceRef.current = setTimeout(async () => {
-        await flushSave(updatedBlocks, meetingId);
         debounceRef.current = null;
-        hasPendingSaveRef.current = false;
+        await flushSave(updatedBlocks, meetingId).catch(() => {});
       }, DEBOUNCE_MS);
     },
     [flushSave, meetingId],
@@ -137,7 +152,6 @@ export function useMeetingNotes(meetingId: string | null) {
       debounceRef.current = null;
     }
 
-    hasPendingSaveRef.current = false;
     await flushSave(latestBlocksRef.current, meetingId, trackState);
   }, [flushSave, meetingId]);
 
@@ -149,7 +163,7 @@ export function useMeetingNotes(meetingId: string | null) {
       }
 
       if (meetingId && hasPendingSaveRef.current) {
-        void flushSave(latestBlocksRef.current, meetingId, false);
+        void flushSave(latestBlocksRef.current, meetingId, false).catch(() => {});
       }
     };
   }, [flushSave, meetingId]);

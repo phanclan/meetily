@@ -27,7 +27,7 @@ export function RecordingStartProvider({
   const recordingState = useRecordingState();
   const startRequestInFlightRef = useRef(false);
   const noop = () => {};
-  const { handleRecordingStartRequest } = useRecordingStart(
+  const { handleRecordingStart } = useRecordingStart(
     recordingState.isRecording,
     noop,
   );
@@ -40,6 +40,7 @@ export function RecordingStartProvider({
 
   useEffect(() => {
     let unlistenFn: (() => void) | undefined;
+    let cancelled = false;
 
     const setupListener = async () => {
       try {
@@ -65,16 +66,16 @@ export function RecordingStartProvider({
             startRequestInFlightRef.current = true;
 
             try {
-              await handleRecordingStartRequest(
-                event.payload?.source || 'global_request',
-              );
+              await handleRecordingStart();
             } catch (error) {
               const message = error instanceof Error ? error.message : String(error);
               toast.error('Failed to start recording', { description: message });
+            } finally {
               startRequestInFlightRef.current = false;
             }
           },
         );
+        if (cancelled) safelyUnlisten(unlistenFn, 'recording-start-provider');
       } catch (error) {
         console.error(
           '[RecordingStartProvider] Failed to set up event listener:',
@@ -86,10 +87,11 @@ export function RecordingStartProvider({
     setupListener();
 
     return () => {
+      cancelled = true;
       safelyUnlisten(unlistenFn, 'recording-start-provider');
     };
   }, [
-    handleRecordingStartRequest,
+    handleRecordingStart,
     isOnboardingVisible,
     recordingState.isRecording,
     recordingState.status,

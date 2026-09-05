@@ -6,7 +6,6 @@ import { motion } from 'framer-motion';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { appDataDir } from '@tauri-apps/api/path';
 import { invoke } from '@tauri-apps/api/core';
-import { saveMeetingNotes } from '@/meetnola/ipc';
 import {
   ArrowLeft,
   CheckCircle2,
@@ -176,7 +175,7 @@ export default function QuickNotePage() {
     meetingTitle,
     setMeetingTitle,
     transcripts,
-    clearTranscripts,
+    transcriptsRef,
   } = useTranscripts();
   const { modelConfig, setModelConfig } = useConfig();
   const templates = useTemplates();
@@ -245,12 +244,11 @@ export default function QuickNotePage() {
     setActiveSavedView('notes');
     setHydratedSessionId(null);
     setAiSummary(null);
-    clearTranscripts();
-    setNoteTitle(draft.title);
+    setNoteTitle(currentMeetingId ? meetingTitle : draft.title);
     setDraftContent(draft.content);
     setUpdatedAt(draft.updatedAt);
     setHasLoadedDraft(true);
-  }, [clearTranscripts, freshToken]);
+  }, [freshToken]);
 
   useEffect(() => {
     if (currentMeetingId) return;
@@ -282,7 +280,7 @@ export default function QuickNotePage() {
       const activeSession = await recordingService.getMeetingSession().catch(() => null);
       if (cancelled) return;
 
-      if (activeSession || recordingState.isRecording) {
+      if ((activeSession && ['recording', 'paused', 'stopping', 'processing_transcripts', 'saving'].includes(activeSession.status)) || recordingState.isRecording) {
         return;
       }
 
@@ -608,11 +606,6 @@ export default function QuickNotePage() {
 
     setIsStoppingSession(true);
     try {
-      const snapshotBlocks = blocks.length > 0
-        ? blocks
-        : (draftContent.trim() ? plainTextToBlocks(draftContent) : []);
-      const snapshotMarkdown = blocksToPlainText(snapshotBlocks);
-
       await flushPendingSave(false);
 
       const dataDir = await appDataDir();
@@ -623,18 +616,8 @@ export default function QuickNotePage() {
         autoNavigate: false,
         showToast: false,
         onSaved: async (nextMeetingId) => {
-          if (snapshotMarkdown.trim().length > 0 || snapshotBlocks.length > 0) {
-            await saveMeetingNotes({
-              meetingId: nextMeetingId,
-              notesMarkdown: snapshotMarkdown,
-              notesJson: JSON.stringify(snapshotBlocks),
-            }).catch((error) => {
-              console.error('Failed to persist quick note blocks to saved meeting:', error);
-            });
-          }
-
           setSavedMeetingId(nextMeetingId);
-          setSavedTranscriptCount(transcripts.length);
+          setSavedTranscriptCount(transcriptsRef.current.length);
           setIsTranscriptOpen(false);
           clearQuickNoteDraft();
           preSessionDraftRef.current = null;
@@ -656,6 +639,8 @@ export default function QuickNotePage() {
     const currentText = noteText;
     const normalizedTitle = noteTitle.trim() || 'New note';
     saveQuickNoteDraft(normalizedTitle, currentText);
+    setDraftContent(currentText);
+    setAiSummary(null);
     preSessionDraftRef.current = {
       title: normalizedTitle,
       content: currentText,
@@ -906,7 +891,6 @@ export default function QuickNotePage() {
                       initialContent={blocks}
                       onChange={handleEditorChange}
                       editable={true}
-                      showMoveControls={false}
                     />
                   </div>
                 ) : isNoteEmpty ? (
@@ -1125,7 +1109,6 @@ export default function QuickNotePage() {
                       initialContent={blocks}
                       onChange={handleEditorChange}
                       editable={true}
-                      showMoveControls={true}
                     />
                   </div>
                 ) : shouldRenderPendingTextarea ? (

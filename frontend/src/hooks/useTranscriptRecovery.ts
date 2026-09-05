@@ -11,6 +11,9 @@ import { indexedDBService, MeetingMetadata, StoredTranscript } from '@/services/
 import { storageService } from '@/services/storageService';
 import { applyPinnedSummaryLanguageToMeeting } from '@/lib/summary-language-preferences';
 import { toast } from 'sonner';
+import { readLiveMeetingNotes, clearLiveMeetingNotes } from '@/lib/liveMeetingNotes';
+import { blocksToPlainText } from '@/lib/meetingNotes';
+import { saveMeetingNotes } from '@/meetnola/ipc';
 
 interface AudioRecoveryStatus {
   status: string; // "success" | "partial" | "failed" | "none"
@@ -118,8 +121,9 @@ export function useTranscriptRecovery(): UseTranscriptRecoveryReturn {
 
       // 2. Load all transcripts
       const transcripts = await loadMeetingTranscripts(meetingId);
-      if (transcripts.length === 0) {
-        throw new Error('No transcripts found for this meeting');
+      const liveNotes = readLiveMeetingNotes(meetingId);
+      if (transcripts.length === 0 && !blocksToPlainText(liveNotes ?? []).trim()) {
+        throw new Error('No transcripts or notes found for this meeting');
       }
 
       // 3. Check for folder path
@@ -183,6 +187,13 @@ export function useTranscriptRecovery(): UseTranscriptRecoveryReturn {
       );
 
       const savedMeetingId = saveResponse.meeting_id;
+      if (liveNotes !== null) {
+        await saveMeetingNotes({
+          meetingId: savedMeetingId,
+          notesMarkdown: blocksToPlainText(liveNotes),
+          notesJson: JSON.stringify(liveNotes),
+        });
+      }
 
       try {
         await applyPinnedSummaryLanguageToMeeting(savedMeetingId);
@@ -195,6 +206,7 @@ export function useTranscriptRecovery(): UseTranscriptRecoveryReturn {
 
       // 7. Mark as saved in IndexedDB
       await indexedDBService.markMeetingSaved(meetingId);
+      clearLiveMeetingNotes(meetingId);
 
 
       // 8. Clean up checkpoint files
