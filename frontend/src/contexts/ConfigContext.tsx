@@ -8,9 +8,9 @@ import { invoke } from '@tauri-apps/api/core';
 import Analytics from '@/lib/analytics';
 import { BetaFeatures, BetaFeatureKey, loadBetaFeatures, saveBetaFeatures } from '@/types/betaFeatures';
 import {
-  DEFAULT_GROQ_SUMMARY_MODEL,
-  DEFAULT_GROQ_TRANSCRIPT_MODEL,
+  DEFAULT_SUMMARY_MODEL,
   DEFAULT_SUMMARY_PROVIDER,
+  DEFAULT_TRANSCRIPT_MODEL,
   DEFAULT_TRANSCRIPT_PROVIDER,
   DEFAULT_WHISPER_MODEL,
 } from '@/constants/modelDefaults';
@@ -120,7 +120,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   // Model configuration state
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
     provider: DEFAULT_SUMMARY_PROVIDER,
-    model: DEFAULT_GROQ_SUMMARY_MODEL,
+    model: DEFAULT_SUMMARY_MODEL,
     whisperModel: DEFAULT_WHISPER_MODEL,
     ollamaEndpoint: null
   });
@@ -128,7 +128,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   // Transcript model configuration state
   const [transcriptModelConfig, setTranscriptModelConfig] = useState<TranscriptModelProps>({
     provider: DEFAULT_TRANSCRIPT_PROVIDER,
-    model: DEFAULT_GROQ_TRANSCRIPT_MODEL,
+    model: DEFAULT_TRANSCRIPT_MODEL,
     apiKey: null
   });
 
@@ -245,7 +245,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
           console.log('[ConfigContext] Loaded saved transcript config:', { provider: config.provider, model: config.model, hasKey: !!config.apiKey });
           setTranscriptModelConfig({
             provider: config.provider || DEFAULT_TRANSCRIPT_PROVIDER,
-            model: config.model || DEFAULT_GROQ_TRANSCRIPT_MODEL,
+            model: config.model || DEFAULT_TRANSCRIPT_MODEL,
             apiKey: config.apiKey || null
           });
         }

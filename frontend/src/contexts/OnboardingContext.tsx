@@ -4,7 +4,7 @@ import React, { createContext, useContext, useState, useEffect, useRef, useCallb
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type { PermissionStatus, OnboardingPermissions } from '@/types/onboarding';
-import { DEFAULT_GROQ_SUMMARY_MODEL } from '@/constants/modelDefaults';
+import { DEFAULT_SUMMARY_MODEL } from '@/constants/modelDefaults';
 
 const PARAKEET_MODEL = 'parakeet-tdt-0.6b-v3-int8';
 
@@ -84,7 +84,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
     totalMb: 0,
     speedMbps: 0,
   });
-  const [selectedSummaryModel, setSelectedSummaryModel] = useState<string>(DEFAULT_GROQ_SUMMARY_MODEL);
+  const [selectedSummaryModel, setSelectedSummaryModel] = useState<string>(DEFAULT_SUMMARY_MODEL);
   const [databaseExists, setDatabaseExists] = useState(false);
   const [isBackgroundDownloading, setIsBackgroundDownloading] = useState(false);
 
@@ -392,7 +392,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
         saveTimeoutRef.current = undefined;
       }
 
-      // Onboarding defaults to Groq and keeps local models opt-in.
+      // Defaults come from the backend (Meetnola: local STT + Gateway; Meetily: Groq-first).
       await invoke('complete_onboarding', {
         model: selectedSummaryModel,
       });

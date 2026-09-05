@@ -10,7 +10,7 @@ import { LoaderIcon } from "lucide-react";
 import { useConfig } from "@/contexts/ConfigContext";
 import { usePaginatedTranscripts } from "@/hooks/usePaginatedTranscripts";
 import {
-  DEFAULT_GROQ_SUMMARY_MODEL,
+  DEFAULT_SUMMARY_MODEL,
   DEFAULT_SUMMARY_PROVIDER,
   DEFAULT_WHISPER_MODEL,
 } from "@/constants/modelDefaults";
@@ -99,7 +99,7 @@ function MeetingDetailsContent() {
       console.log('💾 DB empty, applying Groq default summary config');
       await invoke('api_save_model_config', {
         provider: DEFAULT_SUMMARY_PROVIDER,
-        model: DEFAULT_GROQ_SUMMARY_MODEL,
+        model: DEFAULT_SUMMARY_MODEL,
         whisperModel: DEFAULT_WHISPER_MODEL,
         apiKey: null,
         ollamaEndpoint: null,

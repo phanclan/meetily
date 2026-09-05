@@ -18,9 +18,9 @@ import { useImportDialog } from '@/contexts/ImportDialogContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { safelyUnlisten } from '@/lib/tauriEvents';
 import {
-  DEFAULT_GROQ_SUMMARY_MODEL,
-  DEFAULT_GROQ_TRANSCRIPT_MODEL,
+  DEFAULT_SUMMARY_MODEL,
   DEFAULT_SUMMARY_PROVIDER,
+  DEFAULT_TRANSCRIPT_MODEL,
   DEFAULT_TRANSCRIPT_PROVIDER,
   DEFAULT_WHISPER_MODEL,
 } from '@/constants/modelDefaults';
@@ -77,14 +77,14 @@ const Sidebar: React.FC = () => {
   const [showModelSettings, setShowModelSettings] = useState(false);
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
     provider: DEFAULT_SUMMARY_PROVIDER,
-    model: DEFAULT_GROQ_SUMMARY_MODEL,
+    model: DEFAULT_SUMMARY_MODEL,
     whisperModel: DEFAULT_WHISPER_MODEL,
     apiKey: null,
     ollamaEndpoint: null
   });
   const [transcriptModelConfig, setTranscriptModelConfig] = useState<TranscriptModelProps>({
     provider: DEFAULT_TRANSCRIPT_PROVIDER,
-    model: DEFAULT_GROQ_TRANSCRIPT_MODEL,
+    model: DEFAULT_TRANSCRIPT_MODEL,
   });
   const [settingsSaveSuccess, setSettingsSaveSuccess] = useState<boolean | null>(null);
   const isHomePage = pathname === '/';

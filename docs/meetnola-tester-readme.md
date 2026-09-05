@@ -22,11 +22,13 @@ On first launch, the app will:
 
 1. Create its own clean app-data folder under `~/Library/Application Support/com.meetnola.tester/`
 2. Start onboarding
-3. Default both **Transcription** and **Summary** to **Groq**
-4. Skip local model downloads during onboarding
-5. Route you to **Settings -> Transcription** if no Groq API key is present
+3. Default **Transcription** to local **Parakeet** (Whisper also available)
+4. Default **Summary / Enhance** to **Vercel AI Gateway** via Custom OpenAI (`https://ai-gateway.vercel.sh/v1`, model `openai/gpt-4o-mini`)
+5. Skip local model downloads during onboarding (download Parakeet later from Settings)
+6. Route you to **Settings → Summary** if no Gateway API key is present
 
-One Groq key is enough for both transcription and summary.
+Recording works without a Gateway key. Summaries/Enhance need your Gateway API key (never baked into the build).
+Existing installs that already chose Groq keep that choice.
 
 ## What You Need To Do
 1. Fix executable permissions if launch fails
@@ -64,9 +66,9 @@ One Groq key is enough for both transcription and summary.
    - **Microphone**
    - **Audio Capture** if you want system audio recording
 
-5. Configure Groq
+5. Configure Vercel AI Gateway (summaries)
    - Open **Settings -> Transcription**
-   - Paste a Groq API key
+   - Open Settings → Summary, choose Custom Server / AI Gateway (or apply the Gateway preset), paste your Gateway API key
 
 Groq’s free tier is enough for basic testing.
 
@@ -75,9 +77,10 @@ Groq’s free tier is enough for basic testing.
 
 ## Defaults
 - Analytics: **off by default**
-- Summary provider: **Groq**
-- Transcript provider: **Groq**
-- Local models: optional, not downloaded during onboarding
+- Summary provider: **custom-openai** → Vercel AI Gateway (`openai/gpt-4o-mini`)
+- Transcript provider: **parakeet** (local)
+- Local STT models: optional download after onboarding
+- Gateway API key: required only for summaries/Enhance
 
 ## Recordings Folder
 New default recordings go to:

@@ -4,7 +4,7 @@ import { invoke as invokeTauri } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import Analytics from '@/lib/analytics';
 import {
-  DEFAULT_GROQ_SUMMARY_MODEL,
+  DEFAULT_SUMMARY_MODEL,
   DEFAULT_SUMMARY_PROVIDER,
   DEFAULT_WHISPER_MODEL,
 } from '@/constants/modelDefaults';
@@ -17,7 +17,7 @@ export function useModelConfiguration({ serverAddress }: UseModelConfigurationPr
   // Groq-first fallbacks keep the UI coherent until the DB config loads.
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
     provider: DEFAULT_SUMMARY_PROVIDER,
-    model: DEFAULT_GROQ_SUMMARY_MODEL,
+    model: DEFAULT_SUMMARY_MODEL,
     whisperModel: DEFAULT_WHISPER_MODEL
   });
   const [isLoading, setIsLoading] = useState(true);

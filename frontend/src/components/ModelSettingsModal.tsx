@@ -29,6 +29,11 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn, isOllamaNotInstalledError } from '@/lib/utils';
 import { toast } from 'sonner';
+import { isMeetnola } from '@/flavor';
+import {
+  MEETNOLA_GATEWAY_ENDPOINT,
+  MEETNOLA_GATEWAY_MODEL,
+} from '@/constants/modelDefaults';
 
 export interface ModelConfig {
   provider: 'ollama' | 'groq' | 'claude' | 'openai' | 'openrouter' | 'builtin-ai' | 'custom-openai';
@@ -1020,9 +1025,16 @@ export function ModelSettingsModal({
                       setCustomMaxTokens(config.maxTokens?.toString() || '');
                       setCustomTemperature(config.temperature?.toString() || '');
                       setCustomTopP(config.topP?.toString() || '');
+                    } else if (isMeetnola) {
+                      setCustomOpenAIEndpoint(MEETNOLA_GATEWAY_ENDPOINT);
+                      setCustomOpenAIModel(MEETNOLA_GATEWAY_MODEL);
                     }
                   }).catch((err) => {
                     console.error('Failed to load custom OpenAI config:', err);
+                    if (isMeetnola) {
+                      setCustomOpenAIEndpoint(MEETNOLA_GATEWAY_ENDPOINT);
+                      setCustomOpenAIModel(MEETNOLA_GATEWAY_MODEL);
+                    }
                   });
                 }
               }}
@@ -1033,7 +1045,7 @@ export function ModelSettingsModal({
               <SelectContent className="max-h-64 overflow-y-auto">
                 <SelectItem value="builtin-ai">Built-in AI (Offline, No API needed)</SelectItem>
                 <SelectItem value="claude">Claude</SelectItem>
-                <SelectItem value="custom-openai">Custom Server (OpenAI)</SelectItem>
+                <SelectItem value="custom-openai">{isMeetnola ? 'Vercel AI Gateway / Custom OpenAI' : 'Custom Server (OpenAI)'}</SelectItem>
                 <SelectItem value="groq">Groq</SelectItem>
                 <SelectItem value="ollama">Ollama</SelectItem>
                 <SelectItem value="openai">OpenAI</SelectItem>
@@ -1179,6 +1191,25 @@ export function ModelSettingsModal({
         {/* Custom OpenAI Configuration Section */}
         {modelConfig.provider === 'custom-openai' && (
           <div className="space-y-4 border-t pt-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setCustomOpenAIEndpoint(MEETNOLA_GATEWAY_ENDPOINT);
+                  setCustomOpenAIModel(MEETNOLA_GATEWAY_MODEL);
+                  toast.success('Applied Vercel AI Gateway preset', {
+                    description: 'Paste your Gateway API key below, then Save. Provider is set to custom-openai.',
+                  });
+                }}
+              >
+                Vercel AI Gateway preset
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                Fills endpoint + model ({MEETNOLA_GATEWAY_MODEL}). Key stays in settings only.
+              </p>
+            </div>
             <div>
               <Label htmlFor="custom-endpoint">Endpoint URL *</Label>
               <Input
@@ -1208,13 +1239,21 @@ export function ModelSettingsModal({
             </div>
 
             <div>
-              <Label htmlFor="custom-api-key">API Key (optional)</Label>
+              <Label htmlFor="custom-api-key">
+                {customOpenAIEndpoint.trim().replace(/\/$/, '').toLowerCase() === MEETNOLA_GATEWAY_ENDPOINT.toLowerCase()
+                  ? 'Vercel AI Gateway API Key *'
+                  : 'API Key (optional)'}
+              </Label>
               <Input
                 id="custom-api-key"
                 type="password"
                 value={customOpenAIApiKey}
                 onChange={(e) => setCustomOpenAIApiKey(e.target.value)}
-                placeholder="Leave empty if not required"
+                placeholder={
+                  customOpenAIEndpoint.trim().replace(/\/$/, '').toLowerCase() === MEETNOLA_GATEWAY_ENDPOINT.toLowerCase()
+                    ? 'AI_GATEWAY_API_KEY (never commit / never NEXT_PUBLIC_*)'
+                    : 'Leave empty if not required'
+                }
                 className="mt-1"
               />
             </div>
