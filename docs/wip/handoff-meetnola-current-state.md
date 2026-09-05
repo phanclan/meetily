@@ -4,6 +4,21 @@ Last updated: 2026-09-05
 
 Current checkout: local `main`, including visual polish `42c9976` and title persistence `09859c3` by fast-forward. Continue work directly on `main`; branches and worktrees require an explicit request. Nothing was pushed. Earlier branch references below describe historical validation state.
 
+## Granola comparison: meeting browsing and note workspace
+
+Inspected the running Granola Home, saved note, and enhanced-note selector through native UI without editing Granola data. Adopted its date-grouped meeting list, restrained reading width, and always-reachable meeting composer. Keep Meetnola's white shell and local providers. Calendar integration, shared workspaces, and cross-meeting chat are outside this batch; they need separate data and product decisions.
+
+| Existing behavior | Decision and result |
+| --- | --- |
+| Home navigation, title search, all/recent views, draft, recovery, and import | Preserve; show search on Home, group by local calendar date, use compact rows, and disclose system details below the list. Recovery/device problems keep details expanded. |
+| Saved original/enhanced notes, title autosave, explicit enhanced-note Save | Preserve; narrow the reading column, align editor text with the title, and remove the redundant Saved meeting label. |
+| Meeting questions, recipes, Markdown answers, and clear | Preserve; keep a compact input dock visible while the document scrolls. Enter submits; Escape collapses answers and restores input focus. |
+| Transcript timestamps, pagination, refresh, and copy | Preserve; add case-insensitive phrase search with highlighting, count, empty state, clear, and retry. Active search loads the complete transcript through the existing native API when the page is only partially loaded. Closing the sheet restores focus to Transcript. |
+
+Passed: TypeScript, 36 workflow regression tests, three markdown tests, production frontend build, and diff validation. New regression coverage includes date/year boundaries and invalid dates, literal punctuation/HTML-safe highlights, later-page matches, retry after read failure, and stale-response isolation. Native checks covered Home search across all 45 meetings, no-match/clear, draft entry without recording, highlighted transcript matches/timestamps, long enhanced-note scrolling with the dock visible, a grounded local Qwen answer, and Escape focus return. Captures were 768 × 966, 568 × 777, and 1024 × 768 (scaled desktop captures, not measured CSS viewports). Dense summary tables keep local horizontal scrolling at compact widths; the page and assistant remain usable.
+
+Recording and note persistence logic are unchanged. The known sparse-source summary grounding issue remains open. Dev hot reload is restored on port 3118; native build identity remains `20260905-1612-fast-qwen`. No standalone package rebuild or push in this batch. Work stays on local `main`.
+
 ## Uniform surfaces and faster local Qwen
 
 The shell, Home, Settings, loading screen, and shared document page now use the existing white `bg-background` token; the native window background is white too. This supersedes the earlier warm-center treatment and removes the sidebar/title-bar mismatch. Navigation, editing, and semantic model-selection colors are preserved. Native Settings, Home, and saved-note views were checked after hot reload and native restart.

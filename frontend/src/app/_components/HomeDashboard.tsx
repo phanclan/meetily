@@ -10,6 +10,7 @@ import type { TranscriptModelProps } from '@/components/TranscriptSettings';
 import type { ModelConfig } from '@/services/configService';
 import type { MeetingMetadata } from '@/services/indexedDBService';
 import { loadQuickNoteDraft } from '@/lib/quickNoteDraft';
+import { groupMeetingsByDay } from '@/lib/meetingTimeline';
 
 interface HomeDashboardProps {
   meetings: CurrentMeeting[];
@@ -45,30 +46,6 @@ function formatRelativeTime(timestamp: number | null) {
 
   const diffDays = Math.round(diffHours / 24);
   return `Updated ${diffDays}d ago`;
-}
-
-function formatMeetingDate(createdAt?: string) {
-  if (!createdAt) return 'Date unavailable';
-
-  const meetingDate = new Date(createdAt);
-  if (Number.isNaN(meetingDate.getTime())) {
-    return 'Date unavailable';
-  }
-
-  const now = new Date();
-  const includeYear = meetingDate.getFullYear() !== now.getFullYear();
-  const dateLabel = meetingDate.toLocaleDateString('en-US', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    ...(includeYear ? { year: 'numeric' } : {}),
-  });
-  const timeLabel = meetingDate.toLocaleTimeString('en-US', {
-    hour: 'numeric',
-    minute: '2-digit',
-  });
-
-  return `${dateLabel} · ${timeLabel}`;
 }
 
 export function HomeDashboard({
@@ -140,6 +117,7 @@ export function HomeDashboard({
 
   const matchingMeetings = meetings.filter(meeting => meeting.title.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
   const recentMeetings = showAll ? matchingMeetings : meetings.slice(0, 8);
+  const meetingGroups = groupMeetingsByDay(recentMeetings);
   const recoveryCount = recoverableMeetings.length;
 
   const openQuickNote = () => {
@@ -152,10 +130,10 @@ export function HomeDashboard({
 
   return (
     <div className="flex-1 overflow-y-auto bg-background">
-      <div className="mx-auto flex w-full max-w-5xl flex-col px-8 py-6">
+      <div className="mx-auto flex w-full max-w-3xl flex-col px-5 py-6 md:px-8">
 
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-stone-200 pb-5">
+        <div className="flex flex-wrap items-center justify-between gap-3 pb-5">
           <div>
             <h1 className="text-lg font-semibold text-stone-900">Home</h1>
             <p className="mt-0.5 text-xs text-stone-500">{todayLabel}</p>
@@ -176,11 +154,11 @@ export function HomeDashboard({
           </div>
         </div>
 
-        {/* Main two-column layout */}
-        <div className="mt-6 grid grid-cols-1 gap-8 items-start lg:grid-cols-[minmax(0,1fr)_272px]">
+        {/* Meeting timeline and supporting details */}
+        <div className="mt-3 flex flex-col gap-8">
 
           {/* Recent meetings — primary list */}
-          <div>
+          <div className="w-full">
             <div className="mb-4 flex items-center justify-between">
               <p className="text-xs font-semibold uppercase tracking-widest text-stone-500">
                 {showAll ? 'All meetings' : 'Recent meetings'}
@@ -194,8 +172,7 @@ export function HomeDashboard({
               <button type="button" className="text-sm font-medium text-stone-700 underline" onClick={() => router.push(showAll ? '/' : '/?view=all')}>
                 {showAll ? 'Show recent' : 'View all meetings'}
               </button>
-              {showAll && (
-                <form className="flex min-w-0 flex-1 gap-2" onSubmit={event => {
+              <form className="flex min-w-0 flex-1 gap-2" onSubmit={event => {
                   event.preventDefault();
                   const value = String(new FormData(event.currentTarget).get('q') || '').trim();
                   const params = new URLSearchParams({ view: 'all' });
@@ -204,13 +181,14 @@ export function HomeDashboard({
                 }}>
                   <input key={query} name="q" type="search" aria-label="Search meeting titles" defaultValue={query} placeholder="Search meeting titles" className="min-w-0 flex-1 rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm" />
                   <Button type="submit" variant="outline">Search</Button>
-                </form>
-              )}
+              </form>
             </div>
 
             {recentMeetings.length > 0 ? (
-              <div ref={menuRef} className="divide-y divide-stone-100">
-                {recentMeetings.map((meeting) => (
+              <div ref={menuRef}>
+                {meetingGroups.map(group => <section key={group.key} className="mb-6" aria-label={group.label}>
+                  <h2 className="mb-2 text-xs font-medium text-stone-500">{group.label}</h2>
+                {group.meetings.map((meeting) => (
                   <div
                     key={meeting.id}
                     className="group relative flex items-center gap-3 -mx-2 px-2 rounded-lg hover:bg-stone-100/50 transition-colors"
@@ -218,12 +196,12 @@ export function HomeDashboard({
                     <button
                       type="button"
                       onClick={() => onOpenMeeting(meeting.id)}
-                      className="flex flex-1 items-center gap-3 py-3.5 text-left min-w-0"
+                      className="flex flex-1 items-center gap-3 py-2.5 text-left min-w-0"
                     >
-                      <FileText className="h-4 w-4 shrink-0 text-stone-300 group-hover:text-stone-500 transition-colors" />
+                      <FileText className="h-8 w-8 shrink-0 rounded-md bg-stone-100 p-2 text-stone-500" />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium text-stone-800">{meeting.title}</p>
-                        <p className="text-xs text-stone-500">{formatMeetingDate(meeting.created_at)}</p>
+                        <p className="text-xs text-stone-500">{meeting.created_at && Number.isFinite(new Date(meeting.created_at).getTime()) ? new Date(meeting.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : 'Saved locally'}</p>
                       </div>
                     </button>
 
@@ -256,6 +234,7 @@ export function HomeDashboard({
                     </div>
                   </div>
                 ))}
+                </section>)}
               </div>
             ) : (
               <div className="rounded-xl border border-dashed border-stone-200 bg-white/60 px-5 py-10 text-center">
@@ -265,8 +244,8 @@ export function HomeDashboard({
             )}
           </div>
 
-          {/* Right panel */}
-          <div className="border-l border-stone-200 pl-5 space-y-5">
+          {/* Draft and system details */}
+          <div className="w-full space-y-5 border-t border-stone-100 pt-4">
 
             {/* Quick note */}
             <div>
@@ -303,9 +282,9 @@ export function HomeDashboard({
 
             <hr className="border-stone-100" />
 
-            {/* System readiness */}
-            <div>
-              <p className="mb-2.5 text-xs font-semibold uppercase tracking-widest text-stone-500">System</p>
+            {/* System details stay available without competing with the meeting list. */}
+            <details open={recoveryCount > 0 || (!isCheckingPermissions && !hasMicrophone)}>
+              <summary className="mb-2.5 cursor-pointer text-xs font-medium text-stone-500">{recoveryCount > 0 ? `Recovery available (${recoveryCount})` : 'System & recovery'}</summary>
               <div className="space-y-0.5">
                 <StatusRow
                   label="Microphone"
@@ -365,7 +344,7 @@ export function HomeDashboard({
                   <FileAudio className="h-3 w-3 text-stone-500" />
                 </button>
               </div>
-            </div>
+            </details>
 
           </div>
         </div>

@@ -530,3 +530,85 @@ for (const source of ['notes', 'empty', 'fetch-error']) {
     } else assert.equal(requests.length, 0);
   });
 }
+
+test('timeline groups local days, year boundaries and missing dates without dropping meetings', () => {
+  const { groupMeetingsByDay } = loader()('@/lib/meetingTimeline');
+  const groups = groupMeetingsByDay([
+    { created_at: '2026-01-01T09:00:00' }, { created_at: '2025-12-31T23:00:00' },
+    { created_at: '2024-12-30T09:00:00' }, {}, { created_at: 'invalid' },
+  ], new Date('2026-01-01T12:00:00'));
+  assert.equal(groups[0].label, 'Today'); assert.equal(groups[1].label, 'Yesterday');
+  assert.match(groups[2].label, /2024/); assert.equal(groups[3].label, 'Date unavailable');
+  assert.equal(groups.flatMap(group => group.meetings).length, 5);
+});
+
+test('transcript highlights literal punctuation while escaping source HTML', () => {
+  const { SavedTranscriptRows } = loader()(path.join(root, 'src/components/MeetingDetails/SavedTranscriptRows.tsx'));
+  const html = renderToStaticMarkup(createElement(SavedTranscriptRows, {
+    transcripts: [{ id: 'literal', text: 'Use C++ and c++ <script>', audio_start_time: 61 }], query: 'c++',
+  }));
+  assert.equal((html.match(/<mark /g) || []).length, 2);
+  assert.match(html, /1:01/); assert.ok(!html.includes('<script>'));
+});
+
+function transcriptSearchFixture(getMeeting) {
+  const state = []; let cursor = 0, lastDeps, cleanup, effect;
+  const load = loader({
+    react: { ...quietReact, useState: initial => {
+      const index = cursor++; if (!(index in state)) state[index] = initial;
+      return [state[index], value => { state[index] = typeof value === 'function' ? value(state[index]) : value; }];
+    }, useEffect: (run, deps) => {
+      if (!lastDeps || deps.some((value, i) => value !== lastDeps[i])) {
+        effect = () => { cleanup?.(); cleanup = run(); }; lastDeps = deps;
+      }
+    } },
+    '@/services/storageService': { storageService: { getMeeting } },
+    './SavedTranscriptRows': { SavedTranscriptRows: ({ transcripts }) => createElement('div', null, transcripts.map(t => t.text).join('|')) },
+  });
+  const { SearchableTranscript } = load(path.join(root, 'src/components/MeetingDetails/SearchableTranscript.tsx'));
+  const props = { meetingId: 'synthetic-1', hasMore: true, transcripts: [{ id: 'first', text: 'First page' }] };
+  const render = () => { cursor = 0; effect = null; const tree = SearchableTranscript(props); effect?.(); return tree; };
+  const find = (tree, predicate) => {
+    if (!tree || typeof tree !== 'object') return null;
+    if (predicate(tree)) return tree;
+    for (const child of [tree.props?.children].flat(Infinity)) { const found = find(child, predicate); if (found) return found; }
+    return null;
+  };
+  return { props, render, find, search: value => {
+    find(render(), node => node.type === 'input').props.onChange({ target: { value } }); render();
+  }, html: () => renderToStaticMarkup(render()) };
+}
+
+test('search finds later transcript pages and clear restores pagination without refetching on every keystroke', async () => {
+  let calls = 0;
+  const f = transcriptSearchFixture(async id => {
+    assert.equal(id, 'synthetic-1'); calls++;
+    return { transcripts: [{ id: 'first', text: 'First page' }, { id: 'later', text: 'Needle on a later page' }] };
+  });
+  f.search('needle'); await Promise.resolve();
+  assert.match(f.html(), /1 matching segment/); assert.match(f.html(), /Needle on a later page/);
+  f.search('later'); assert.equal(calls, 1);
+  f.search(''); assert.match(f.html(), /First page/); assert.ok(!f.html().includes('Needle on a later page'));
+});
+
+test('failed complete-transcript search is retryable and never reports false no-match', async () => {
+  let fail = true;
+  const f = transcriptSearchFixture(async () => {
+    if (fail) throw new Error('Unavailable'); return { transcripts: [{ id: 'later', text: 'Needle' }] };
+  });
+  f.search('needle'); await Promise.resolve(); await Promise.resolve();
+  assert.match(f.html(), /Could not search the complete transcript/); assert.ok(!f.html().includes('No matches.'));
+  fail = false;
+  f.find(f.render(), node => node.type === 'button' && node.props.children === 'Retry search').props.onClick();
+  f.render(); await Promise.resolve(); assert.match(f.html(), /1 matching segment/);
+});
+
+test('late search results cannot cross into a different meeting', async () => {
+  let finish;
+  const f = transcriptSearchFixture(() => new Promise(resolve => { finish = resolve; }));
+  f.search('needle');
+  f.props.meetingId = 'synthetic-2'; f.props.hasMore = false;
+  f.props.transcripts = [{ id: 'new', text: 'Needle in new meeting' }]; f.render();
+  finish({ transcripts: [{ id: 'old', text: 'Needle in old meeting' }] }); await Promise.resolve();
+  assert.match(f.html(), /Needle in new meeting/); assert.ok(!f.html().includes('Needle in old meeting'));
+});

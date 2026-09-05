@@ -15,16 +15,13 @@ import {
   MoreHorizontal,
   Loader2,
   Save,
-  Send,
-  Sparkles,
-  Wand2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Summary } from '@/types';
-import { SavedTranscriptRows } from '@/components/MeetingDetails/SavedTranscriptRows';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
-import { AssistantMessage } from '@/components/AssistantMessage';
+import { MeetingAssistantDock } from '@/components/MeetingDetails/MeetingAssistantDock';
+import { SearchableTranscript } from '@/components/MeetingDetails/SearchableTranscript';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { BlockNoteSummaryView } from '@/components/AISummary/BlockNoteSummaryView';
 import { EmptyStateSummary } from '@/components/EmptyStateSummary';
@@ -119,6 +116,7 @@ export default function PageContent({
 }) {
   const router = useRouter();
   const titleRef = useRef<HTMLTextAreaElement | null>(null);
+  const transcriptButtonRef = useRef<HTMLButtonElement | null>(null);
   const openModelSettingsRef = useRef<(() => void) | null>(null);
   const notes = useMeetingNotes(meeting.id);
   const notesText = useMemo(() => blocksToPlainText(notes.blocks), [notes.blocks]);
@@ -290,9 +288,10 @@ export default function PageContent({
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.22, ease: 'easeOut' }}
-      className="document-page"
+      className="flex h-screen min-h-0 flex-col overflow-hidden bg-background text-stone-900"
     >
-      <div className="document-shell">
+      <div className="min-h-0 flex-1 overflow-y-auto" aria-label="Meeting document">
+      <div className="document-shell !min-h-0 !max-w-3xl">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <button
             type="button"
@@ -323,11 +322,6 @@ export default function PageContent({
           <section className="flex min-h-0 flex-1 flex-col">
             <div className="document-header">
               <div className="space-y-3">
-                <div className="inline-flex items-center gap-2 text-xs font-medium text-stone-500">
-                  <Wand2 className="h-3.5 w-3.5" />
-                  Saved meeting
-                </div>
-
                 <textarea
                   ref={titleRef}
                   value={meetingData.meetingTitle}
@@ -369,7 +363,7 @@ export default function PageContent({
                     )}
                   </div>
 
-                  <Button variant="ghost" onClick={() => setIsTranscriptOpen(true)}>Transcript</Button>
+                  <Button ref={transcriptButtonRef} variant="ghost" onClick={() => setIsTranscriptOpen(true)}>Transcript</Button>
 
                   <div className="ml-auto flex flex-wrap items-center gap-2">
                     {showEnhanceNotesCta && <EnhanceNotesCta onClick={handleEnhanceNotes} />}
@@ -411,8 +405,8 @@ export default function PageContent({
             <div className="w-full py-5">
               {activeView === 'summary' ? (
                 meetingData.aiSummary ? (
-                  <div className="document-editor">
-                    <div className="h-full overflow-y-auto p-4">
+                  <div className="document-editor [&_.bn-editor]:!px-0">
+                    <div className="h-full overflow-y-auto">
                       <BlockNoteSummaryView
                         ref={meetingData.blockNoteSummaryRef}
                         summaryData={meetingData.aiSummary}
@@ -439,7 +433,7 @@ export default function PageContent({
                   </div>
                 )
               ) : notes.isReady ? (
-                <div className="document-editor">
+                <div className="document-editor [&_.bn-editor]:!px-0">
                   <Editor key={meeting.id} initialContent={notes.blocks} onChange={notes.saveNotes} editable />
                 </div>
               ) : (
@@ -450,117 +444,9 @@ export default function PageContent({
             </div>
           </section>
 
-          <div className="border-t border-stone-200 pt-4">
-            <div className="mx-auto flex w-full items-end gap-3">
-              <div className="min-w-0 flex-1 overflow-hidden rounded-lg border border-stone-200/70 bg-white/84">
-                {isComposerExpanded ? (
-                  <div className="p-4">
-                    {messages.length > 0 && (
-                      <div className="mb-4 max-h-52 space-y-3 overflow-y-auto pr-1">
-                        {messages.map((message, index) => (
-                          <div
-                            key={`${message.role}-${index}`}
-                            className={`max-w-[78%] rounded-2xl px-4 py-3 text-sm leading-6 ${
-                              message.role === 'user'
-                                ? 'ml-auto bg-stone-900 text-white shadow-sm'
-                                : 'border border-stone-200/80 bg-stone-50 text-stone-700'
-                            }`}
-                          >
-                            {message.role === 'assistant' ? <AssistantMessage content={message.content} /> : message.content}
-                          </div>
-                        ))}
-                        {isChatLoading && (
-                          <div className="rounded-2xl bg-stone-100/85 px-4 py-3 text-sm text-stone-600">
-                            <span className="inline-flex items-center gap-2">
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                              Thinking...
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    <div className="mb-3 flex flex-wrap items-center gap-2">
-                      {RECIPES.map((recipe) => (
-                        <button
-                          key={recipe.label}
-                          type="button"
-                          onClick={() => handleRecipe(recipe)}
-                          disabled={isChatLoading}
-                          className="rounded-md border border-stone-200/75 bg-stone-50/80 px-3 py-1.5 text-xs font-medium text-stone-700 transition-colors hover:border-stone-300 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {recipe.label}
-                        </button>
-                      ))}
-                      {messages.length > 0 && (
-                        <button
-                          type="button"
-                          onClick={clearMessages}
-                          className="rounded-md border border-stone-200 px-3 py-1.5 text-xs font-medium text-stone-500 transition-colors hover:border-stone-300 hover:text-stone-700"
-                        >
-                          Clear
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => setIsAiComposerOpen(false)}
-                        className="ml-auto rounded-md border border-stone-200 px-3 py-1.5 text-xs font-medium text-stone-500 transition-colors hover:border-stone-300 hover:text-stone-700"
-                      >
-                        Collapse
-                      </button>
-                    </div>
-
-                    <div className="flex items-center gap-2 rounded-lg border border-stone-200/80 bg-stone-50/80 p-2">
-                      <div className="flex items-center gap-2 pl-2 text-stone-400">
-                        <Sparkles className="h-4 w-4" />
-                      </div>
-                      <input
-                        value={chatInput}
-                        onChange={(event) => setChatInput(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter' && !event.shiftKey) {
-                            event.preventDefault();
-                            handleSendChat();
-                          }
-                        }}
-                        placeholder="Ask anything about this meeting"
-                        className="min-w-0 flex-1 border-0 bg-transparent px-2 py-2 text-sm text-stone-700 outline-none placeholder:text-stone-400"
-                      />
-                      <button
-                        type="button"
-                        onClick={handleSendChat}
-                        disabled={isChatLoading || !chatInput.trim() || (!notesText.trim() && meetingData.transcripts.length === 0)}
-                        aria-label="Send question"
-                        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-stone-900 text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <Send className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setIsAiComposerOpen(true)}
-                    className="flex w-full items-center gap-3 px-5 py-3.5 text-left"
-                  >
-                    <div className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-md bg-stone-100/85 md:flex text-stone-700">
-                      <Sparkles className="h-4 w-4" />
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-sm font-medium text-stone-900">Ask anything</p>
-                      <p className="hidden text-xs text-stone-500 md:block">Open follow-up prompts, recap recipes, and Q&A for this meeting.</p>
-                    </div>
-                    <div className="rounded-md border border-stone-200 px-3 py-1.5 text-xs font-medium text-stone-600">
-                      View recipes
-                    </div>
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-
           <Sheet open={isTranscriptOpen} onOpenChange={setIsTranscriptOpen}>
             <SheetContent
+              onCloseAutoFocus={event => { event.preventDefault(); transcriptButtonRef.current?.focus(); }}
               side="bottom"
               className="h-[78vh] rounded-t-xl border-stone-200 bg-white px-0 pb-0 pt-4"
             >
@@ -600,7 +486,7 @@ export default function PageContent({
 
                 <div className="flex-1 overflow-y-auto px-6 py-5">
                   <div className="mx-auto max-w-4xl space-y-3">
-                    <SavedTranscriptRows transcripts={meetingData.transcripts} />
+                    <SearchableTranscript meetingId={meeting.id} transcripts={meetingData.transcripts} hasMore={Boolean(hasMore)} />
 
                     {hasMore && onLoadMore && (
                       <div className="flex justify-center pt-2">
@@ -622,6 +508,14 @@ export default function PageContent({
           </Sheet>
         </div>
       </div>
+      </div>
+      <MeetingAssistantDock
+        expanded={isComposerExpanded} onExpandedChange={setIsAiComposerOpen}
+        messages={messages} loading={isChatLoading} input={chatInput} onInputChange={setChatInput}
+        onSend={handleSendChat} onClear={clearMessages}
+        canSend={Boolean(notesText.trim() || meetingData.transcripts.length)}
+        recipes={RECIPES.map(recipe => ({ label: recipe.label, onSelect: () => handleRecipe(recipe) }))}
+      />
     </motion.div>
   );
 }

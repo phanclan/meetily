@@ -9,7 +9,7 @@ function formatTranscriptTime(seconds?: number | null) {
 }
 
 /** Render saved API transcripts using recording-relative time, not wall-clock time. */
-export function SavedTranscriptRows({ transcripts }: { transcripts: Transcript[] }) {
+export function SavedTranscriptRows({ transcripts, query = '' }: { transcripts: Transcript[]; query?: string }) {
   if (transcripts.length === 0) {
     return (
       <div className="rounded-md border border-dashed border-stone-300 bg-stone-50 px-4 py-8 text-sm leading-6 text-stone-500">
@@ -26,7 +26,10 @@ export function SavedTranscriptRows({ transcripts }: { transcripts: Transcript[]
       <div className="pt-1 text-xs tabular-nums text-stone-500">
         {formatTranscriptTime(item.audio_start_time)}
       </div>
-      <p className="text-sm leading-7 text-stone-700">{item.text}</p>
+      <p className="text-sm leading-7 text-stone-700">{query
+        ? item.text.split(new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi')).map((part, index) =>
+            index % 2 === 1 ? <mark key={index} className="rounded-sm bg-amber-100 text-stone-900">{part}</mark> : part)
+        : item.text}</p>
     </div>
   ));
 }
