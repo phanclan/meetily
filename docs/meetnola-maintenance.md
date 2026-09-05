@@ -22,6 +22,8 @@ Live notes are stored locally under the temporary IndexedDB recording ID (`meeti
 
 **New note** and **Draft → Open** open the existing local scratchpad without starting audio. **Start recording** explicitly starts capture, carrying draft notes into the session. **New recording** starts a separate meeting carrying the current notes; it does not append to the previous transcript. Original notes and titles save automatically both after stopping and after reopening, with visible save/retry status. Enhanced-note editing retains its explicit save action. **Enhance notes** can use notes alone when no transcript exists.
 
+Meeting questions and follow-up recipes use written notes and available transcript text as separate sources. If both are empty, the app explains what to add instead of silently ignoring the question. Home shows stored meeting dates; **View all meetings** opens the full collection with title search. The list mode and submitted search are represented in the URL.
+
 ## Validation before promotion
 
 From `frontend`:

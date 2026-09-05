@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { FileAudio, FileText, Mic, MoreHorizontal, NotebookPen, RefreshCw, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -88,6 +89,10 @@ export function HomeDashboard({
   onDeleteMeeting,
   isRecordingDisabled,
 }: HomeDashboardProps) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const query = searchParams.get('q')?.trim() || '';
+  const showAll = searchParams.get('view') === 'all' || Boolean(query);
   const [quickNoteTitle, setQuickNoteTitle] = useState('New note');
   const [quickNoteDraft, setQuickNoteDraft] = useState('');
   const [quickNoteUpdatedAt, setQuickNoteUpdatedAt] = useState<number | null>(null);
@@ -133,7 +138,8 @@ export function HomeDashboard({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const recentMeetings = meetings.slice(0, 8);
+  const matchingMeetings = meetings.filter(meeting => meeting.title.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
+  const recentMeetings = showAll ? matchingMeetings : meetings.slice(0, 8);
   const recoveryCount = recoverableMeetings.length;
 
   const openQuickNote = () => {
@@ -171,16 +177,34 @@ export function HomeDashboard({
         </div>
 
         {/* Main two-column layout */}
-        <div className="mt-6 grid grid-cols-[1fr_272px] gap-8 items-start">
+        <div className="mt-6 grid grid-cols-1 gap-8 items-start lg:grid-cols-[minmax(0,1fr)_272px]">
 
           {/* Recent meetings — primary list */}
           <div>
             <div className="mb-4 flex items-center justify-between">
               <p className="text-[11px] font-semibold uppercase tracking-widest text-stone-400">
-                Recent meetings
+                {showAll ? 'All meetings' : 'Recent meetings'}
               </p>
               {meetings.length > 0 && (
-                <span className="text-xs text-stone-400">{meetings.length} sessions</span>
+                <span className="text-xs text-stone-500">{query ? `${matchingMeetings.length} of ${meetings.length}` : meetings.length} sessions</span>
+              )}
+            </div>
+
+            <div className="mb-4 flex flex-wrap items-center gap-3">
+              <button type="button" className="text-sm font-medium text-stone-700 underline" onClick={() => router.push(showAll ? '/' : '/?view=all')}>
+                {showAll ? 'Show recent' : 'View all meetings'}
+              </button>
+              {showAll && (
+                <form className="flex min-w-0 flex-1 gap-2" onSubmit={event => {
+                  event.preventDefault();
+                  const value = String(new FormData(event.currentTarget).get('q') || '').trim();
+                  const params = new URLSearchParams({ view: 'all' });
+                  if (value) params.set('q', value);
+                  router.replace(`/?${params.toString()}`);
+                }}>
+                  <input key={query} name="q" type="search" aria-label="Search meeting titles" defaultValue={query} placeholder="Search meeting titles" className="min-w-0 flex-1 rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm" />
+                  <Button type="submit" variant="outline">Search</Button>
+                </form>
               )}
             </div>
 
@@ -207,8 +231,9 @@ export function HomeDashboard({
                     <div className="relative shrink-0">
                       <button
                         type="button"
+                        aria-label={`Actions for ${meeting.title}`}
                         onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === meeting.id ? null : meeting.id); }}
-                        className="flex h-6 w-6 items-center justify-center rounded-md text-stone-400 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-stone-200 hover:text-stone-700"
+                        className="flex h-6 w-6 items-center justify-center rounded-md text-stone-400 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-stone-200 hover:text-stone-700"
                       >
                         <MoreHorizontal className="h-3.5 w-3.5" />
                       </button>
@@ -234,8 +259,8 @@ export function HomeDashboard({
               </div>
             ) : (
               <div className="rounded-xl border border-dashed border-stone-200 bg-white/60 px-5 py-10 text-center">
-                <p className="text-sm text-stone-500">No recordings yet</p>
-                <p className="mt-1 text-xs text-stone-400">Start a meeting to see it here.</p>
+                <p className="text-sm text-stone-500">{query ? 'No matching meetings' : 'No recordings yet'}</p>
+                {query ? <button type="button" onClick={() => router.replace('/?view=all')} className="mt-2 text-sm underline">Clear search</button> : <p className="mt-1 text-xs text-stone-400">Start a meeting to see it here.</p>}
               </div>
             )}
           </div>

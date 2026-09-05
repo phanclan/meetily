@@ -30,6 +30,40 @@ pub struct ApiResponse<T> {
 pub struct Meeting {
     pub id: String,
     pub title: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl From<MeetingModel> for Meeting {
+    fn from(meeting: MeetingModel) -> Self {
+        Self {
+            id: meeting.id,
+            title: meeting.title,
+            created_at: meeting.created_at.0.to_rfc3339(),
+            updated_at: meeting.updated_at.0.to_rfc3339(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod meeting_list_tests {
+    use super::*;
+    use crate::database::models::DateTimeUtc;
+
+    #[test]
+    fn quality_meeting_list_preserves_timestamps() {
+        let timestamp = "2026-09-05T20:00:00Z".parse::<chrono::DateTime<chrono::Utc>>().unwrap();
+        let meeting = Meeting::from(MeetingModel {
+            id: "synthetic-meeting".into(),
+            title: "Synthetic dated meeting".into(),
+            created_at: DateTimeUtc(timestamp),
+            updated_at: DateTimeUtc(timestamp),
+            folder_path: None,
+        });
+        let json = serde_json::to_value(meeting).unwrap();
+        assert_eq!(json["created_at"], "2026-09-05T20:00:00+00:00");
+        assert_eq!(json["updated_at"], "2026-09-05T20:00:00+00:00");
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -338,10 +372,7 @@ pub async fn api_get_meetings<R: Runtime>(
 
             let result: Vec<Meeting> = meeting_models
                 .into_iter()
-                .map(|m| Meeting {
-                    id: m.id,
-                    title: m.title,
-                })
+                .map(Meeting::from)
                 .collect();
             Ok(result)
         }

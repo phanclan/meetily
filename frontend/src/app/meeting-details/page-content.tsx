@@ -26,6 +26,7 @@ import { EmptyStateSummary } from '@/components/EmptyStateSummary';
 import { SummaryGeneratorButtonGroup } from '@/components/MeetingDetails/SummaryGeneratorButtonGroup';
 import { blocksToPlainText } from '@/lib/meetingNotes';
 import { buildEnhanceNotesPrompt } from '@/lib/enhanceNotes';
+import { buildMeetingContext } from '@/lib/meetingContext';
 import Analytics from '@/lib/analytics';
 import { useMeetingData } from '@/hooks/meeting-details/useMeetingData';
 import { useSummaryGeneration } from '@/hooks/meeting-details/useSummaryGeneration';
@@ -271,9 +272,9 @@ export default function PageContent({
 
   const handleRecipe = (recipe: Recipe) => {
     setIsAiComposerOpen(true);
-    const transcriptContext = getScopedTranscript(meetingData.transcripts, recipe.scope);
+    const transcriptContext = buildMeetingContext(getScopedTranscript(meetingData.transcripts, recipe.scope), notesText);
     if (!transcriptContext.trim()) {
-      toast.error('No transcript context available yet');
+      toast.error('Add notes or record a transcript before asking about this meeting.');
       return;
     }
     void send(recipe.prompt, transcriptContext);
@@ -281,8 +282,12 @@ export default function PageContent({
 
   const handleSendChat = () => {
     const userPrompt = chatInput.trim();
-    const transcriptContext = meetingData.transcripts.map((item: any) => item.text).join('\n');
-    if (!userPrompt || !transcriptContext.trim()) return;
+    const transcriptContext = buildMeetingContext(meetingData.transcripts.map((item: any) => item.text).join('\n'), notesText);
+    if (!userPrompt) return;
+    if (!transcriptContext) {
+      toast.error('Add notes or record a transcript before asking about this meeting.');
+      return;
+    }
     setIsAiComposerOpen(true);
     void send(userPrompt, transcriptContext);
     setChatInput('');

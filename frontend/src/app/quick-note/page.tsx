@@ -41,6 +41,7 @@ import { EmptyStateSummary } from '@/components/EmptyStateSummary';
 import { BlockNoteSummaryView, BlockNoteSummaryViewRef } from '@/components/AISummary/BlockNoteSummaryView';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { buildEnhanceNotesPrompt } from '@/lib/enhanceNotes';
+import { buildMeetingContext } from '@/lib/meetingContext';
 import { EnhanceNotesCta } from '@/components/EnhanceNotesCta';
 
 const Editor = dynamic(() => import('@/components/BlockNoteEditor/Editor'), {
@@ -694,9 +695,9 @@ export default function QuickNotePage() {
 
   const handleRecipe = (recipe: Recipe) => {
     setIsAiComposerOpen(true);
-    const transcriptContext = getScopedTranscript(transcripts, recipe.scope);
+    const transcriptContext = buildMeetingContext(getScopedTranscript(transcripts, recipe.scope), noteText);
     if (!transcriptContext.trim()) {
-      toast.error('No transcript context available yet');
+      toast.error('Add notes or record a transcript before asking about this meeting.');
       return;
     }
     void send(recipe.prompt, transcriptContext);
@@ -705,8 +706,12 @@ export default function QuickNotePage() {
   const handleSendChat = () => {
     setIsAiComposerOpen(true);
     const userPrompt = chatInput.trim();
-    const transcriptContext = transcripts.map(item => item.text).join('\n');
-    if (!userPrompt || !transcriptContext.trim()) return;
+    const transcriptContext = buildMeetingContext(transcripts.map(item => item.text).join('\n'), noteText);
+    if (!userPrompt) return;
+    if (!transcriptContext) {
+      toast.error('Add notes or record a transcript before asking about this meeting.');
+      return;
+    }
     void send(userPrompt, transcriptContext);
     setChatInput('');
   };

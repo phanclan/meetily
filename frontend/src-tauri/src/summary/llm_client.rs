@@ -358,13 +358,13 @@ pub async fn query_with_context(
     app_data_dir: Option<&PathBuf>,
 ) -> Result<String, String> {
     const SYSTEM_PROMPT: &str =
-        "You are a helpful meeting assistant. Answer concisely based on the transcript provided.          Keep responses brief and actionable. Do not reveal chain-of-thought, hidden reasoning,          or internal analysis. Return only the final answer.";
+        "You are a helpful meeting assistant. Answer concisely based on the written notes and transcript provided. Do not invent missing facts or treat written notes as recorded speech. Keep responses brief and actionable. Do not reveal chain-of-thought, hidden reasoning, or internal analysis. Return only the final answer.";
 
     let user_prompt = if transcript_context.is_empty() {
         user_message.to_string()
     } else {
         format!(
-            "Meeting transcript:\n{}\n\n---\n\nQuestion: {}",
+            "Meeting context:\n{}\n\n---\n\nQuestion: {}",
             transcript_context, user_message
         )
     };

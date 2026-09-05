@@ -39,6 +39,21 @@ function loader(stubs = {}, globals = {}) {
 const blocks = [{ id: 'note-1', type: 'paragraph', content: [{ type: 'text', text: 'Synthetic recovery note', styles: {} }], children: [] }];
 const quietReact = { useCallback: f => f, useEffect: noop, useRef: value => ({ current: value }), useState: value => [value, noop] };
 
+test('notes-only and mixed follow-up context reaches the native assistant with source labels', async () => {
+  const calls = [];
+  const load = loader({
+    react: quietReact,
+    '@/meetnola/ipc': { liveQuery: async args => { calls.push(args); return 'Synthetic answer'; } },
+  });
+  const { buildMeetingContext } = load('@/lib/meetingContext');
+  const chat = load('@/hooks/useLiveMeetingChat').useLiveMeetingChat();
+  await chat.send('What is the action?', buildMeetingContext('', 'Action: test reopening.'));
+  assert.equal(calls[0].transcriptContext, 'Written notes:\nAction: test reopening.');
+  await chat.send('Summarize both sources', buildMeetingContext('Captured speech', 'Written note'));
+  assert.equal(calls[1].transcriptContext, 'Written notes:\nWritten note\n\nTranscript:\nCaptured speech');
+  assert.equal(buildMeetingContext('  ', '\n'), '');
+});
+
 test('draft navigation does not request a fresh recording while explicit recording entry does', () => {
   const route = loader()('@/lib/quickNoteRoute');
   assert.equal(route.createDraftNotePath(), '/quick-note');
