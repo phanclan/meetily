@@ -43,7 +43,6 @@ function MeetingDetailsContent() {
   // Use pagination hook for efficient transcript loading
   const {
     metadata,
-    segments,
     transcripts,
     isLoading: isLoadingTranscripts,
     isLoadingMore,
@@ -391,7 +390,6 @@ function MeetingDetailsContent() {
     }}
     onRefetchTranscripts={refetch}
     // Pagination props for efficient transcript loading
-    segments={segments}
     hasMore={hasMore}
     isLoadingMore={isLoadingMore}
     totalCount={totalCount}

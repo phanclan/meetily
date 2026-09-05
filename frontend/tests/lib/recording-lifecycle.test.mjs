@@ -6,6 +6,8 @@ import vm from 'node:vm';
 import ts from 'typescript';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const require = createRequire(import.meta.url);
@@ -24,7 +26,7 @@ function loader(stubs = {}, globals = {}) {
     const module = { exports: {} };
     cache.set(resolved, module.exports);
     const compiled = ts.transpileModule(fs.readFileSync(resolved, 'utf8'), {
-      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true },
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true, jsx: ts.JsxEmit.ReactJSX },
     }).outputText;
     vm.runInNewContext(compiled, {
       module, exports: module.exports, require: load,
@@ -38,6 +40,53 @@ function loader(stubs = {}, globals = {}) {
 }
 const blocks = [{ id: 'note-1', type: 'paragraph', content: [{ type: 'text', text: 'Synthetic recovery note', styles: {} }], children: [] }];
 const quietReact = { useCallback: f => f, useEffect: noop, useRef: value => ({ current: value }), useState: value => [value, noop] };
+
+test('reopened paginated API transcripts render their saved recording times', async () => {
+  const saved = [25.3, 29.8, 48.1].map((seconds, i) => ({
+    id: `saved-${i}`, text: `Synthetic segment ${i}`, timestamp: '14:51:30',
+    audio_start_time: seconds, audio_end_time: seconds + 2,
+  }));
+  const state = [];
+  let cursor = 0;
+  const load = loader({
+    react: {
+      ...quietReact,
+      useMemo: fn => fn(),
+      useState: initial => {
+        const index = cursor++;
+        if (!(index in state)) state[index] = initial;
+        return [state[index], value => { state[index] = typeof value === 'function' ? value(state[index]) : value; }];
+      },
+    },
+    '@tauri-apps/api/core': { invoke: async command => {
+      if (command === 'api_get_meeting_metadata') return { id: 'synthetic', title: 'Saved meeting' };
+      assert.equal(command, 'api_get_meeting_transcripts');
+      return { transcripts: saved, total_count: saved.length, has_more: false };
+    } },
+  });
+  const { usePaginatedTranscripts } = load('@/hooks/usePaginatedTranscripts');
+  await usePaginatedTranscripts({ meetingId: 'synthetic' }).refetch();
+  cursor = 0;
+  const { transcripts } = usePaginatedTranscripts({ meetingId: 'synthetic' });
+  const { SavedTranscriptRows } = load(path.join(root, 'src/components/MeetingDetails/SavedTranscriptRows.tsx'));
+  const html = renderToStaticMarkup(createElement(SavedTranscriptRows, { transcripts }));
+  for (const time of ['0:25', '0:29', '0:48']) assert.ok(html.includes(time));
+  for (const item of saved) assert.ok(html.includes(item.text));
+  assert.ok(!html.includes('--:--'));
+  assert.ok(!html.includes('14:51:30'));
+});
+
+test('saved transcript rows distinguish zero from missing or invalid recording times', () => {
+  const { SavedTranscriptRows } = loader()(path.join(root, 'src/components/MeetingDetails/SavedTranscriptRows.tsx'));
+  for (const [seconds, expected] of [[0, '0:00'], [125.9, '2:05'], [null, '--:--'], [undefined, '--:--'], [NaN, '--:--'], [Infinity, '--:--']]) {
+    const html = renderToStaticMarkup(createElement(SavedTranscriptRows, {
+      transcripts: [{ id: 'synthetic', text: 'Saved text', timestamp: '14:51:30', audio_start_time: seconds }],
+    }));
+    assert.ok(html.includes(expected), `Expected ${expected} for ${seconds}`);
+    assert.ok(html.includes('Saved text'));
+  }
+  assert.match(renderToStaticMarkup(createElement(SavedTranscriptRows, { transcripts: [] })), /No transcript segments/);
+});
 
 test('notes-only and mixed follow-up context reaches the native assistant with source labels', async () => {
   const calls = [];

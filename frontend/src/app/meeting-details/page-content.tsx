@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Summary } from '@/types';
+import { SavedTranscriptRows } from '@/components/MeetingDetails/SavedTranscriptRows';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { BlockNoteSummaryView } from '@/components/AISummary/BlockNoteSummaryView';
@@ -65,14 +66,6 @@ const RECIPES: Recipe[] = [
   },
 ];
 
-function formatTranscriptTime(seconds?: number) {
-  if (seconds === undefined || seconds === null) return '--:--';
-  const totalSeconds = Math.max(0, Math.floor(seconds));
-  const minutes = Math.floor(totalSeconds / 60);
-  const remainder = totalSeconds % 60;
-  return `${minutes}:${remainder.toString().padStart(2, '0')}`;
-}
-
 function formatSavedAt(timestamp?: string) {
   if (!timestamp) return 'Stored locally on this Mac';
   const parsed = new Date(timestamp);
@@ -103,7 +96,6 @@ export default function PageContent({
   onAutoGenerateComplete,
   onMeetingUpdated,
   onRefetchTranscripts,
-  segments,
   hasMore,
   isLoadingMore,
   totalCount,
@@ -116,7 +108,6 @@ export default function PageContent({
   onAutoGenerateComplete?: () => void;
   onMeetingUpdated?: () => Promise<void>;
   onRefetchTranscripts?: () => Promise<void>;
-  segments?: any[];
   hasMore?: boolean;
   isLoadingMore?: boolean;
   totalCount?: number;
@@ -224,13 +215,6 @@ export default function PageContent({
     }
 
   }, [meetingData.aiSummary]);
-
-  const transcriptSegments = useMemo(() => {
-    if (segments && segments.length > 0) {
-      return segments;
-    }
-    return meetingData.transcripts;
-  }, [meetingData.transcripts, segments]);
 
   const transcriptCount = totalCount ?? meetingData.transcripts.length;
   const isNotesEmpty = notesText.trim().length === 0;
@@ -629,23 +613,7 @@ export default function PageContent({
 
                 <div className="flex-1 overflow-y-auto px-6 py-5">
                   <div className="mx-auto max-w-4xl space-y-3">
-                    {transcriptSegments.length > 0 ? (
-                      transcriptSegments.map((item: any) => (
-                        <div
-                          key={item.id}
-                          className="rounded-[24px] border border-stone-200 bg-white/90 px-4 py-4 shadow-sm"
-                        >
-                          <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-stone-500">
-                            {formatTranscriptTime(item.audio_start_time)}
-                          </div>
-                          <p className="text-sm leading-7 text-stone-700">{item.text}</p>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="rounded-[24px] border border-dashed border-stone-300 bg-stone-50 px-4 py-8 text-sm leading-6 text-stone-500">
-                        No transcript segments were captured for this meeting.
-                      </div>
-                    )}
+                    <SavedTranscriptRows transcripts={meetingData.transcripts} />
 
                     {hasMore && onLoadMore && (
                       <div className="flex justify-center pt-2">

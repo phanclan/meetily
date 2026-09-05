@@ -7,7 +7,7 @@ import { toast } from 'sonner';
 import { useMeetingTitleSave } from '@/hooks/useMeetingTitleSave';
 
 interface UseMeetingDataProps {
-  meeting: any;
+  meeting: { id: string; title: string; transcripts: Transcript[] };
   summaryData: Summary | null;
   onMeetingUpdated?: () => Promise<void>;
 }

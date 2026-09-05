@@ -41,6 +41,8 @@ Passed: TypeScript, 22 workflow regression tests, three markdown tests, the onbo
 
 Audio retry at 14:52 PDT on 2026-09-05 passed in the dev app: recording started, synthetic system speech transcribed, Stop saved three segments, and the title, notes, and transcript survived reopening **Meetnola audio retry verified** (`meeting-recording-meeting-1788645074580`). Home then showed both microphone and system audio as **Default**, with 43 meetings. Recording is stopped. No code change or permission reset was needed; the earlier device-readiness observation is superseded for this dev run.
 
+Saved transcript timestamp fix verified at 15:06 PDT: the sheet previously read `audio_start_time` from virtualized segments that expose `timestamp` instead. It now renders typed saved API transcripts directly. The same synthetic meeting displays **0:25**, **0:29**, and **0:48**, including after **Refresh** and reopening the sheet; no stored-data change was required. TypeScript, 24 workflow tests (including API-to-row rendering and missing/zero/invalid timestamp coverage), three markdown tests, and the onboarding check passed. The fix is active through dev hot reload; the packaged tester has not been rebuilt with it. No merge or push.
+
 ## Quality fixes (2026-09-05)
 
 - Code commit `32fb2ab` on `codex/meetnola-quality-fixes` addresses the seven review findings: checkpoint retention, Unicode-safe truncation, idempotent saves, editor clearing, saved-title persistence, accurate **New recording** behavior, and notes-only enhancement.
