@@ -20,7 +20,9 @@ Passed: TypeScript, 21 recording/workflow regression tests, 3 markdown tests, an
 
 The follow-up batch adds notes-aware meeting questions/recipes, stored dates in the native meeting-list response, and **View all meetings** with title search and an empty-results recovery action. TypeScript, 22 frontend regression checks, four native quality tests, and the native dev build passed. Live checks confirmed a local Qwen answer on a notes-only meeting, all 42 meetings in the full list, matching and empty searches, clearing search, and dates displayed after restarting the rebuilt app.
 
-Current dev build: `20260905-1329-discovery` in `/private/tmp/meetnola Dev.app`, with frontend hot reload on port 3118. The temporary app now contains its helper binaries and resources rather than external symlinks; strict ad-hoc signature verification passed. Neither design batch has been merged into local `main` or pushed. Remaining review item: navigation accessibility. Enhanced-note editing still uses its explicit save action.
+Navigation accessibility is implemented: named collapsed controls, a navigation landmark, selected/expanded states, keyboard-operable meeting rows, visible focus and row actions, focused search/meeting expansion, and focus return after closing the title dialog. TypeScript and all 22 workflow regression tests passed. Native dev checks passed for Tab/Enter meeting navigation, Escape from the title dialog, Space to collapse meetings with hidden rows removed from the tab order, and search expansion/clearing. This closes the six findings from the bounded design review; a full VoiceOver audit and narrow-window testing remain outside the verified coverage. Enhanced-note editing still uses its explicit save action.
+
+Current dev build: `20260905-1329-discovery` in `/private/tmp/meetnola Dev.app`, with frontend hot reload on port 3118, including the navigation changes. The temporary app contains its helper binaries and resources; strict ad-hoc signature verification passed. The design changes have not been merged into local `main` or pushed.
 
 ## Quality fixes (2026-09-05)
 
