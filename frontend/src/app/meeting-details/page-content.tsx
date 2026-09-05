@@ -4,6 +4,7 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import { invoke } from '@tauri-apps/api/core';
+import { getMeetingNotes } from '@/meetnola/ipc';
 import {
   ArrowLeft,
   Copy,
@@ -182,9 +183,7 @@ export default function PageContent({
     setNotesText('');
     setActiveView(summaryData ? 'summary' : 'notes');
 
-    invoke<{ notes_json?: string | null; notes_markdown?: string | null } | null>('get_meeting_notes', {
-      meetingId: meeting.id,
-    })
+    getMeetingNotes<{ notes_json?: string | null; notes_markdown?: string | null } | null>(meeting.id)
       .then((result) => {
         const markdown = result?.notes_markdown?.trim();
         if (markdown) {

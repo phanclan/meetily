@@ -6,6 +6,7 @@ import { motion } from 'framer-motion';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { appDataDir } from '@tauri-apps/api/path';
 import { invoke } from '@tauri-apps/api/core';
+import { saveMeetingNotes } from '@/meetnola/ipc';
 import {
   ArrowLeft,
   CheckCircle2,
@@ -623,7 +624,7 @@ export default function QuickNotePage() {
         showToast: false,
         onSaved: async (nextMeetingId) => {
           if (snapshotMarkdown.trim().length > 0 || snapshotBlocks.length > 0) {
-            await invoke('save_meeting_notes', {
+            await saveMeetingNotes({
               meetingId: nextMeetingId,
               notesMarkdown: snapshotMarkdown,
               notesJson: JSON.stringify(snapshotBlocks),

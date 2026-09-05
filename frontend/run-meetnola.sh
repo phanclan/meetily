@@ -16,5 +16,6 @@ ln -sfn "$TESTER_APP_SUPPORT_DIR" "$TMP_LOG_DIR/app-support"
 export EXTRA_LOG_LINK_DIR="$TMP_LOG_DIR"
 export PRESTART_NEXT_DEV="true"
 export TAURI_DEV_SCRIPT="tauri:dev:meetnola:attach"
+export NEXT_PUBLIC_FLAVOR="${NEXT_PUBLIC_FLAVOR:-meetnola}"
 
 ./clean_run.sh "$@"

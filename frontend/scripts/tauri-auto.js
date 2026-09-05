@@ -74,6 +74,11 @@ env.MEETNOLA_BUILD_ID = env.MEETNOLA_BUILD_ID || defaultBuildId;
 env.MEETNOLA_BUILD_CHANNEL = env.MEETNOLA_BUILD_CHANNEL || (command === 'build' ? 'bundle' : 'dev');
 env.MEETNOLA_BUILD_FLAVOR = env.MEETNOLA_BUILD_FLAVOR || (testerConfig ? 'meetnola-tester' : 'meetily');
 
+// Frontend flavor gate (Meetnola ipc / UI extensions)
+if (testerConfig) {
+  env.NEXT_PUBLIC_FLAVOR = env.NEXT_PUBLIC_FLAVOR || 'meetnola';
+}
+
 console.log(`🏷️  Build identity: ${env.MEETNOLA_BUILD_FLAVOR} ${env.MEETNOLA_BUILD_CHANNEL} ${env.MEETNOLA_BUILD_ID}`);
 console.log('');
 

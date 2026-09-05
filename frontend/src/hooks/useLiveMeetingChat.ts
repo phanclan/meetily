@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { liveQuery } from '@/meetnola/ipc';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -20,7 +20,7 @@ export function useLiveMeetingChat() {
     setError(null);
 
     try {
-      const response = await invoke<string>('live_query', {
+      const response = await liveQuery({
         userMessage,
         transcriptContext,
       });

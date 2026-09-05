@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { getMeetingNotes, saveMeetingNotes } from '@/meetnola/ipc';
 import type { Block } from '@blocknote/core';
 import { blocksToPlainText, parseStoredMeetingNotesJson } from '@/lib/meetingNotes';
 
@@ -30,7 +30,7 @@ export function useMeetingNotes(meetingId: string | null) {
       setIsSaving(true);
     }
     try {
-      await invoke('save_meeting_notes', {
+      await saveMeetingNotes({
         meetingId: meetingIdToSave,
         notesMarkdown: blocksToPlainText(blocksToSave),
         notesJson: JSON.stringify(blocksToSave),
@@ -65,7 +65,7 @@ export function useMeetingNotes(meetingId: string | null) {
     setIsReady(false);
     latestBlocksRef.current = [];
     hasPendingSaveRef.current = false;
-    invoke<{ notes_json?: string | null } | null>('get_meeting_notes', { meetingId })
+    getMeetingNotes<{ notes_json?: string | null } | null>(meetingId)
       .then(result => {
         if (cancelled) return;
 

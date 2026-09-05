@@ -12,6 +12,10 @@ import "sonner/dist/styles.css"
 import { useState, useEffect, useCallback } from 'react'
 import { listen, UnlistenFn } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
+import {
+  appendFrontendLog as appendFrontendLogIpc,
+  setCallDetectionEnabled,
+} from '@/meetnola/ipc'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { RecordingStateProvider } from '@/contexts/RecordingStateContext'
 import { OllamaDownloadProvider } from '@/contexts/OllamaDownloadContext'
@@ -108,7 +112,7 @@ export default function RootLayout({
     metadata?: Record<string, unknown>,
   ) => {
     try {
-      await invoke('append_frontend_log', {
+      await appendFrontendLogIpc({
         level,
         message,
         metadata: metadata ?? null,
@@ -321,7 +325,7 @@ export default function RootLayout({
           }
 
           try {
-            await invoke('append_frontend_log', { level, message, metadata: null })
+            await appendFrontendLogIpc({ level, message, metadata: null })
           } catch {
             // Ignore bridge failures to avoid recursive logging loops.
           }
@@ -343,9 +347,7 @@ export default function RootLayout({
   useEffect(() => {
     const syncCallDetectionPreference = async () => {
       try {
-        await invoke('set_call_detection_enabled', {
-          enabled: loadCallDetectionPreference(),
-        })
+        await setCallDetectionEnabled(loadCallDetectionPreference())
       } catch (error) {
         console.error('[Layout] Failed to sync call detection preference:', error)
       }
