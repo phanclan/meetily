@@ -1,6 +1,9 @@
 {
   "productName": "meetnola Tester",
   "identifier": "com.meetnola.tester",
+  "plugins": {
+    "updater": { "endpoints": [] }
+  },
   "bundle": {
     "createUpdaterArtifacts": false
   }

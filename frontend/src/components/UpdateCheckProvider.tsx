@@ -1,6 +1,8 @@
 'use client'
 
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import { isMeetnola } from '@/flavor';
+import { toast } from 'sonner';
 import { useUpdateCheck } from '@/hooks/useUpdateCheck';
 import { UpdateInfo } from '@/services/updateService';
 import { UpdateDialog } from './UpdateDialog';
@@ -19,11 +21,17 @@ export function UpdateCheckProvider({ children }: { children: React.ReactNode })
   const [showDialog, setShowDialog] = useState(false);
 
   const handleShowDialog = useCallback(() => {
+    if (isMeetnola) {
+      toast.info('Meetnola updates are installed manually', {
+        description: 'Use a verified Meetnola build. Upstream Meetily updates are not installed in this fork.',
+      });
+      return;
+    }
     setShowDialog(true);
   }, []);
 
   const { updateInfo, isChecking, checkForUpdates } = useUpdateCheck({
-    checkOnMount: true,
+    checkOnMount: !isMeetnola,
     showNotification: true,
     onUpdateAvailable: (info) => {
       // Show notification, dialog will be shown when user clicks notification
@@ -42,13 +50,13 @@ export function UpdateCheckProvider({ children }: { children: React.ReactNode })
   // Listen for tray menu events
   useEffect(() => {
     const handleTrayCheck = () => {
-      checkForUpdates(true); // Force check from tray
-      setShowDialog(true);
+      if (!isMeetnola) void checkForUpdates(true);
+      handleShowDialog();
     };
 
     window.addEventListener('check-updates-from-tray', handleTrayCheck);
     return () => window.removeEventListener('check-updates-from-tray', handleTrayCheck);
-  }, [checkForUpdates]);
+  }, [checkForUpdates, handleShowDialog]);
 
   return (
     <UpdateCheckContext.Provider

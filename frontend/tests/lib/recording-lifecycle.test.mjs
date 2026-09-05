@@ -194,3 +194,16 @@ test('interrupted notes-only recording can be recovered and clears its draft onl
   assert.deepEqual(events, ['notes', 'marked']);
   assert.equal(notes.readLiveMeetingNotes('meeting-1'), null);
 });
+
+test('Meetnola never checks or installs an upstream application update', async () => {
+  const unexpected = () => { throw new Error('Upstream updater must not run'); };
+  const load = loader({
+    '@/flavor': { isMeetnola: true },
+    '@tauri-apps/plugin-updater': { check: unexpected },
+    '@tauri-apps/plugin-process': { relaunch: unexpected },
+    '@tauri-apps/api/app': { getVersion: async () => '0.4.0' },
+  });
+  const { updateService } = load('@/services/updateService');
+  assert.equal((await updateService.checkForUpdates(true)).available, false);
+  await assert.rejects(updateService.downloadAndInstall({ download: unexpected, install: unexpected }), /verified fork build/);
+});

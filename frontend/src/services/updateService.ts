@@ -8,6 +8,7 @@
 import { check, Update } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { getVersion } from '@tauri-apps/api/app';
+import { isMeetnola } from '@/flavor';
 
 export interface UpdateInfo {
   available: boolean;
@@ -39,6 +40,8 @@ export class UpdateService {
    * @returns Promise with update information
    */
   async checkForUpdates(force = false): Promise<UpdateInfo> {
+    if (isMeetnola) return { available: false, currentVersion: await getVersion() };
+
     // Prevent concurrent update checks
     if (this.updateCheckInProgress) {
       throw new Error('Update check already in progress');
@@ -95,6 +98,7 @@ export class UpdateService {
     update: Update,
     onProgress?: (progress: UpdateProgress) => void
   ): Promise<void> {
+    if (isMeetnola) throw new Error('Meetnola updates must be installed from a verified fork build');
     try {
       // Download the update
       await update.download();
