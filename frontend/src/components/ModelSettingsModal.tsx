@@ -257,6 +257,7 @@ interface ModelSettingsModalProps {
   onSave: (config: ModelConfig) => void;
   skipInitialFetch?: boolean; // Optional: skip fetching config from backend if parent manages it
   layout?: 'inline' | 'dialog';
+  showHeading?: boolean;
 }
 
 export function ModelSettingsModal({
@@ -265,6 +266,7 @@ export function ModelSettingsModal({
   onSave,
   skipInitialFetch = false,
   layout = 'inline',
+  showHeading = true,
 }: ModelSettingsModalProps) {
   // Use ConfigContext if available, fallback to props for backward compatibility
   const configContext = useConfig();
@@ -965,14 +967,13 @@ export function ModelSettingsModal({
 
   return (
     <div>
-      <div className="flex justify-between items-center mb-4">
-        <h3 className="text-lg font-semibold">Model Settings</h3>
-      </div>
+      {showHeading && <h3 className="mb-4 text-base font-semibold">Model settings</h3>}
 
       <div className="space-y-4">
         <div>
-          <Label>Summarization Model</Label>
-          <div className="flex space-x-2 mt-1">
+          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+            <div className="min-w-0 space-y-2">
+            <Label htmlFor="summary-provider">Provider</Label>
             <Select
               value={modelConfig.provider}
               onValueChange={(value) => {
@@ -1039,7 +1040,7 @@ export function ModelSettingsModal({
                 }
               }}
             >
-              <SelectTrigger>
+              <SelectTrigger id="summary-provider">
                 <SelectValue placeholder="Select provider" />
               </SelectTrigger>
               <SelectContent className="max-h-64 overflow-y-auto">
@@ -1052,16 +1053,19 @@ export function ModelSettingsModal({
                 <SelectItem value="openrouter">OpenRouter</SelectItem>
               </SelectContent>
             </Select>
+            </div>
 
             {modelConfig.provider !== 'builtin-ai' && modelConfig.provider !== 'custom-openai' && (
-              <div className="flex items-center gap-2">
+              <div className="relative flex min-w-0 items-center gap-2 pt-7">
+                <Label htmlFor="summary-model" className="absolute left-0 top-0">Model</Label>
                 <Popover open={modelComboboxOpen} onOpenChange={setModelComboboxOpen} modal={true}>
                   <PopoverTrigger asChild>
                     <Button
                       variant="outline"
                       role="combobox"
+                      id="summary-model"
                       aria-expanded={modelComboboxOpen}
-                      className="flex-1 max-w-[200px] justify-between font-normal"
+                      className="min-w-0 flex-1 justify-between font-normal"
                     >
                       <span className="truncate">
                         {modelConfig.model || "Select model..."}
@@ -1069,7 +1073,7 @@ export function ModelSettingsModal({
                       <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                     </Button>
                   </PopoverTrigger>
-                  <PopoverContent className="w-[250px] p-0" align="start">
+                  <PopoverContent className="w-[min(420px,calc(100vw-3rem))] p-0" align="start">
                     <Command>
                       <CommandInput placeholder="Search models..." />
                       <CommandList className="max-h-[300px]">
@@ -1588,7 +1592,7 @@ export function ModelSettingsModal({
                           className={cn(
                             'bg-card p-2 m-0 rounded-md border transition-colors',
                             modelConfig.model === model.name
-                              ? 'ring-1 ring-blue-500 border-blue-500 background-blue-100'
+                              ? 'ring-1 ring-stone-500 border-stone-500 bg-stone-50'
                               : 'hover:bg-muted/50',
                             !modelIsDownloading && 'cursor-pointer'
                           )}
@@ -1598,10 +1602,9 @@ export function ModelSettingsModal({
                             }
                           }}
                         >
-                          <div>
-                            <b className="font-bold">{model.name}&nbsp;</b>
-                            <span className="text-muted-foreground">with a size of </span>
-                            <span className="font-mono font-bold text-sm">{model.size}</span>
+                          <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                            <span className="min-w-0 break-all font-medium">{model.name}</span>
+                            <span className="shrink-0 text-xs tabular-nums text-stone-500">{model.size}</span>
                           </div>
 
                           {/* Progress bar for downloading models */}

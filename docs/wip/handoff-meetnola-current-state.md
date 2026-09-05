@@ -2,6 +2,25 @@
 
 Last updated: 2026-09-05
 
+## Visual consistency pass
+
+Scope: address the six visual-review findings using the existing editor, navigation, Radix controls, and installed Markdown renderer. Keep a warm neutral surface with compact document controls; no provider, storage, or recording redesign.
+
+| Behavior | Decision |
+| --- | --- |
+| Draft, live, and saved note editing; title and note autosave | Preserve; share a flatter document surface and compact header |
+| Recording entry/stop, recovery, and enhanced-note explicit save | Preserve |
+| Transcript sheet, timestamps, pagination, and copy | Preserve; move the labeled opener beside document controls |
+| Sidebar navigation, search, edit/delete confirmation, and keyboard access | Preserve; use one row action menu and more title space |
+| Model selection, endpoints, language, and save | Preserve; clarify labels and allocate more width to the model |
+| Assistant source context and requests | Preserve; render Markdown lists, links, and paragraphs in answers |
+
+Implemented and verified on `codex/meetnola-visual-polish`: shared document styles, 240px minimum note surface (previously 420px for saved notes), visible Transcript/Enhance controls, folder overflow menu, neutral Settings styling, Meetnola branding, wider sidebar titles with one action menu, labeled provider/model fields, and Markdown assistant answers. The installed `react-markdown`/`remark-gfm` packages render answers without accepting raw HTML. Informational alerts retain their semantic color; the existing editor, transcript sheet, and enhanced-note Save behavior remain.
+
+Passed: TypeScript, 26 workflow tests, three markdown tests, onboarding check, production frontend build, and `git diff --check`. Native dev checks covered draft entry without recording, live notes at wide and compact sizes, Stop/save/reopen, saved transcript timestamps, formatted Qwen checklists, model picker without changing selection, sidebar edit via keyboard with focus return, and delete confirmation canceled without deletion. Captures were 1024 × 768 (scaled desktop), 754 × 1012, and 591 × 850, not measured CSS viewports. Saved-note actions and the collapsed assistant now fit the initial 754 × 1012 view; at 591px capture width, toolbar actions wrap and Settings fields stack. The selected Settings tab scrolls into view. Recording is stopped; the hot-reload frontend is restored on port 3118. The packaged tester was not rebuilt, and nothing was merged or pushed.
+
+Synthetic recording `meeting-recording-meeting-1788647839126` preserved its notes and two transcript segments at 0:29 and 0:31. A separate correctness issue remains: its custom draft/recording title, “Meetnola visual verification,” reopened as the first note line, “Synthetic design check. Action: verify notes and transcript after reopening.” Title persistence must be investigated next; the visual changes do not alter the save logic.
+
 ## Note workflow design batch
 
 Scope: make drafting, recording entry, and reopened note editing predictable without changing audio, recovery, or enhancement providers.

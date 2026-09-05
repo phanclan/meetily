@@ -158,15 +158,15 @@ export function HomeDashboard({
         <div className="flex items-center justify-between border-b border-stone-200 pb-5">
           <div>
             <h1 className="text-lg font-semibold text-stone-900">Home</h1>
-            <p className="mt-0.5 text-xs text-stone-400">{todayLabel}</p>
+            <p className="mt-0.5 text-xs text-stone-500">{todayLabel}</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" className="rounded-full" onClick={openQuickNote}>
+            <Button variant="outline" className="rounded-md" onClick={openQuickNote}>
               <NotebookPen className="h-3.5 w-3.5" />
               New note
             </Button>
             <Button
-              className="h-9 rounded-full bg-stone-900 px-4 text-sm font-medium text-white hover:bg-stone-800"
+              className="h-9 rounded-md bg-stone-900 px-4 text-sm font-medium text-white hover:bg-stone-800"
               onClick={onStartRecording}
               disabled={isRecordingDisabled}
             >
@@ -182,7 +182,7 @@ export function HomeDashboard({
           {/* Recent meetings — primary list */}
           <div>
             <div className="mb-4 flex items-center justify-between">
-              <p className="text-[11px] font-semibold uppercase tracking-widest text-stone-400">
+              <p className="text-xs font-semibold uppercase tracking-widest text-stone-500">
                 {showAll ? 'All meetings' : 'Recent meetings'}
               </p>
               {meetings.length > 0 && (
@@ -220,10 +220,10 @@ export function HomeDashboard({
                       onClick={() => onOpenMeeting(meeting.id)}
                       className="flex flex-1 items-center gap-3 py-3.5 text-left min-w-0"
                     >
-                      <FileText className="h-4 w-4 shrink-0 text-stone-300 group-hover:text-stone-400 transition-colors" />
+                      <FileText className="h-4 w-4 shrink-0 text-stone-300 group-hover:text-stone-500 transition-colors" />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium text-stone-800">{meeting.title}</p>
-                        <p className="text-xs text-stone-400">{formatMeetingDate(meeting.created_at)}</p>
+                        <p className="text-xs text-stone-500">{formatMeetingDate(meeting.created_at)}</p>
                       </div>
                     </button>
 
@@ -233,7 +233,7 @@ export function HomeDashboard({
                         type="button"
                         aria-label={`Actions for ${meeting.title}`}
                         onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === meeting.id ? null : meeting.id); }}
-                        className="flex h-6 w-6 items-center justify-center rounded-md text-stone-400 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-stone-200 hover:text-stone-700"
+                        className="flex h-6 w-6 items-center justify-center rounded-md text-stone-500 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-stone-200 hover:text-stone-700"
                       >
                         <MoreHorizontal className="h-3.5 w-3.5" />
                       </button>
@@ -260,22 +260,22 @@ export function HomeDashboard({
             ) : (
               <div className="rounded-xl border border-dashed border-stone-200 bg-white/60 px-5 py-10 text-center">
                 <p className="text-sm text-stone-500">{query ? 'No matching meetings' : 'No recordings yet'}</p>
-                {query ? <button type="button" onClick={() => router.replace('/?view=all')} className="mt-2 text-sm underline">Clear search</button> : <p className="mt-1 text-xs text-stone-400">Start a meeting to see it here.</p>}
+                {query ? <button type="button" onClick={() => router.replace('/?view=all')} className="mt-2 text-sm underline">Clear search</button> : <p className="mt-1 text-xs text-stone-500">Start a meeting to see it here.</p>}
               </div>
             )}
           </div>
 
           {/* Right panel */}
-          <div className="rounded-2xl border border-stone-200 bg-white p-4 space-y-5 shadow-sm">
+          <div className="border-l border-stone-200 pl-5 space-y-5">
 
             {/* Quick note */}
             <div>
               <div className="mb-2.5 flex items-center justify-between">
-                <p className="text-[11px] font-semibold uppercase tracking-widest text-stone-400">Draft</p>
+                <p className="text-xs font-semibold uppercase tracking-widest text-stone-500">Draft</p>
                 <button
                   type="button"
                   onClick={openQuickNote}
-                  className="text-xs text-stone-400 hover:text-stone-700 transition-colors"
+                  className="text-xs text-stone-500 hover:text-stone-700 transition-colors"
                 >
                   Open →
                 </button>
@@ -285,15 +285,15 @@ export function HomeDashboard({
                 tabIndex={0}
                 onClick={openQuickNote}
                 onKeyDown={(e) => e.key === 'Enter' && openQuickNote()}
-                className="w-full cursor-pointer rounded-xl border border-stone-100 bg-stone-50 px-3.5 py-3 text-left transition-colors hover:border-stone-200 hover:bg-stone-100/70"
+                className="w-full cursor-pointer rounded-md bg-stone-100 px-3.5 py-3 text-left transition-colors hover:border-stone-200 hover:bg-stone-100/70"
               >
                 <p className="line-clamp-3 text-xs leading-[1.6] text-stone-600">{quickNotePreview}</p>
                 <div className="mt-2.5 flex items-center justify-between">
-                  <span className="text-[10px] text-stone-400">{formatRelativeTime(quickNoteUpdatedAt)}</span>
+                  <span className="text-xs text-stone-500">{formatRelativeTime(quickNoteUpdatedAt)}</span>
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); copyQuickNote(); }}
-                    className="text-[10px] text-stone-400 hover:text-stone-700 transition-colors"
+                    className="text-xs text-stone-500 hover:text-stone-700 transition-colors"
                   >
                     Copy
                   </button>
@@ -305,7 +305,7 @@ export function HomeDashboard({
 
             {/* System readiness */}
             <div>
-              <p className="mb-2.5 text-[11px] font-semibold uppercase tracking-widest text-stone-400">System</p>
+              <p className="mb-2.5 text-xs font-semibold uppercase tracking-widest text-stone-500">System</p>
               <div className="space-y-0.5">
                 <StatusRow
                   label="Microphone"
@@ -344,12 +344,12 @@ export function HomeDashboard({
                   className="flex flex-1 items-center justify-between rounded-xl border border-stone-100 bg-stone-50 px-3 py-2.5 text-left transition-colors hover:border-stone-200 hover:bg-stone-100"
                 >
                   <div>
-                    <p className="text-[11px] font-medium text-stone-700">Recovery</p>
-                    <p className="text-[10px] text-stone-400">
+                    <p className="text-xs font-medium text-stone-700">Recovery</p>
+                    <p className="text-xs text-stone-500">
                       {recoveryCount > 0 ? `${recoveryCount} ready` : 'None'}
                     </p>
                   </div>
-                  <RefreshCw className="h-3 w-3 text-stone-400" />
+                  <RefreshCw className="h-3 w-3 text-stone-500" />
                 </button>
                 <button
                   type="button"
@@ -357,12 +357,12 @@ export function HomeDashboard({
                   className="flex flex-1 items-center justify-between rounded-xl border border-stone-100 bg-stone-50 px-3 py-2.5 text-left transition-colors hover:border-stone-200 hover:bg-stone-100"
                 >
                   <div>
-                    <p className="text-[11px] font-medium text-stone-700">Import</p>
-                    <p className="text-[10px] text-stone-400">
+                    <p className="text-xs font-medium text-stone-700">Import</p>
+                    <p className="text-xs text-stone-500">
                       {importEnabled ? 'Enabled' : 'Beta only'}
                     </p>
                   </div>
-                  <FileAudio className="h-3 w-3 text-stone-400" />
+                  <FileAudio className="h-3 w-3 text-stone-500" />
                 </button>
               </div>
             </div>
@@ -392,9 +392,9 @@ function StatusRow({
 
   return (
     <div className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-stone-50">
-      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotColor[tone]}`} />
-      <span className="w-20 shrink-0 text-[11px] font-medium text-stone-500">{label}</span>
-      <span className="min-w-0 truncate text-[11px] text-stone-800">{value}</span>
+      <span className={`h-1.5 w-1.5 shrink-0 rounded-md ${dotColor[tone]}`} />
+      <span className="w-20 shrink-0 text-xs font-medium text-stone-500">{label}</span>
+      <span className="min-w-0 truncate text-xs text-stone-800">{value}</span>
     </div>
   );
 }

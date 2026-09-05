@@ -18,9 +18,9 @@ import { getBuildInfo, type BuildInfo } from '@/lib/buildInfo';
 // Tabs configuration (constant)
 const TABS = [
   { value: 'general', label: 'General', icon: Settings2 },
-  { value: 'recording', label: 'Recordings', icon: Mic },
+  { value: 'recording', label: 'Recording', icon: Mic },
   { value: 'Transcriptionmodels', label: 'Transcription', icon: DatabaseIcon },
-  { value: 'summaryModels', label: 'Summary', icon: SparkleIcon },
+  { value: 'summaryModels', label: 'Enhancement', icon: SparkleIcon },
   { value: 'beta', label: 'Beta', icon: FlaskConical }
 ] as const;
 
@@ -73,32 +73,33 @@ export default function SettingsPage() {
     const activeTabElement = tabRefs.current[activeIndex];
 
     if (activeTabElement) {
+      activeTabElement.scrollIntoView({ block: 'nearest', inline: 'nearest' });
       const { offsetLeft, offsetWidth } = activeTabElement;
       setUnderlineStyle({ left: offsetLeft, width: offsetWidth });
     }
   }, [activeTab]);
 
   return (
-    <div className="h-screen bg-gray-50 flex flex-col">
+    <div className="h-screen bg-[#fafaf8] flex flex-col">
       {/* Fixed Header */}
-      <div className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200">
-        <div className="max-w-6xl mx-auto px-8 py-6">
+      <div className="sticky top-0 z-10 bg-[#fafaf8] border-b border-stone-200">
+        <div className="max-w-5xl mx-auto px-5 py-5 md:px-8">
           <div className="flex items-center gap-4">
             <button
               onClick={() => router.back()}
-              className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors"
+              className="flex items-center gap-2 text-stone-600 hover:text-stone-900 transition-colors"
             >
               <ArrowLeft className="w-5 h-5" />
               <span>Back</span>
             </button>
-            <h1 className="text-3xl font-bold">Settings</h1>
+            <h1 className="text-2xl font-semibold">Settings</h1>
           </div>
         </div>
       </div>
 
       {/* Scrollable Content */}
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-6xl mx-auto p-8 pt-6">
+        <div className="max-w-5xl mx-auto px-5 py-4 md:px-8">
           {onboardingIntent === 'groq-key' && (
             <Alert className="mb-6 border-blue-200 bg-blue-50 text-blue-950">
               <AlertDescription className="space-y-2">
@@ -113,7 +114,7 @@ export default function SettingsPage() {
           {/* Tabs */}
           <Tabs value={activeTab} onValueChange={setActiveTab}>
             <div className="max-w-full overflow-x-auto">
-            <TabsList className="w-max bg-transparent relative rounded-none border-b border-gray-200 p-0 h-auto">
+            <TabsList className="w-max bg-transparent relative rounded-none border-b border-stone-200 p-0 h-auto">
               {TABS.map((tab, index) => {
                 const Icon = tab.icon;
                 return (
@@ -121,7 +122,7 @@ export default function SettingsPage() {
                     key={tab.value}
                     value={tab.value}
                     ref={el => { tabRefs.current[index] = el }}
-                    className="flex items-center gap-2 px-6 py-4 bg-transparent rounded-none border-0 data-[state=active]:bg-transparent data-[state=active]:text-blue-600 data-[state=active]:shadow-none text-gray-600 hover:text-gray-900 relative z-10"
+                    className="flex items-center gap-2 px-6 py-4 bg-transparent rounded-none border-0 data-[state=active]:bg-transparent data-[state=active]:text-stone-900 data-[state=active]:shadow-none text-stone-600 hover:text-stone-900 relative z-10"
                   >
                     <Icon className="w-4 h-4" />
                     {tab.label}
@@ -130,7 +131,7 @@ export default function SettingsPage() {
               })}
 
               <motion.div
-                className="absolute bottom-0 z-20 h-0.5 bg-blue-600"
+                className="absolute bottom-0 z-20 h-0.5 bg-stone-900"
                 layoutId="underline"
                 style={{ left: underlineStyle.left, width: underlineStyle.width }}
                 transition={{ type: 'spring', stiffness: 400, damping: 40 }}
@@ -159,7 +160,7 @@ export default function SettingsPage() {
           </Tabs>
 
           {buildInfo && (
-            <div className="mt-8 border-t border-gray-200 pt-4 text-xs text-gray-500">
+            <div className="mt-8 border-t border-stone-200 pt-4 text-xs text-stone-500">
               <p>{buildInfo.displayName}</p>
               <p className="mt-1">Channel: {buildInfo.channel} · Build ID: {buildInfo.buildId}</p>
             </div>

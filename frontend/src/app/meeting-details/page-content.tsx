@@ -12,6 +12,7 @@ import {
   ArrowLeft,
   Copy,
   FolderOpen,
+  MoreHorizontal,
   Loader2,
   Save,
   Send,
@@ -22,6 +23,8 @@ import { toast } from 'sonner';
 import { Summary } from '@/types';
 import { SavedTranscriptRows } from '@/components/MeetingDetails/SavedTranscriptRows';
 import { Button } from '@/components/ui/button';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
+import { AssistantMessage } from '@/components/AssistantMessage';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { BlockNoteSummaryView } from '@/components/AISummary/BlockNoteSummaryView';
 import { EmptyStateSummary } from '@/components/EmptyStateSummary';
@@ -225,10 +228,7 @@ export default function PageContent({
   const isComposerExpanded = isAiComposerOpen || isChatLoading;
   const enhanceNotesPrompt = useMemo(() => buildEnhanceNotesPrompt(notesText), [notesText]);
   const showEnhanceNotesCta = !meetingData.aiSummary && !isSummaryGenerating;
-  const titleSizeClass =
-    meetingData.meetingTitle.trim().length > 52
-      ? 'text-3xl leading-[1.05] lg:text-[2.55rem]'
-      : 'text-4xl leading-[0.98] lg:text-5xl';
+
 
   const handleEnhanceNotes = () => {
     setActiveView('summary');
@@ -290,36 +290,40 @@ export default function PageContent({
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.22, ease: 'easeOut' }}
-      className="h-screen overflow-y-auto bg-[#f6f2ea] text-stone-900"
+      className="document-page"
     >
-      <div className="mx-auto flex min-h-full w-full max-w-[1480px] flex-col px-5 py-5 md:px-6 lg:px-8">
+      <div className="document-shell">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <button
             type="button"
             onClick={() => void handleGoHome()}
-            className="inline-flex items-center gap-2 rounded-full border border-stone-200/80 bg-white/65 px-4 py-2 text-sm font-medium text-stone-600 transition-colors hover:border-stone-300 hover:bg-white/80"
+            className="document-back"
           >
             <ArrowLeft className="h-4 w-4" />
             Home
           </button>
 
           <div className="flex flex-wrap items-center justify-end gap-2">
-            <Button variant="outline" className="rounded-full border-stone-200/75 bg-white/65 text-stone-600 shadow-none" onClick={meetingOperations.handleOpenMeetingFolder}>
-              <FolderOpen className="h-4 w-4" />
-              Folder
-            </Button>
-            {activeView === 'summary' && <Button variant="outline" className="rounded-full border-stone-200/75 bg-white/65 text-stone-600 shadow-none" onClick={meetingData.saveAllChanges}>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" aria-label="Meeting actions"><MoreHorizontal /></Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={meetingOperations.handleOpenMeetingFolder}><FolderOpen className="mr-2 h-4 w-4" />Open recording folder</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            {activeView === 'summary' && <Button variant="outline" className="rounded-md border-stone-200/75 bg-white/65 text-stone-600 shadow-none" onClick={meetingData.saveAllChanges}>
               {meetingData.isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
               Save enhanced notes
             </Button>}
           </div>
         </div>
 
-        <div className="mt-5 flex min-h-0 flex-1 flex-col gap-4 pb-36">
+        <div className="mt-3 flex min-h-0 flex-col gap-4 pb-8">
           <section className="flex min-h-0 flex-1 flex-col">
-            <div className="mx-auto w-full max-w-[980px] border-b border-stone-200/70 px-2 py-3 lg:px-1 lg:py-4">
-              <div className="space-y-4">
-                <div className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.24em] text-stone-400">
+            <div className="document-header">
+              <div className="space-y-3">
+                <div className="inline-flex items-center gap-2 text-xs font-medium text-stone-500">
                   <Wand2 className="h-3.5 w-3.5" />
                   Saved meeting
                 </div>
@@ -330,7 +334,7 @@ export default function PageContent({
                   onChange={(event) => meetingData.handleTitleChange(event.target.value)}
                   placeholder="Untitled meeting"
                   rows={1}
-                  className={`w-full resize-none overflow-hidden border-0 bg-transparent px-0 font-semibold tracking-tight text-stone-900 outline-none placeholder:text-stone-400 ${titleSizeClass}`}
+                  className="document-title"
                 />
 
                 <div className="flex flex-wrap items-center gap-2 text-sm text-stone-500">
@@ -344,15 +348,12 @@ export default function PageContent({
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3">
-                  <div className="inline-flex rounded-full bg-stone-100/70 p-1">
+                  <div className="flex flex-wrap items-center gap-4">
                     <button
                       type="button"
                       onClick={() => setActiveView('notes')}
-                      className={`rounded-full px-4 py-2 text-sm font-medium transition-colors ${
-                        activeView === 'notes'
-                          ? 'bg-white text-stone-900 shadow-sm'
-                          : 'text-stone-600 hover:text-stone-900 disabled:cursor-not-allowed disabled:opacity-50'
-                      }`}
+                      aria-pressed={activeView === 'notes'}
+                      className="document-tab"
                     >
                       Meeting Notes
                     </button>
@@ -360,31 +361,31 @@ export default function PageContent({
                       <button
                         type="button"
                         onClick={() => setActiveView('summary')}
-                        className={`rounded-full px-4 py-2 text-sm font-medium transition-colors ${
-                          activeView === 'summary'
-                            ? 'bg-white text-stone-900 shadow-sm'
-                            : 'text-stone-600 hover:text-stone-900'
-                        }`}
+                        aria-pressed={activeView === 'summary'}
+                      className="document-tab"
                       >
                         {meetingData.aiSummary ? 'Enhanced Notes' : 'Enhancing…'}
                       </button>
                     )}
                   </div>
 
+                  <Button variant="ghost" onClick={() => setIsTranscriptOpen(true)}>Transcript</Button>
+
                   <div className="ml-auto flex flex-wrap items-center gap-2">
+                    {showEnhanceNotesCta && <EnhanceNotesCta onClick={handleEnhanceNotes} />}
                     {activeView === 'notes' ? (
-                      <Button variant="outline" className="rounded-full border-stone-200/75 bg-white/65 text-stone-600 shadow-none" onClick={handleCopyNotes}>
+                      <Button variant="outline" className="rounded-md border-stone-200/75 bg-white/65 text-stone-600 shadow-none" onClick={handleCopyNotes}>
                         <Copy className="h-4 w-4" />
                         Copy Notes
                       </Button>
                     ) : meetingData.aiSummary ? (
-                      <Button variant="outline" className="rounded-full border-stone-200/75 bg-white/65 text-stone-600 shadow-none" onClick={copyOperations.handleCopySummary}>
+                      <Button variant="outline" className="rounded-md border-stone-200/75 bg-white/65 text-stone-600 shadow-none" onClick={copyOperations.handleCopySummary}>
                         <Copy className="h-4 w-4" />
                         Copy Summary
                       </Button>
                     ) : null}
 
-                    <div className="rounded-full bg-white/65 p-1 ring-1 ring-stone-200/60">
+                    <div className="rounded-md bg-white/65 p-1 ring-1 ring-stone-200/60">
                       <SummaryGeneratorButtonGroup
                         modelConfig={modelConfig}
                         setModelConfig={setModelConfig}
@@ -407,10 +408,10 @@ export default function PageContent({
               </div>
             </div>
 
-            <div className="mx-auto flex min-h-0 w-full max-w-[980px] flex-1 px-2 py-5 lg:px-1 lg:py-6">
+            <div className="w-full py-5">
               {activeView === 'summary' ? (
                 meetingData.aiSummary ? (
-                  <div className="h-full min-h-[420px] overflow-hidden rounded-[24px] bg-white/78 ring-1 ring-stone-200/60 shadow-[0_18px_40px_-34px_rgba(41,37,36,0.18)]">
+                  <div className="document-editor">
                     <div className="h-full overflow-y-auto p-4">
                       <BlockNoteSummaryView
                         ref={meetingData.blockNoteSummaryRef}
@@ -429,7 +430,7 @@ export default function PageContent({
                     </div>
                   </div>
                 ) : (
-                  <div className="flex h-full min-h-[420px] items-center justify-center rounded-[24px] bg-white/76 ring-1 ring-stone-200/60 shadow-[0_18px_40px_-34px_rgba(41,37,36,0.18)]">
+                  <div className="flex h-full min-h-[240px] items-center justify-center rounded-lg bg-white/76 ring-1 ring-stone-200/60">
                     <EmptyStateSummary
                       onGenerate={handleEnhanceNotes}
                       hasModel={Boolean(modelConfig.provider && modelConfig.model)}
@@ -438,34 +439,20 @@ export default function PageContent({
                   </div>
                 )
               ) : notes.isReady ? (
-                <div className="h-full min-h-[420px] w-full overflow-y-auto rounded-[24px] bg-white px-6 py-6 text-base leading-8 text-stone-700 ring-1 ring-stone-200/60">
+                <div className="document-editor">
                   <Editor key={meeting.id} initialContent={notes.blocks} onChange={notes.saveNotes} editable />
                 </div>
               ) : (
-                <div className="flex h-full min-h-[420px] items-center justify-center rounded-[24px] bg-white/76 ring-1 ring-stone-200/60 shadow-[0_18px_40px_-34px_rgba(41,37,36,0.18)]">
+                <div className="flex h-full min-h-[240px] items-center justify-center rounded-lg bg-white/76 ring-1 ring-stone-200/60">
                   <p>Loading notes… If this persists, reopen the meeting to retry.</p>
                 </div>
               )}
             </div>
           </section>
 
-          <div className="mt-auto lg:sticky lg:bottom-4 lg:z-30">
-            {showEnhanceNotesCta && (
-              <div className="mb-3 flex justify-center">
-                <EnhanceNotesCta onClick={handleEnhanceNotes} />
-              </div>
-            )}
-            <div className="mx-auto flex max-w-[980px] items-end gap-3">
-              <button
-                type="button"
-                onClick={() => setIsTranscriptOpen(true)}
-                className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-stone-200/70 bg-white/82 text-stone-700 shadow-[0_12px_28px_-24px_rgba(41,37,36,0.24)] transition-colors hover:border-stone-300 hover:bg-white"
-                title="Open transcript"
-              >
-                <WaveGlyph />
-              </button>
-
-              <div className="min-w-0 flex-1 overflow-hidden rounded-[24px] border border-stone-200/70 bg-white/84 shadow-[0_16px_36px_-28px_rgba(41,37,36,0.2)]">
+          <div className="border-t border-stone-200 pt-4">
+            <div className="mx-auto flex w-full items-end gap-3">
+              <div className="min-w-0 flex-1 overflow-hidden rounded-lg border border-stone-200/70 bg-white/84">
                 {isComposerExpanded ? (
                   <div className="p-4">
                     {messages.length > 0 && (
@@ -479,7 +466,7 @@ export default function PageContent({
                                 : 'border border-stone-200/80 bg-stone-50 text-stone-700'
                             }`}
                           >
-                            {message.content}
+                            {message.role === 'assistant' ? <AssistantMessage content={message.content} /> : message.content}
                           </div>
                         ))}
                         {isChatLoading && (
@@ -500,7 +487,7 @@ export default function PageContent({
                           type="button"
                           onClick={() => handleRecipe(recipe)}
                           disabled={isChatLoading}
-                          className="rounded-full border border-stone-200/75 bg-stone-50/80 px-3 py-1.5 text-xs font-medium text-stone-700 transition-colors hover:border-stone-300 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+                          className="rounded-md border border-stone-200/75 bg-stone-50/80 px-3 py-1.5 text-xs font-medium text-stone-700 transition-colors hover:border-stone-300 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {recipe.label}
                         </button>
@@ -509,7 +496,7 @@ export default function PageContent({
                         <button
                           type="button"
                           onClick={clearMessages}
-                          className="rounded-full border border-stone-200 px-3 py-1.5 text-xs font-medium text-stone-500 transition-colors hover:border-stone-300 hover:text-stone-700"
+                          className="rounded-md border border-stone-200 px-3 py-1.5 text-xs font-medium text-stone-500 transition-colors hover:border-stone-300 hover:text-stone-700"
                         >
                           Clear
                         </button>
@@ -517,13 +504,13 @@ export default function PageContent({
                       <button
                         type="button"
                         onClick={() => setIsAiComposerOpen(false)}
-                        className="ml-auto rounded-full border border-stone-200 px-3 py-1.5 text-xs font-medium text-stone-500 transition-colors hover:border-stone-300 hover:text-stone-700"
+                        className="ml-auto rounded-md border border-stone-200 px-3 py-1.5 text-xs font-medium text-stone-500 transition-colors hover:border-stone-300 hover:text-stone-700"
                       >
                         Collapse
                       </button>
                     </div>
 
-                    <div className="flex items-center gap-2 rounded-[22px] border border-stone-200/80 bg-stone-50/80 p-2">
+                    <div className="flex items-center gap-2 rounded-lg border border-stone-200/80 bg-stone-50/80 p-2">
                       <div className="flex items-center gap-2 pl-2 text-stone-400">
                         <Sparkles className="h-4 w-4" />
                       </div>
@@ -544,7 +531,7 @@ export default function PageContent({
                         onClick={handleSendChat}
                         disabled={isChatLoading || !chatInput.trim() || (!notesText.trim() && meetingData.transcripts.length === 0)}
                         aria-label="Send question"
-                        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-stone-900 text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-stone-900 text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         <Send className="h-4 w-4" />
                       </button>
@@ -556,14 +543,14 @@ export default function PageContent({
                     onClick={() => setIsAiComposerOpen(true)}
                     className="flex w-full items-center gap-3 px-5 py-3.5 text-left"
                   >
-                    <div className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-full bg-stone-100/85 md:flex text-stone-700">
+                    <div className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-md bg-stone-100/85 md:flex text-stone-700">
                       <Sparkles className="h-4 w-4" />
                     </div>
                     <div className="flex-1">
                       <p className="text-sm font-medium text-stone-900">Ask anything</p>
                       <p className="hidden text-xs text-stone-500 md:block">Open follow-up prompts, recap recipes, and Q&A for this meeting.</p>
                     </div>
-                    <div className="rounded-full border border-stone-200 px-3 py-1.5 text-xs font-medium text-stone-600">
+                    <div className="rounded-md border border-stone-200 px-3 py-1.5 text-xs font-medium text-stone-600">
                       View recipes
                     </div>
                   </button>
@@ -575,7 +562,7 @@ export default function PageContent({
           <Sheet open={isTranscriptOpen} onOpenChange={setIsTranscriptOpen}>
             <SheetContent
               side="bottom"
-              className="h-[78vh] rounded-t-[30px] border-stone-200 bg-[linear-gradient(180deg,_rgba(255,255,255,0.98)_0%,_rgba(248,246,240,0.98)_100%)] px-0 pb-0 pt-4"
+              className="h-[78vh] rounded-t-xl border-stone-200 bg-white px-0 pb-0 pt-4"
             >
               <div className="flex h-full flex-col">
                 <SheetHeader className="border-b border-stone-200 px-6 pb-4">
@@ -591,7 +578,7 @@ export default function PageContent({
                         <Button
                           variant="outline"
                           size="sm"
-                          className="rounded-full border-stone-200 bg-white"
+                          className="rounded-md border-stone-200 bg-white"
                           onClick={() => void onRefetchTranscripts()}
                         >
                           <Loader2 className={`h-4 w-4 ${isLoadingMore ? 'animate-spin' : ''}`} />
@@ -601,7 +588,7 @@ export default function PageContent({
                       <Button
                         variant="outline"
                         size="sm"
-                        className="rounded-full border-stone-200 bg-white"
+                        className="rounded-md border-stone-200 bg-white"
                         onClick={copyOperations.handleCopyTranscript}
                       >
                         <Copy className="h-4 w-4" />
@@ -619,7 +606,7 @@ export default function PageContent({
                       <div className="flex justify-center pt-2">
                         <Button
                           variant="outline"
-                          className="rounded-full border-stone-200 bg-white"
+                          className="rounded-md border-stone-200 bg-white"
                           onClick={onLoadMore}
                           disabled={isLoadingMore}
                         >
@@ -639,19 +626,9 @@ export default function PageContent({
   );
 }
 
-function WaveGlyph() {
-  return (
-    <span className="flex h-4 items-end gap-0.5">
-      <span className="h-2 w-0.5 rounded-full bg-current opacity-70" />
-      <span className="h-3.5 w-0.5 rounded-full bg-current" />
-      <span className="h-2.5 w-0.5 rounded-full bg-current opacity-80" />
-    </span>
-  );
-}
-
 function StatusPill({ children }: { children: ReactNode }) {
   return (
-    <div className="inline-flex items-center gap-2 rounded-full border border-stone-200 bg-white/90 px-3 py-1.5 text-sm font-medium text-stone-600">
+    <div className="inline-flex items-center gap-2 rounded-md border border-stone-200 bg-white/90 px-3 py-1.5 text-sm font-medium text-stone-600">
       {children}
     </div>
   );

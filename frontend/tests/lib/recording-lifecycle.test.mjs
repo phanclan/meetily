@@ -8,6 +8,8 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const require = createRequire(import.meta.url);
@@ -40,6 +42,30 @@ function loader(stubs = {}, globals = {}) {
 }
 const blocks = [{ id: 'note-1', type: 'paragraph', content: [{ type: 'text', text: 'Synthetic recovery note', styles: {} }], children: [] }];
 const quietReact = { useCallback: f => f, useEffect: noop, useRef: value => ({ current: value }), useState: value => [value, noop] };
+
+test('assistant answers render task lists, paragraphs and links as Markdown', () => {
+  const load = loader({ 'react-markdown': Markdown, 'remark-gfm': remarkGfm });
+  const { AssistantMessage } = load(path.join(root, 'src/components/AssistantMessage.tsx'));
+  const html = renderToStaticMarkup(createElement(AssistantMessage, {
+    content: '## Follow up\n\n- [ ] Verify saved notes\n- [x] Review transcript\n\nRead the [notes](https://example.com/notes).',
+  }));
+  assert.match(html, /<h2>Follow up<\/h2>/);
+  assert.equal((html.match(/type="checkbox"/g) || []).length, 2);
+  assert.equal((html.match(/checked=""/g) || []).length, 1);
+  assert.match(html, /<a href="https:\/\/example.com\/notes">notes<\/a>/);
+  assert.ok(!html.includes('- [ ]'));
+});
+
+test('assistant Markdown does not execute HTML or unsafe links', () => {
+  const load = loader({ 'react-markdown': Markdown, 'remark-gfm': remarkGfm });
+  const { AssistantMessage } = load(path.join(root, 'src/components/AssistantMessage.tsx'));
+  const html = renderToStaticMarkup(createElement(AssistantMessage, {
+    content: '<script>alert(1)</script>\n\n[unsafe](javascript:alert%281%29)\n\n**Saved notes**',
+  }));
+  assert.ok(!html.includes('<script'));
+  assert.ok(!html.includes('javascript:'));
+  assert.match(html, /<strong>Saved notes<\/strong>/);
+});
 
 test('reopened paginated API transcripts render their saved recording times', async () => {
   const saved = [25.3, 29.8, 48.1].map((seconds, i) => ({

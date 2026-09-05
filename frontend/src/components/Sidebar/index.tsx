@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { File, Settings, PanelLeftClose, PanelLeftOpen, Home, Trash2, Mic, Pencil, SearchIcon, X, Upload, FolderOpen, ChevronDown } from 'lucide-react';
+import { File, Settings, PanelLeftClose, PanelLeftOpen, Home, Trash2, Mic, Pencil, SearchIcon, X, Upload, FolderOpen, ChevronDown, MoreHorizontal } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useSidebar } from './SidebarProvider';
 import type { CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
@@ -36,6 +36,7 @@ import { VisuallyHidden } from "@/components/ui/visually-hidden"
 import { MessageToast } from '../MessageToast';
 import Logo from '../Logo';
 import Info from '../Info';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import { ComplianceNotification } from '../ComplianceNotification';
 import { Input } from '../ui/input';
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '../ui/input-group';
@@ -78,7 +79,7 @@ const Sidebar: React.FC = () => {
   const focusSearchOnExpand = useRef(false);
   const meetingsToggleRef = useRef<HTMLButtonElement>(null);
   const focusMeetingsOnExpand = useRef(false);
-  const editTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const editTriggerIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!isCollapsed && focusSearchOnExpand.current) {
@@ -496,7 +497,7 @@ const Sidebar: React.FC = () => {
               aria-label={item.title}
               aria-current={isActive ? 'page' : undefined}
               className={`flex items-center justify-center p-2 rounded-lg my-0.5 cursor-pointer transition-colors ${
-                isActive ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-100 text-gray-500'
+                isActive ? 'bg-stone-200 text-stone-900' : 'hover:bg-gray-100 text-gray-500'
               }`}
               onClick={() => {
                 setCurrentMeeting({ id: item.id, title: item.title });
@@ -517,7 +518,7 @@ const Sidebar: React.FC = () => {
       <div key={item.id}>
         <div
           className={`flex items-center pr-2 my-0.5 rounded-lg text-sm group transition-colors ${
-            isActive ? 'bg-blue-100 text-blue-700 font-medium' :
+            isActive ? 'bg-stone-200 text-stone-900 font-medium' :
             hasTranscriptMatch ? 'bg-yellow-50 hover:bg-yellow-100' : 'hover:bg-gray-100 text-gray-700'
           }`}
         >
@@ -531,25 +532,22 @@ const Sidebar: React.FC = () => {
             }}
           >
             <File className="w-3.5 h-3.5 flex-shrink-0 mr-2 text-gray-400" />
-            <span className="flex-1 truncate">{item.title}</span>
+            <span className="flex-1 truncate" title={item.title}>{item.title}</span>
           </button>
           {isMeetingItem && (
-            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity flex-shrink-0">
-              <button
-                onClick={(e) => { editTriggerRef.current = e.currentTarget; handleEditStart(item.id, item.title); }}
-                className="hover:text-blue-600 p-1 rounded hover:bg-blue-50"
-                aria-label={`Edit title: ${item.title}`}
-              >
-                <Pencil className="w-3.5 h-3.5" />
-              </button>
-              <button
-                onClick={(e) => { e.stopPropagation(); setDeleteModalState({ isOpen: true, itemId: item.id }); }}
-                className="hover:text-red-600 p-1 rounded hover:bg-red-50"
-                aria-label={`Delete meeting: ${item.title}`}
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
-            </div>
+            <DropdownMenu onOpenChange={(open) => { if (open) editTriggerIdRef.current = `meeting-actions-${item.id}`; }}>
+              <DropdownMenuTrigger asChild>
+                <button
+                  id={`meeting-actions-${item.id}`}
+                  aria-label={`Actions for ${item.title}`}
+                  className="shrink-0 rounded-md p-1.5 text-stone-500 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 data-[state=open]:opacity-100 hover:bg-stone-200"
+                ><MoreHorizontal className="h-4 w-4" /></button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                <DropdownMenuItem onSelect={() => handleEditStart(item.id, item.title)}><Pencil className="mr-2 h-4 w-4" />Edit title</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => setDeleteModalState({ isOpen: true, itemId: item.id })} className="text-red-600"><Trash2 className="mr-2 h-4 w-4" />Delete meeting</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           )}
         </div>
         {hasTranscriptMatch && (
@@ -565,13 +563,13 @@ const Sidebar: React.FC = () => {
     <>
     <nav
       aria-label="Main navigation"
-      className={`sticky top-0 h-screen flex-shrink-0 bg-white border-r shadow-sm flex flex-col transition-all duration-300 overflow-hidden z-40 [&_button:focus-visible]:outline [&_button:focus-visible]:outline-2 [&_button:focus-visible]:outline-blue-600 [&_button:focus-visible]:-outline-offset-2 ${
-        isCollapsed ? 'w-14' : 'w-56'
+      className={`sticky top-0 h-screen flex-shrink-0 bg-white border-r border-stone-200 flex flex-col transition-all duration-300 overflow-hidden z-40 [&_button:focus-visible]:outline [&_button:focus-visible]:outline-2 [&_button:focus-visible]:outline-stone-700 [&_button:focus-visible]:-outline-offset-2 ${
+        isCollapsed ? 'w-14' : 'w-64'
       }`}
     >
         {/* Header: Logo + toggle button */}
         <div className="flex items-center justify-between px-3 py-3 flex-shrink-0">
-          <Logo isCollapsed={isCollapsed} />
+          {!isCollapsed && <Logo isCollapsed={false} />}
           <button
             onClick={toggleCollapse}
             className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500 flex-shrink-0 transition-colors"
@@ -774,9 +772,11 @@ const Sidebar: React.FC = () => {
         if (!open) handleEditCancel();
       }}>
         <DialogContent className="sm:max-w-[425px]" onCloseAutoFocus={(event) => {
-          if (editTriggerRef.current?.isConnected) {
+          if (editTriggerIdRef.current) {
             event.preventDefault();
-            editTriggerRef.current.focus();
+            requestAnimationFrame(() => {
+              document.getElementById(editTriggerIdRef.current!)?.focus();
+            });
           }
         }}>
           <VisuallyHidden>
@@ -801,7 +801,7 @@ const Sidebar: React.FC = () => {
                       handleEditCancel();
                     }
                   }}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-stone-600 focus:border-transparent"
                   placeholder="Enter meeting title"
                   autoFocus
                 />
@@ -817,7 +817,7 @@ const Sidebar: React.FC = () => {
             </button>
             <button
               onClick={handleEditConfirm}
-              className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors"
+              className="px-4 py-2 text-sm font-medium text-white bg-stone-900 hover:bg-stone-800 rounded-md transition-colors"
             >
               Save
             </button>

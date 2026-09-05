@@ -21,6 +21,7 @@ import {
 import type { Block } from '@blocknote/core';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
+import { AssistantMessage } from '@/components/AssistantMessage';
 import { useTranscripts } from '@/contexts/TranscriptContext';
 import { RecordingStatus, useRecordingState } from '@/contexts/RecordingStateContext';
 import { useConfig } from '@/contexts/ConfigContext';
@@ -424,10 +425,7 @@ export default function QuickNotePage() {
   const showSavedSummary = isPostRecording && activeSavedView === 'summary' && Boolean(aiSummary);
   const isComposerExpanded = isAiComposerOpen || isChatLoading;
   const enhanceNotesPrompt = useMemo(() => buildEnhanceNotesPrompt(noteText), [noteText]);
-  const titleSizeClass =
-    noteTitle.trim().length > 52
-      ? 'text-3xl leading-[1.05] lg:text-[2.55rem]'
-      : 'text-4xl leading-[0.98] lg:text-5xl';
+
 
   const handleRegisterModalOpen = (openFn: () => void) => {
     openModelSettingsRef.current = openFn;
@@ -720,14 +718,14 @@ export default function QuickNotePage() {
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.22, ease: 'easeOut' }}
-      className="h-screen overflow-y-auto bg-[#f6f2ea] text-stone-900"
+      className="document-page"
     >
-      <div className="mx-auto flex min-h-full w-full max-w-[1480px] flex-col px-5 py-5 md:px-6 lg:px-8">
+      <div className="document-shell">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <button
             type="button"
             onClick={() => void handleGoHome()}
-            className="inline-flex items-center gap-2 rounded-full border border-stone-200/80 bg-white/65 px-4 py-2 text-sm font-medium text-stone-600 transition-colors hover:border-stone-300 hover:bg-white/80"
+            className="document-back"
           >
             <ArrowLeft className="h-4 w-4" />
             Home
@@ -761,7 +759,7 @@ export default function QuickNotePage() {
 
             <Button
               variant="outline"
-              className={`rounded-full border-stone-200/75 bg-white/70 text-stone-600 shadow-none ${isPostRecording ? 'border-stone-200/60 bg-white/55 text-stone-500' : ''}`}
+              className={`rounded-md border-stone-200/75 bg-white/70 text-stone-600 shadow-none ${isPostRecording ? 'border-stone-200/60 bg-white/55 text-stone-500' : ''}`}
               onClick={handleCopyNote}
             >
               <Copy className="h-4 w-4" />
@@ -770,7 +768,7 @@ export default function QuickNotePage() {
             {!isPostRecording && (
               <Button
                 variant="outline"
-                className="rounded-full border-stone-200/75 bg-white/70 text-stone-600 shadow-none"
+                className="rounded-md border-stone-200/75 bg-white/70 text-stone-600 shadow-none"
                 onClick={handleClearNote}
               >
                 Clear
@@ -778,7 +776,7 @@ export default function QuickNotePage() {
             )}
             {recordingState.isRecording && (
               <Button
-                className="rounded-full bg-stone-900 text-white hover:bg-stone-800"
+                className="rounded-md bg-stone-900 text-white hover:bg-stone-800"
                 onClick={handleStopSession}
                 disabled={isStoppingSession}
               >
@@ -797,7 +795,7 @@ export default function QuickNotePage() {
             )}
             {!isLiveSessionVisible && (
               <Button
-                className="rounded-full bg-stone-900 text-white hover:bg-stone-800"
+                className="rounded-md bg-stone-900 text-white hover:bg-stone-800"
                 onClick={handleNewRecording}
               >
                 <Mic className="h-4 w-4" />
@@ -808,11 +806,11 @@ export default function QuickNotePage() {
         </div>
 
         {isPostRecording ? (
-          <div className="mt-5 flex min-h-0 flex-1 flex-col gap-4 pb-36">
+          <div className="mt-3 flex min-h-0 flex-col gap-4 pb-8">
             <section className="flex min-h-0 flex-1 flex-col">
-              <div className="mx-auto w-full max-w-[980px] border-b border-stone-200/70 px-2 py-3 lg:px-1 lg:py-4">
+              <div className="document-header">
                 <div className="space-y-4">
-                  <div className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.24em] text-stone-400">
+                  <div className="inline-flex items-center gap-2 text-xs font-medium text-stone-500">
                     <Wand2 className="h-3.5 w-3.5" />
                     Captured note
                   </div>
@@ -822,7 +820,7 @@ export default function QuickNotePage() {
                     onChange={(event) => handleTitleChange(event.target.value)}
                     placeholder="New note"
                     rows={1}
-                    className={`w-full resize-none overflow-hidden border-0 bg-transparent px-0 font-semibold tracking-tight text-stone-900 outline-none placeholder:text-stone-400 ${titleSizeClass}`}
+                    className="document-title"
                   />
                   <div className="flex flex-wrap items-center gap-2 text-sm text-stone-500">
                     <InlineMeta>
@@ -839,15 +837,11 @@ export default function QuickNotePage() {
                     </InlineMeta>
                   </div>
                   <div className="flex flex-wrap items-center gap-3">
-                    <div className="inline-flex rounded-full bg-stone-100/70 p-1">
+                    <div className="flex flex-wrap items-center gap-4">
                       <button
                         type="button"
                         onClick={() => setActiveSavedView('notes')}
-                        className={`rounded-full px-4 py-2 text-sm font-medium transition-colors ${
-                          activeSavedView === 'notes'
-                            ? 'bg-white text-stone-900 shadow-sm'
-                            : 'text-stone-600 hover:text-stone-900'
-                        }`}
+                        aria-pressed={activeSavedView === 'notes'} className="document-tab"
                       >
                         Meeting Notes
                       </button>
@@ -855,18 +849,16 @@ export default function QuickNotePage() {
                         <button
                           type="button"
                           onClick={() => setActiveSavedView('summary')}
-                          className={`rounded-full px-4 py-2 text-sm font-medium transition-colors ${
-                            activeSavedView === 'summary'
-                              ? 'bg-white text-stone-900 shadow-sm'
-                              : 'text-stone-600 hover:text-stone-900'
-                          }`}
+                          aria-pressed={activeSavedView === 'summary'} className="document-tab"
                         >
                           {aiSummary ? 'Enhanced Notes' : 'Enhancing…'}
                         </button>
                       )}
                     </div>
 
-                    <div className="ml-auto rounded-full bg-white/75 p-1 ring-1 ring-stone-200/70">
+                    <Button variant="ghost" onClick={() => setIsTranscriptOpen(true)}>Transcript</Button>
+                    {showEnhanceNotesCta && <EnhanceNotesCta onClick={handleEnhanceNotes} />}
+                    <div className="ml-auto rounded-md bg-white/75 p-1 ring-1 ring-stone-200/70">
                       <SummaryGeneratorButtonGroup
                         modelConfig={modelConfig}
                         setModelConfig={setModelConfig}
@@ -888,9 +880,9 @@ export default function QuickNotePage() {
                 </div>
               </div>
 
-              <div className="mx-auto flex min-h-0 w-full max-w-[980px] flex-1 px-2 py-5 lg:px-1 lg:py-6">
+              <div className="w-full py-5">
                 {showSavedSummary ? (
-                  <div className="h-full min-h-[420px] overflow-hidden rounded-[24px] bg-white/78 ring-1 ring-stone-200/60 shadow-[0_18px_40px_-34px_rgba(41,37,36,0.18)]">
+                  <div className="document-editor">
                     <div className="h-full overflow-y-auto p-4">
                       <BlockNoteSummaryView
                         ref={summaryRef}
@@ -909,7 +901,7 @@ export default function QuickNotePage() {
                     </div>
                   </div>
                 ) : shouldRenderEditor ? (
-                  <div className="relative h-full min-h-[420px] overflow-hidden rounded-[24px] bg-white/76 px-3 py-3 ring-1 ring-stone-200/60 shadow-[0_18px_40px_-34px_rgba(41,37,36,0.18)] md:min-h-[560px]">
+                  <div className="document-editor">
                     <Editor
                       key={activeNotesMeetingId || 'quick-note-draft'}
                       initialContent={blocks}
@@ -918,7 +910,7 @@ export default function QuickNotePage() {
                     />
                   </div>
                 ) : isNoteEmpty ? (
-                  <div className="flex h-full min-h-[420px] items-center justify-center rounded-[24px] bg-white/76 ring-1 ring-stone-200/60 shadow-[0_18px_40px_-34px_rgba(41,37,36,0.18)]">
+                  <div className="flex h-full min-h-[240px] items-center justify-center rounded-lg bg-white/76 ring-1 ring-stone-200/60">
                     <EmptyStateSummary
                       onGenerate={handleEnhanceNotes}
                       hasModel={Boolean(modelConfig.provider && modelConfig.model)}
@@ -926,30 +918,16 @@ export default function QuickNotePage() {
                     />
                   </div>
                 ) : (
-                  <div className="flex min-h-[420px] items-center justify-center rounded-[24px] bg-white/76 px-6 py-6 text-sm text-stone-500 ring-1 ring-stone-200/60 shadow-[0_18px_40px_-34px_rgba(41,37,36,0.18)]">
+                  <div className="flex min-h-[240px] items-center justify-center rounded-lg bg-white/76 px-6 py-6 text-sm text-stone-500 ring-1 ring-stone-200/60">
                     Loading saved note...
                   </div>
                 )}
               </div>
             </section>
 
-            <div className="mt-auto lg:sticky lg:bottom-4 lg:z-30">
-              {showEnhanceNotesCta && (
-                <div className="mb-3 flex justify-center">
-                  <EnhanceNotesCta onClick={handleEnhanceNotes} />
-                </div>
-              )}
-              <div className="mx-auto flex max-w-[980px] items-end gap-3">
-                <button
-                  type="button"
-                  onClick={() => setIsTranscriptOpen(true)}
-                  className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-stone-200/70 bg-white/82 text-stone-700 shadow-[0_12px_28px_-24px_rgba(41,37,36,0.24)] transition-colors hover:border-stone-300 hover:bg-white"
-                  title="Open transcript"
-                >
-                  <WaveGlyph />
-                </button>
-
-                <div className="min-w-0 flex-1 overflow-hidden rounded-[24px] border border-stone-200/70 bg-white/84 shadow-[0_16px_36px_-28px_rgba(41,37,36,0.2)]">
+            <div className="border-t border-stone-200 pt-4">
+              <div className="mx-auto flex w-full items-end gap-3">
+                <div className="min-w-0 flex-1 overflow-hidden rounded-lg border border-stone-200/70 bg-white/84">
                   {isComposerExpanded ? (
                     <div className="p-4">
                       {messages.length > 0 && (
@@ -963,7 +941,7 @@ export default function QuickNotePage() {
                                   : 'border border-stone-200/80 bg-stone-50 text-stone-700'
                               }`}
                             >
-                              {message.content}
+                              {message.role === 'assistant' ? <AssistantMessage content={message.content} /> : message.content}
                             </div>
                           ))}
                           {isChatLoading && (
@@ -984,7 +962,7 @@ export default function QuickNotePage() {
                             type="button"
                             onClick={() => handleRecipe(recipe)}
                             disabled={isChatLoading}
-                            className="rounded-full border border-stone-200/75 bg-stone-50/80 px-3 py-1.5 text-xs font-medium text-stone-700 transition-colors hover:border-stone-300 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+                            className="rounded-md border border-stone-200/75 bg-stone-50/80 px-3 py-1.5 text-xs font-medium text-stone-700 transition-colors hover:border-stone-300 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             {recipe.label}
                           </button>
@@ -992,13 +970,13 @@ export default function QuickNotePage() {
                         <button
                           type="button"
                           onClick={() => setIsAiComposerOpen(false)}
-                          className="ml-auto rounded-full border border-stone-200 px-3 py-1.5 text-xs font-medium text-stone-500 transition-colors hover:border-stone-300 hover:text-stone-700"
+                          className="ml-auto rounded-md border border-stone-200 px-3 py-1.5 text-xs font-medium text-stone-500 transition-colors hover:border-stone-300 hover:text-stone-700"
                         >
                           Collapse
                         </button>
                       </div>
 
-                      <div className="flex items-center gap-2 rounded-[22px] border border-stone-200/80 bg-stone-50/80 p-2">
+                      <div className="flex items-center gap-2 rounded-lg border border-stone-200/80 bg-stone-50/80 p-2">
                         <div className="flex items-center gap-2 pl-2 text-stone-400">
                           <Sparkles className="h-4 w-4" />
                         </div>
@@ -1020,7 +998,7 @@ export default function QuickNotePage() {
                           onClick={handleSendChat}
                           disabled={isChatLoading || !chatInput.trim() || (!noteText.trim() && transcripts.length === 0)}
                           aria-label="Send question"
-                          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-stone-900 text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
+                          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-stone-900 text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           <Send className="h-4 w-4" />
                         </button>
@@ -1032,14 +1010,14 @@ export default function QuickNotePage() {
                       onClick={() => setIsAiComposerOpen(true)}
                       className="flex w-full items-center gap-3 px-5 py-3.5 text-left"
                     >
-                      <div className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-full bg-stone-100/85 md:flex text-stone-700">
+                      <div className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-md bg-stone-100/85 md:flex text-stone-700">
                         <Sparkles className="h-4 w-4" />
                       </div>
                       <div className="flex-1">
                         <p className="text-sm font-medium text-stone-900">Ask anything</p>
                         <p className="hidden text-xs text-stone-500 md:block">Open follow-up prompts, action-item recipes, and Q&A for this meeting.</p>
                       </div>
-                      <div className="rounded-full border border-stone-200/80 px-3 py-1.5 text-xs font-medium text-stone-600">
+                      <div className="rounded-md border border-stone-200/80 px-3 py-1.5 text-xs font-medium text-stone-600">
                         View recipes
                       </div>
                     </button>
@@ -1051,7 +1029,7 @@ export default function QuickNotePage() {
             <Sheet open={isTranscriptOpen} onOpenChange={setIsTranscriptOpen}>
               <SheetContent
                 side="bottom"
-                className="h-[78vh] rounded-t-[30px] border-stone-200 bg-[linear-gradient(180deg,_rgba(255,255,255,0.98)_0%,_rgba(248,246,240,0.98)_100%)] px-0 pb-0 pt-4"
+                className="h-[78vh] rounded-t-xl border-stone-200 bg-white px-0 pb-0 pt-4"
               >
                 <div className="flex h-full flex-col">
                   <SheetHeader className="border-b border-stone-200 px-6 pb-4">
@@ -1065,7 +1043,7 @@ export default function QuickNotePage() {
                       <Button
                         variant="outline"
                         size="sm"
-                        className="rounded-full border-stone-200 bg-white"
+                        className="rounded-md border-stone-200 bg-white"
                         onClick={handleCopyTranscript}
                       >
                         <Copy className="h-4 w-4" />
@@ -1080,7 +1058,7 @@ export default function QuickNotePage() {
                         transcripts.map((item) => (
                           <div
                             key={item.id}
-                            className="rounded-[24px] border border-stone-200 bg-white/90 px-4 py-4 shadow-sm"
+                            className="rounded-lg border border-stone-200 bg-white/90 px-4 py-4 shadow-sm"
                           >
                             <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-stone-500">
                               {formatTranscriptTime(item.audio_start_time)}
@@ -1089,7 +1067,7 @@ export default function QuickNotePage() {
                           </div>
                         ))
                       ) : (
-                        <div className="rounded-[24px] border border-dashed border-stone-300 bg-stone-50 px-4 py-8 text-sm leading-6 text-stone-500">
+                        <div className="rounded-lg border border-dashed border-stone-300 bg-stone-50 px-4 py-8 text-sm leading-6 text-stone-500">
                           No transcript segments were captured for this note.
                         </div>
                       )}
@@ -1101,12 +1079,12 @@ export default function QuickNotePage() {
           </div>
         ) : (
           <div className={`mt-5 grid min-h-0 flex-1 gap-5 ${isLiveSessionVisible ? 'md:grid-cols-[minmax(0,1.2fr)_minmax(300px,0.86fr)] xl:grid-cols-[minmax(0,1.4fr)_420px]' : 'mx-auto w-full max-w-[980px]'}`}>
-            <section className="flex min-h-0 flex-col rounded-[32px] border border-white/70 bg-[linear-gradient(180deg,_rgba(255,255,255,0.96)_0%,_rgba(252,249,243,0.96)_100%)] shadow-[0_28px_80px_-36px_rgba(41,37,36,0.42)] backdrop-blur">
-              <div className="border-b border-stone-200/80 px-6 py-6 lg:px-8 lg:py-7">
+            <section className="flex min-h-0 flex-col">
+              <div className="document-header">
                 <div className="space-y-4">
-                  <div className="inline-flex items-center gap-2 rounded-full border border-stone-200 bg-stone-50/90 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-stone-500">
+                  <div className="inline-flex items-center gap-2 text-xs font-medium text-stone-500">
                     <Wand2 className="h-3.5 w-3.5" />
-                    {isLiveSessionVisible ? 'Live note canvas' : 'Draft note'}
+                    {isLiveSessionVisible ? 'Live notes' : 'Draft note'}
                   </div>
                   <textarea
                     ref={titleRef}
@@ -1114,7 +1092,7 @@ export default function QuickNotePage() {
                     onChange={(event) => handleTitleChange(event.target.value)}
                     placeholder="New note"
                     rows={1}
-                    className={`w-full resize-none overflow-hidden border-0 bg-transparent px-0 font-semibold tracking-tight text-stone-900 outline-none placeholder:text-stone-400 ${titleSizeClass}`}
+                    className="document-title"
                   />
                   <div className="flex flex-wrap items-center gap-2 text-sm">
                     <StatusPill icon={<Mic className="h-3.5 w-3.5 text-stone-500" />}>
@@ -1126,9 +1104,9 @@ export default function QuickNotePage() {
                 </div>
               </div>
 
-              <div className="flex-1 min-h-0 px-5 py-5 lg:px-8 lg:py-6">
+              <div className="min-h-0 py-5">
                 {shouldRenderEditor ? (
-                  <div className="relative h-full min-h-[300px] overflow-hidden rounded-[28px] border border-stone-200/70 bg-[linear-gradient(180deg,_#fffdf8_0%,_#fbf7ef_100%)] px-2 py-2 md:min-h-[520px]">
+                  <div className="document-editor">
                     <Editor
                       key={activeNotesMeetingId || 'quick-note-draft'}
                       initialContent={blocks}
@@ -1144,10 +1122,10 @@ export default function QuickNotePage() {
                       setUpdatedAt(Date.now());
                     }}
                     placeholder={isLiveSessionVisible ? 'Write notes while recording spins up...' : 'Write your notes. Changes are saved locally.'}
-                    className="h-full min-h-[300px] w-full resize-none rounded-[28px] border border-stone-200/70 bg-[linear-gradient(180deg,_#fffdf8_0%,_#fbf7ef_100%)] px-6 py-6 text-lg leading-8 text-stone-800 outline-none placeholder:text-stone-400 md:min-h-[520px]"
+                    className="document-editor resize-y px-8 outline-none placeholder:text-stone-500"
                   />
                 ) : (
-                  <div className="flex min-h-[320px] items-center justify-center rounded-[28px] border border-stone-200/70 bg-[linear-gradient(180deg,_#fffdf8_0%,_#fbf7ef_100%)] px-6 py-6 text-sm text-stone-500">
+                  <div className="document-editor flex items-center justify-center text-sm text-stone-500">
                     Loading saved note...
                   </div>
                 )}
@@ -1155,7 +1133,7 @@ export default function QuickNotePage() {
             </section>
 
             <aside className={`${isLiveSessionVisible ? 'flex' : 'hidden'} min-h-0 flex-col gap-4 md:sticky md:top-5 md:max-h-[calc(100vh-2.5rem)]`}>
-              <section className="rounded-[28px] border border-stone-200/80 bg-white/90 p-5 shadow-sm">
+              <section className="rounded-lg border border-stone-200/80 bg-white/90 p-5 shadow-sm">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">
@@ -1165,7 +1143,7 @@ export default function QuickNotePage() {
                       Listen and write at the same time
                     </h2>
                   </div>
-                  <span className="rounded-full bg-stone-100 px-3 py-1 text-xs font-medium text-stone-600">
+                  <span className="rounded-md bg-stone-100 px-3 py-1 text-xs font-medium text-stone-600">
                     {transcripts.length} segments
                   </span>
                 </div>
@@ -1191,7 +1169,7 @@ export default function QuickNotePage() {
                 </div>
               </section>
 
-              <section className="flex min-h-0 flex-1 flex-col rounded-[28px] border border-stone-200/80 bg-[linear-gradient(180deg,_rgba(255,255,255,0.96)_0%,_rgba(247,246,241,0.98)_100%)] p-5 shadow-sm md:min-h-[320px]">
+              <section className="flex min-h-0 flex-1 flex-col rounded-lg border border-stone-200/80 bg-white p-5 shadow-sm md:min-h-[320px]">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">
@@ -1219,7 +1197,7 @@ export default function QuickNotePage() {
                       type="button"
                       onClick={() => handleRecipe(recipe)}
                       disabled={isChatLoading}
-                      className="rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-700 transition-colors hover:border-stone-300 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+                      className="rounded-md border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-700 transition-colors hover:border-stone-300 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {recipe.label}
                     </button>
@@ -1237,7 +1215,7 @@ export default function QuickNotePage() {
                             : 'border border-stone-200/80 bg-white/90 text-stone-700'
                         }`}
                       >
-                        {message.content}
+                        {message.role === 'assistant' ? <AssistantMessage content={message.content} /> : message.content}
                       </div>
                     ))
                   ) : (
@@ -1255,7 +1233,7 @@ export default function QuickNotePage() {
                   )}
                 </div>
 
-                <div className="mt-4 flex items-center gap-2 rounded-[22px] border border-stone-200 bg-stone-50 p-2">
+                <div className="mt-4 flex items-center gap-2 rounded-lg border border-stone-200 bg-stone-50 p-2">
                   <div className="flex items-center gap-2 pl-2 text-stone-400">
                     <Sparkles className="h-4 w-4" />
                   </div>
@@ -1276,7 +1254,7 @@ export default function QuickNotePage() {
                     onClick={handleSendChat}
                     disabled={isChatLoading || !chatInput.trim() || (!noteText.trim() && transcripts.length === 0)}
                     aria-label="Send question"
-                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-stone-900 text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-stone-900 text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <Send className="h-4 w-4" />
                   </button>
@@ -1287,16 +1265,6 @@ export default function QuickNotePage() {
         )}
       </div>
     </motion.div>
-  );
-}
-
-function WaveGlyph() {
-  return (
-    <span className="flex h-4 items-end gap-0.5">
-      <span className="h-2 w-0.5 rounded-full bg-current opacity-70" />
-      <span className="h-3.5 w-0.5 rounded-full bg-current" />
-      <span className="h-2.5 w-0.5 rounded-full bg-current opacity-80" />
-    </span>
   );
 }
 
@@ -1311,11 +1279,7 @@ function StatusPill({
 }) {
   return (
     <div
-      className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-sm font-medium ${
-        subdued
-          ? 'border border-stone-200/70 bg-white/60 text-stone-500'
-          : 'border border-stone-200/85 bg-white/80 text-stone-600'
-      }`}
+      className={`inline-flex items-center gap-2 text-sm ${subdued ? 'text-stone-500' : 'text-stone-600'}`}
     >
       {icon}
       {children}

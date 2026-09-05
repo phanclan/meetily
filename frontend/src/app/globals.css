@@ -212,3 +212,29 @@
     overflow: visible !important;
   }
 }
+/* Shared document surfaces for drafting, recording, and saved meetings. */
+@layer components {
+  .document-page { @apply h-screen overflow-y-auto bg-[#fafaf8] text-stone-900; }
+  .document-shell { @apply mx-auto flex min-h-full w-full max-w-6xl flex-col px-5 py-5 md:px-8; }
+  .document-header { @apply w-full border-b border-stone-200 pb-4 pt-2; }
+  .document-title { @apply w-full resize-none overflow-hidden border-0 bg-transparent px-0 text-2xl font-semibold leading-tight tracking-tight text-stone-900 outline-none placeholder:text-stone-400 md:text-3xl; }
+  .document-editor { @apply min-h-[240px] w-full bg-white py-5 text-base leading-7 text-stone-800; }
+  .document-editor .bn-editor { padding-inline: 32px; }
+  .document-tab { @apply border-b-2 border-transparent px-1 py-2 text-sm font-medium text-stone-600 hover:text-stone-900; }
+  .document-tab[aria-pressed="true"] { @apply border-stone-900 text-stone-900; }
+  .document-back { @apply inline-flex items-center gap-2 rounded-md px-2 py-2 text-sm font-medium text-stone-600 hover:bg-stone-100 hover:text-stone-900; }
+  .assistant-markdown > :first-child { margin-top: 0; }
+  .assistant-markdown > :last-child { margin-bottom: 0; }
+  .assistant-markdown p { @apply my-2; }
+  .assistant-markdown ul { @apply my-2 list-disc pl-5; }
+  .assistant-markdown ol { @apply my-2 list-decimal pl-5; }
+  .assistant-markdown li { @apply my-1; }
+  .assistant-markdown .contains-task-list { @apply list-none pl-0; }
+  .assistant-markdown input[type="checkbox"] { @apply mr-2; }
+  .assistant-markdown a { @apply underline underline-offset-2; }
+  .assistant-markdown h1, .assistant-markdown h2, .assistant-markdown h3 { @apply mb-2 mt-4 text-base font-semibold; }
+  .assistant-markdown pre { @apply my-2 overflow-x-auto rounded-md bg-stone-100 p-3 text-xs; }
+  .assistant-markdown table { @apply my-2 block max-w-full overflow-x-auto text-sm; }
+  .assistant-markdown th, .assistant-markdown td { @apply border border-stone-200 px-3 py-2 text-left; }
+  .assistant-markdown blockquote { @apply my-2 border-l-2 border-stone-300 pl-3 text-stone-600; }
+}

@@ -18,7 +18,7 @@ export function EnhanceNotesCta({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="inline-flex items-center gap-2 rounded-full bg-[#6f7d32] px-5 py-3 text-sm font-semibold text-white shadow-[0_18px_40px_-22px_rgba(69,82,22,0.7)] transition-colors hover:bg-[#5f6b2b] disabled:cursor-not-allowed disabled:bg-[#a7b27c] disabled:shadow-none"
+      className="inline-flex h-9 items-center gap-2 rounded-md bg-stone-900 px-3 text-sm font-medium text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
     >
       {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
       {isLoading ? 'Enhancing notes…' : 'Enhance notes'}
