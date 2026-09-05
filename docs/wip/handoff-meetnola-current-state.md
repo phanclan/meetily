@@ -2,6 +2,14 @@
 
 Last updated: 2026-09-05
 
+## Quality fixes (2026-09-05)
+
+- Code commit `32fb2ab` on `codex/meetnola-quality-fixes` addresses the seven review findings: checkpoint retention, Unicode-safe truncation, idempotent saves, editor clearing, saved-title persistence, accurate **New recording** behavior, and notes-only enhancement.
+- Packaged tester build `20260905-32fb2ab` replaces the earlier bundle at the recovery worktree's app path. This branch has not been merged into `main` or pushed.
+- Passed: TypeScript, 16 frontend regression checks, 3 Rust tests using Unicode inputs and isolated SQLite databases, markdown/onboarding checks, production frontend/native builds, and ad-hoc signature verification. Dependencies were synchronized to the existing lockfile.
+- Browser verification used the actual application editor: **Clear** emptied its visible document and stored state; subsequent typing did not restore old text.
+- Full native retesting remains blocked: startup waits inside CoreAudio during CPAL input-device discovery, including after restarting the tester. The sampled paths include `AudioStream::create` and `configure_macos_audio`. Saved-title reopening was not verified in the new native build. The tester was quit; the system audio service was not restarted. Live cloud summaries remain untested.
+
 ## Verified recovery baseline
 
 Meetnola is maintained as an independent fork with selective upstream adoption. See [Meetnola maintenance](../meetnola-maintenance.md) for branch policy, supported providers, and validation commands.
