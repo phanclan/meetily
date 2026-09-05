@@ -24,6 +24,8 @@ Navigation accessibility is implemented: named collapsed controls, a navigation 
 
 Current dev build: `20260905-1329-discovery` in `/private/tmp/meetnola Dev.app`, with frontend hot reload on port 3118, including the timestamp fix through `c5a3d78`. The temporary app contains its helper binaries and resources; strict ad-hoc signature verification passed. This checkout is now on local `main`; the packaged tester remains at `20260905-ae4bd26`. Earlier no-merge statements below describe the state at each validation pass.
 
+The fully merged recovery worktree was removed on 2026-09-05. Its build cache was preserved at `/Volumes/ServerData/Apps/meetily/target/meetnola`; set `CARGO_TARGET_DIR` to that path to reuse it. The packaged tester is now at `target/meetnola/release/bundle/macos/meetnola Tester.app`, and strict signature verification passed after relocation. The existing main-checkout cache and running dev app were preserved. Recovery-worktree paths below are historical.
+
 ## Compact-window and package verification
 
 Scope: preserve navigation, note saving, model choices, and page actions; improve shared content width, title wrapping, and compact AI controls. No navigation or editor replacement.
