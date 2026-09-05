@@ -1,6 +1,23 @@
 # Meetnola Current State Handoff
 
-Last updated: 2026-03-09
+Last updated: 2026-09-05
+
+## Verified recovery baseline
+
+Meetnola is maintained as an independent fork with selective upstream adoption. See [Meetnola maintenance](../meetnola-maintenance.md) for branch policy, supported providers, and validation commands.
+
+- Recovery code: `54e3af9` on `meetnola/recovery-baseline`, including recording/note fixes in `7347b94`.
+- Final packaged tester: `meetnola Tester v0.4.0 (bundle, 20260905-54e3af9)` at `target/release/bundle/macos/meetnola Tester.app` in the recovery worktree.
+- Local Parakeet Compact remains selected by user choice. System-audio permission was granted by the user.
+- Validation passed: TypeScript, 10 recording/updater regression tests, 3 markdown tests, onboarding model checks, Rust check, production frontend build, native app bundle, and ad-hoc signature verification.
+- Packaged UI validation: synthetic speech transcribed; title, notes, and transcript survived navigation, stop, and reopening. A second recording on the final build saved two transcript segments; editing its note after stop persisted when reopened.
+- Synthetic evidence remains in the tester as **Meetnola recovery smoke test** and **Meetnola final build verification**. No test records were deleted.
+- Upstream automatic updates are disabled for Meetnola. Cloud transcription is unsupported in this baseline. Live summary-provider behavior and notarized distribution were not validated.
+- Local promotion uses a fast-forward into `main`; remote publication is separate and has not been performed.
+
+## Historical product and packaging snapshot (2026-03-09)
+
+The sections below preserve the earlier handoff. Build versions and outstanding-work statements below are historical; the verified baseline above takes precedence.
 
 ## Purpose
 
