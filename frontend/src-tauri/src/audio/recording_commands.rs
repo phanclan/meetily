@@ -55,6 +55,42 @@ pub struct RecordingArgs {
 }
 
 #[derive(Debug, Serialize, Clone)]
+pub struct StopRecordingResult {
+    pub status: String,
+    pub reason: Option<String>,
+    pub chunks_remaining: usize,
+    pub message: String,
+}
+
+impl StopRecordingResult {
+    pub fn complete(message: impl Into<String>) -> Self {
+        Self {
+            status: "complete".to_string(),
+            reason: None,
+            chunks_remaining: 0,
+            message: message.into(),
+        }
+    }
+
+    pub fn partial(
+        reason: impl Into<String>,
+        chunks_remaining: usize,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            status: "partial".to_string(),
+            reason: Some(reason.into()),
+            chunks_remaining,
+            message: message.into(),
+        }
+    }
+
+    pub fn is_complete(&self) -> bool {
+        self.status == "complete"
+    }
+}
+
+#[derive(Debug, Serialize, Clone)]
 pub struct TranscriptionStatus {
     pub chunks_in_queue: usize,
     pub is_processing: bool,
@@ -483,7 +519,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
 pub async fn stop_recording<R: Runtime>(
     app: AppHandle<R>,
     _args: RecordingArgs,
-) -> Result<(), String> {
+) -> Result<StopRecordingResult, String> {
     info!(
         "🛑 Starting optimized recording shutdown - ensuring ALL transcript chunks are preserved"
     );
@@ -491,7 +527,7 @@ pub async fn stop_recording<R: Runtime>(
     // Check if recording is active
     if !IS_RECORDING.load(Ordering::SeqCst) {
         info!("Recording was not active");
-        return Ok(());
+        return Ok(StopRecordingResult::complete("Recording was already stopped"));
     }
 
     // Emit shutdown progress to frontend
@@ -893,7 +929,9 @@ pub async fn stop_recording<R: Runtime>(
     crate::tray::update_tray_menu(&app);
 
     info!("🎉 Recording stopped successfully with ZERO transcript chunks lost");
-    Ok(())
+    Ok(StopRecordingResult::complete(
+        "Recording stopped successfully with ZERO transcript chunks lost",
+    ))
 }
 
 /// Check if recording is active

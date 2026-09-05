@@ -90,9 +90,18 @@ if (extraArgs.length > 0) {
   tauriCmd += ` ${extraArgs.map((arg) => JSON.stringify(arg)).join(' ')}`;
   console.log(`🧩 Extra Tauri args: ${extraArgs.join(' ')}`);
 }
+// Meetnola tester builds always enable the meetnola Cargo feature.
+const featureList = [];
 if (feature && feature !== 'none') {
-  tauriCmd += ` -- --features ${feature}`;
-  console.log(`🚀 Running: tauri ${command} with features: ${feature}`);
+  featureList.push(feature);
+}
+if (testerConfig) {
+  featureList.push('meetnola');
+}
+if (featureList.length > 0) {
+  const featuresArg = featureList.join(',');
+  tauriCmd += ` -- --features ${featuresArg}`;
+  console.log(`🚀 Running: tauri ${command} with features: ${featuresArg}`);
 } else {
   console.log(`🚀 Running: tauri ${command} (CPU-only mode)`);
 }

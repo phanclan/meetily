@@ -297,10 +297,10 @@ export function SummaryGeneratorButtonGroup({
         </>
       )}
 
-      {/* Settings button */}
-      <{languageSlot}
+      {languageSlot}
 
-      Dialog open={settingsDialogOpen} onOpenChange={setSettingsDialogOpen}>
+      {/* Settings button */}
+      <Dialog open={settingsDialogOpen} onOpenChange={setSettingsDialogOpen}>
         <DialogTrigger asChild>
           <Button
             variant="outline"

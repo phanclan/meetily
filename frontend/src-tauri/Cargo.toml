@@ -52,6 +52,11 @@ hipblas = ["whisper-rs/hipblas"]   # Linux: AMD ROCm HIP
 openblas = ["whisper-rs/openblas"] # Optimized BLAS (Auto-enabled on Windows/Linux)
 openmp = ["whisper-rs/openmp"]     # OpenMP parallel processing
 
+# Meetnola product modules (notes, live query, call detection, frontend logging)
+meetnola = []
+# Development-only automation HTTP API (axum). Do not enable for production.
+meetnola-automation = ["meetnola", "dep:axum"]
+
 [build-dependencies]
 tauri-build = { version = "2.3.0", features = [] }
 reqwest = { version = "0.11", features = ["blocking", "multipart", "json", "stream"] }
@@ -147,7 +152,7 @@ ffmpeg-sidecar = { git = "https://github.com/nathanbabcock/ffmpeg-sidecar", bran
 sqlx = { version = "0.8", features = [ "runtime-tokio", "sqlite", "chrono"] }
 
 # Automation HTTP API (opt-in via MEETILY_AUTOMATION=1)
-axum = { version = "0.7", features = ["json"] }
+axum = { version = "0.7", features = ["json"], optional = true }
 
 # Common Tauri configuration
 tauri = { version = "2.6.2", features = [ "macos-private-api", "protocol-asset", "tray-icon"] }

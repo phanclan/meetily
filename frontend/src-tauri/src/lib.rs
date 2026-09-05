@@ -40,13 +40,18 @@ pub(crate) use perf_trace;
 pub mod analytics;
 pub mod api;
 pub mod audio;
+#[cfg(feature = "meetnola-automation")]
 pub mod automation;
 pub mod config;
 pub mod console_utils;
 pub mod database;
+#[cfg(feature = "meetnola")]
 pub mod frontend_logging;
+#[cfg(feature = "meetnola")]
 pub mod live_query;
+#[cfg(feature = "meetnola")]
 pub mod meeting_detection;
+#[cfg(feature = "meetnola")]
 pub mod notes_commands;
 pub mod notifications;
 pub mod ollama;
@@ -691,17 +696,21 @@ pub fn run() {
                 log::warn!("Failed to resolve resource directory for templates");
             }
 
-            // Start automation HTTP server if MEETILY_AUTOMATION=1
-            if std::env::var("MEETILY_AUTOMATION").as_deref() == Ok("1") {
-                if let Some(app_state) = _app.try_state::<state::AppState>() {
-                    let db = app_state.db_manager.clone();
-                    tauri::async_runtime::spawn(automation::start(db));
-                } else {
-                    log::warn!("[automation] AppState not available; server not started");
+            // Start automation HTTP server only with meetnola-automation + MEETILY_AUTOMATION=1
+            #[cfg(feature = "meetnola-automation")]
+            {
+                if std::env::var("MEETILY_AUTOMATION").as_deref() == Ok("1") {
+                    if let Some(app_state) = _app.try_state::<state::AppState>() {
+                        let db = app_state.db_manager.clone();
+                        tauri::async_runtime::spawn(automation::start(db));
+                    } else {
+                        log::warn!("[automation] AppState not available; server not started");
+                    }
                 }
             }
 
             // Start call detection background poller. Emission is gated by user preference.
+            #[cfg(feature = "meetnola")]
             meeting_detection::start_detection(_app.handle().clone());
 
             Ok(())
@@ -949,17 +958,26 @@ pub fn run() {
             audio::import::start_import_audio_command,
             audio::import::cancel_import_command,
             audio::import::is_import_in_progress_command,
+            #[cfg(feature = "meetnola")]
             frontend_logging::append_frontend_log,
             // Live meeting AI chat
+            #[cfg(feature = "meetnola")]
             live_query::live_query,
             // Call detection commands
+            #[cfg(feature = "meetnola")]
             meeting_detection::start_call_detection,
+            #[cfg(feature = "meetnola")]
             meeting_detection::stop_call_detection,
+            #[cfg(feature = "meetnola")]
             meeting_detection::set_call_detection_enabled,
+            #[cfg(feature = "meetnola")]
             meeting_detection::get_call_detection_enabled,
             // Meeting notes commands
+            #[cfg(feature = "meetnola")]
             notes_commands::save_meeting_notes,
+            #[cfg(feature = "meetnola")]
             notes_commands::get_meeting_notes,
+            #[cfg(feature = "meetnola")]
             notes_commands::move_meeting_notes,
         ])
         .build(tauri::generate_context!())

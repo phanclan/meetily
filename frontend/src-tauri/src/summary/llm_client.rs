@@ -344,3 +344,45 @@ fn provider_name(provider: &LLMProvider) -> &str {
         LLMProvider::CustomOpenAI => "Custom OpenAI",
     }
 }
+
+/// Single-shot Q&A against a live meeting transcript (Meetnola live chat helper).
+pub async fn query_with_context(
+    client: &Client,
+    provider: &LLMProvider,
+    model_name: &str,
+    api_key: &str,
+    transcript_context: &str,
+    user_message: &str,
+    ollama_endpoint: Option<&str>,
+    custom_openai_endpoint: Option<&str>,
+    app_data_dir: Option<&PathBuf>,
+) -> Result<String, String> {
+    const SYSTEM_PROMPT: &str =
+        "You are a helpful meeting assistant. Answer concisely based on the transcript provided.          Keep responses brief and actionable. Do not reveal chain-of-thought, hidden reasoning,          or internal analysis. Return only the final answer.";
+
+    let user_prompt = if transcript_context.is_empty() {
+        user_message.to_string()
+    } else {
+        format!(
+            "Meeting transcript:\n{}\n\n---\n\nQuestion: {}",
+            transcript_context, user_message
+        )
+    };
+
+    generate_summary(
+        client,
+        provider,
+        model_name,
+        api_key,
+        SYSTEM_PROMPT,
+        &user_prompt,
+        ollama_endpoint,
+        custom_openai_endpoint,
+        Some(400),
+        None,
+        None,
+        app_data_dir,
+        None,
+    )
+    .await
+}
