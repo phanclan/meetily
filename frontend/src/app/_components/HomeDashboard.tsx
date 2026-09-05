@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { FileAudio, FileText, MoreHorizontal, NotebookPen, RefreshCw, Trash2 } from 'lucide-react';
+import { FileAudio, FileText, Mic, MoreHorizontal, NotebookPen, RefreshCw, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import type { CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
@@ -27,6 +27,7 @@ interface HomeDashboardProps {
   onImportAudio: () => void;
   importEnabled: boolean;
   onStartRecording: () => void;
+  onOpenDraft: () => void;
   onDeleteMeeting: (meetingId: string) => Promise<void>;
   isRecordingDisabled: boolean;
 }
@@ -83,6 +84,7 @@ export function HomeDashboard({
   onImportAudio,
   importEnabled,
   onStartRecording,
+  onOpenDraft,
   onDeleteMeeting,
   isRecordingDisabled,
 }: HomeDashboardProps) {
@@ -135,7 +137,7 @@ export function HomeDashboard({
   const recoveryCount = recoverableMeetings.length;
 
   const openQuickNote = () => {
-    onStartRecording();
+    onOpenDraft();
   };
 
   const todayLabel = new Date().toLocaleDateString('en-US', {
@@ -152,14 +154,20 @@ export function HomeDashboard({
             <h1 className="text-lg font-semibold text-stone-900">Home</h1>
             <p className="mt-0.5 text-xs text-stone-400">{todayLabel}</p>
           </div>
-          <Button
-            className="h-9 rounded-full bg-stone-900 px-4 text-sm font-medium text-white hover:bg-stone-800"
-            onClick={openQuickNote}
-            disabled={isRecordingDisabled}
-          >
-            <NotebookPen className="h-3.5 w-3.5" />
-            New note
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" className="rounded-full" onClick={openQuickNote}>
+              <NotebookPen className="h-3.5 w-3.5" />
+              New note
+            </Button>
+            <Button
+              className="h-9 rounded-full bg-stone-900 px-4 text-sm font-medium text-white hover:bg-stone-800"
+              onClick={onStartRecording}
+              disabled={isRecordingDisabled}
+            >
+              <Mic className="h-3.5 w-3.5" />
+              Start recording
+            </Button>
+          </div>
         </div>
 
         {/* Main two-column layout */}

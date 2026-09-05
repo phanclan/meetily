@@ -2,6 +2,24 @@
 
 Last updated: 2026-09-05
 
+## Note workflow design batch
+
+Scope: make drafting, recording entry, and reopened note editing predictable without changing audio, recovery, or enhancement providers.
+
+| Behavior | Decision |
+| --- | --- |
+| Local draft persistence and recording seeding | Preserve; opening a draft must not start audio |
+| Home, sidebar, and call-banner recording entry | Preserve explicit recording entry; distinguish it from **New note** |
+| Original notes and titles after stop/reopen | Improve with the existing editor, automatic saving, visible failure/retry, and save-before-Home |
+| Enhanced-note editing and explicit summary save | Preserve in this batch |
+| Recovery, transcript persistence, Parakeet, and Qwen | Preserve |
+
+Implemented on `codex/meetnola-note-workflow`. The existing local draft remains a single scratchpad; this batch does not introduce a separate note collection. The build badge was also moved to the bottom edge because it obscured **Start recording**.
+
+Passed: TypeScript, 21 recording/workflow regression tests, 3 markdown tests, and native dev checks for **New note** / **Draft → Open** without recording, draft persistence, explicit recording with draft seeding, stop, post-stop editing, reopening, and immediate Home navigation after editing the reopened note/title. Synthetic evidence is **Meetnola reopened edit verified**. The build badge no longer overlaps the tested Home, recording, or saved-meeting actions. Tested at the current desktop window size; narrow layouts and packaged builds were not retested. Parakeet transcription and local Qwen enhancement settings are unchanged.
+
+Remaining review items: notes-only assistant context, meeting discovery/dates, and navigation accessibility. Enhanced-note editing still uses its explicit save action.
+
 ## Quality fixes (2026-09-05)
 
 - Code commit `32fb2ab` on `codex/meetnola-quality-fixes` addresses the seven review findings: checkpoint retention, Unicode-safe truncation, idempotent saves, editor clearing, saved-title persistence, accurate **New recording** behavior, and notes-only enhancement.

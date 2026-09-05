@@ -4,6 +4,7 @@ import { BlockNoteSummaryViewRef } from '@/components/AISummary/BlockNoteSummary
 import { CurrentMeeting, useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { invoke as invokeTauri } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
+import { useMeetingTitleSave } from '@/hooks/useMeetingTitleSave';
 
 interface UseMeetingDataProps {
   meeting: any;
@@ -17,7 +18,8 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
   const transcripts = meeting.transcripts;
   const [meetingTitle, setMeetingTitle] = useState(meeting.title || '+ New Call');
   const [isEditingTitle, setIsEditingTitle] = useState(false);
-  const [isTitleDirty, setIsTitleDirty] = useState(false);
+  const titleSave = useMeetingTitleSave(meeting.id);
+  const isTitleDirty = titleSave.status !== 'saved';
   const [aiSummary, setAiSummary] = useState<Summary | null>(summaryData);
   const [isSaving, setIsSaving] = useState(false);
   const [, setIsSummaryDirty] = useState(false);
@@ -38,8 +40,10 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
   // Handlers
   const handleTitleChange = useCallback((newTitle: string) => {
     setMeetingTitle(newTitle);
-    setIsTitleDirty(true);
-  }, []);
+    void titleSave.save(newTitle).catch(() => {
+      toast.error('Could not save the meeting title. Use Retry to save it.');
+    });
+  }, [titleSave.save]);
 
   const handleSummaryChange = useCallback((newSummary: Summary) => {
     setAiSummary(newSummary);
@@ -47,13 +51,9 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
 
   const handleSaveMeetingTitle = useCallback(async () => {
     try {
-      await invokeTauri('api_save_meeting_title', {
-        meetingId: meeting.id,
-        title: meetingTitle,
-      });
+      await titleSave.flush();
 
       console.log('Save meeting title success');
-      setIsTitleDirty(false);
 
       // Update meetings with new title
       const updatedMeetings = sidebarMeetings.map((m: CurrentMeeting) =>
@@ -71,7 +71,7 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
       }
       return false;
     }
-  }, [meeting.id, meetingTitle, sidebarMeetings, setMeetings, setCurrentMeeting]);
+  }, [meeting.id, meetingTitle, sidebarMeetings, setMeetings, setCurrentMeeting, titleSave.flush]);
 
   const handleSaveSummary = useCallback(async (summary: Summary | { markdown?: string; summary_json?: any[] }) => {
     console.log('📄 handleSaveSummary called with:', {
@@ -160,6 +160,7 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
     isTitleDirty,
     aiSummary,
     isSaving,
+    titleSave,
     blockNoteSummaryRef,
 
     // Setters

@@ -20,7 +20,7 @@ Transcription uses local Parakeet or Whisper. Cloud transcription is unavailable
 
 Live notes are stored locally under the temporary IndexedDB recording ID (`meeting-<timestamp>`). The shared stop handler saves them to SQLite under a stable persisted meeting ID (`meeting-recording-<source ID>` for new recordings; older meetings retain their UUIDs) before marking the recording saved. Interrupted recordings retain their draft for the existing recovery flow. Saved-note edits use the native notes API. Save retries reuse the source recording ID instead of creating another meeting. Failed audio recovery keeps its recovery entry and checkpoints for another attempt.
 
-**New recording** starts a separate meeting carrying the current notes; it does not append to the previous transcript. Post-stop title edits persist immediately. **Enhance notes** can use notes alone when no transcript exists.
+**New note** and **Draft → Open** open the existing local scratchpad without starting audio. **Start recording** explicitly starts capture, carrying draft notes into the session. **New recording** starts a separate meeting carrying the current notes; it does not append to the previous transcript. Original notes and titles save automatically both after stopping and after reopening, with visible save/retry status. Enhanced-note editing retains its explicit save action. **Enhance notes** can use notes alone when no transcript exists.
 
 ## Validation before promotion
 

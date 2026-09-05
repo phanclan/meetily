@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { getMeetingNotes, saveMeetingNotes } from '@/meetnola/ipc';
 import type { Block } from '@blocknote/core';
-import { blocksToPlainText, parseStoredMeetingNotesJson } from '@/lib/meetingNotes';
+import { blocksToPlainText, parseStoredMeetingNotesJson, plainTextToBlocks } from '@/lib/meetingNotes';
 
 import { isLiveMeetingId, readLiveMeetingNotes, writeLiveMeetingNotes } from '@/lib/liveMeetingNotes';
 import { toast } from 'sonner';
@@ -16,6 +16,7 @@ export function useMeetingNotes(meetingId: string | null) {
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [isReady, setIsReady] = useState(false);
+  const [saveError, setSaveError] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestBlocksRef = useRef<Block[]>([]);
   const hasPendingSaveRef = useRef(false);
@@ -42,13 +43,17 @@ export function useMeetingNotes(meetingId: string | null) {
       }));
       writesRef.current = write;
       await write;
-      if (latestBlocksRef.current === blocksToSave) hasPendingSaveRef.current = false;
+      if (latestBlocksRef.current === blocksToSave) {
+        hasPendingSaveRef.current = false;
+        setSaveError(false);
+      }
     } catch (err) {
       console.error('Failed to save notes:', err);
+      setSaveError(true);
       toast.error('Notes could not be saved. Please retry before leaving.');
       throw err;
     } finally {
-      if (trackState) {
+      if (latestBlocksRef.current === blocksToSave) {
         setIsSaving(false);
       }
     }
@@ -56,6 +61,8 @@ export function useMeetingNotes(meetingId: string | null) {
 
   // Load existing notes when meetingId becomes available
   useEffect(() => {
+    setSaveError(false);
+    setIsSaving(false);
     if (!meetingId) {
       setBlocks([]);
       setIsReady(false);
@@ -78,15 +85,14 @@ export function useMeetingNotes(meetingId: string | null) {
     setIsReady(false);
     latestBlocksRef.current = [];
     hasPendingSaveRef.current = false;
-    getMeetingNotes<{ notes_json?: string | null } | null>(meetingId)
+    getMeetingNotes<{ notes_json?: string | null; notes_markdown?: string | null } | null>(meetingId)
       .then(result => {
         if (cancelled) return;
 
-        if (result?.notes_json) {
-          const parsedBlocks = parseStoredMeetingNotesJson(result.notes_json);
-          setBlocks(parsedBlocks);
-          latestBlocksRef.current = parsedBlocks;
-        }
+        const parsedBlocks = parseStoredMeetingNotesJson(result?.notes_json);
+        const restored = parsedBlocks.length ? parsedBlocks : plainTextToBlocks(result?.notes_markdown || '');
+        setBlocks(restored);
+        latestBlocksRef.current = restored;
         setIsReady(true);
       })
       .catch(() => {
@@ -117,6 +123,7 @@ export function useMeetingNotes(meetingId: string | null) {
       }
 
       hasPendingSaveRef.current = true;
+      setIsSaving(true);
       if (immediate) {
         void flushSave(updatedBlocks, meetingId).catch(() => {});
         return;
@@ -145,7 +152,7 @@ export function useMeetingNotes(meetingId: string | null) {
   );
 
   const flushPendingSave = useCallback(async (trackState = false) => {
-    if (!meetingId) return;
+    if (!meetingId || !hasPendingSaveRef.current) return;
 
     if (debounceRef.current) {
       clearTimeout(debounceRef.current);
@@ -168,5 +175,5 @@ export function useMeetingNotes(meetingId: string | null) {
     };
   }, [flushSave, meetingId]);
 
-  return { blocks, saveNotes, replaceNotes, flushPendingSave, isSaving, isReady };
+  return { blocks, saveNotes, replaceNotes, flushPendingSave, isSaving, isReady, saveError };
 }

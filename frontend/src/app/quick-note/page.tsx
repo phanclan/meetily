@@ -25,6 +25,8 @@ import { useTranscripts } from '@/contexts/TranscriptContext';
 import { RecordingStatus, useRecordingState } from '@/contexts/RecordingStateContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useMeetingNotes } from '@/hooks/useMeetingNotes';
+import { useMeetingTitleSave } from '@/hooks/useMeetingTitleSave';
+import { NoteSaveStatus } from '@/components/NoteSaveStatus';
 import { useRecordingStop } from '@/hooks/useRecordingStop';
 import { useLiveMeetingChat } from '@/hooks/useLiveMeetingChat';
 import { useSummaryGeneration } from '@/hooks/meeting-details/useSummaryGeneration';
@@ -201,6 +203,7 @@ export default function QuickNotePage() {
     flushPendingSave,
     isSaving,
     isReady,
+    saveError,
   } = useMeetingNotes(activeNotesMeetingId);
   const { messages, isLoading: isChatLoading, send, clearMessages } = useLiveMeetingChat();
 
@@ -208,14 +211,10 @@ export default function QuickNotePage() {
   const autoStartRequestedRef = useRef(false);
   const consumedFreshTokenRef = useRef<string | null>(null);
   const titleSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const titleWritesRef = useRef<Promise<unknown>>(Promise.resolve());
+  const titleSave = useMeetingTitleSave(savedMeetingId);
   const handleTitleChange = (title: string) => {
     setNoteTitle(title);
-    if (!savedMeetingId) return;
-    const meetingId = savedMeetingId;
-    titleWritesRef.current = titleWritesRef.current.catch(() => {}).then(() =>
-      invoke('api_save_meeting_title', { meetingId, title: title.trim() || 'New note' })
-    ).catch(error => {
+    void titleSave.save(title).catch(error => {
       console.error('Failed to save meeting title:', error);
       toast.error('Could not save the meeting title. Please retry.');
     });
@@ -650,7 +649,7 @@ export default function QuickNotePage() {
   const handleNewRecording = async () => {
     try {
       await flushPendingSave(false);
-      await titleWritesRef.current;
+      await titleSave.flush();
     } catch {
       return;
     }
@@ -678,8 +677,9 @@ export default function QuickNotePage() {
 
   const handleGoHome = async () => {
     try {
+      if (!activeNotesMeetingId) saveQuickNoteDraft(noteTitle, draftContent);
       await flushPendingSave(false);
-      await titleWritesRef.current;
+      await titleSave.flush();
       router.push('/');
     } catch {
       // Keep the editor open so a failed note save can be retried.
@@ -796,13 +796,13 @@ export default function QuickNotePage() {
                 )}
               </Button>
             )}
-            {isPostRecording && (
+            {!isLiveSessionVisible && (
               <Button
                 className="rounded-full bg-stone-900 text-white hover:bg-stone-800"
                 onClick={handleNewRecording}
               >
                 <Mic className="h-4 w-4" />
-                New recording
+                {isPostRecording ? 'New recording' : 'Start recording'}
               </Button>
             )}
           </div>
@@ -832,12 +832,8 @@ export default function QuickNotePage() {
                     </InlineMeta>
                     <MetaDot />
                     <InlineMeta>{formatSavedAt(updatedAt)}</InlineMeta>
-                    {isSaving && (
-                      <>
-                        <MetaDot />
-                        <InlineMeta>Saving notes…</InlineMeta>
-                      </>
-                    )}
+                    <MetaDot />
+                    <NoteSaveStatus saving={isSaving || titleSave.status === 'saving'} failed={saveError || titleSave.status === 'error'} onRetry={() => { void Promise.all([flushPendingSave(true), titleSave.flush()]).catch(() => {}); }} />
                     <MetaDot />
                     <InlineMeta>
                       {savedTranscriptCount} transcript segment{savedTranscriptCount === 1 ? '' : 's'} saved
@@ -1104,13 +1100,13 @@ export default function QuickNotePage() {
             </Sheet>
           </div>
         ) : (
-          <div className="mt-5 grid min-h-0 flex-1 gap-5 md:grid-cols-[minmax(0,1.2fr)_minmax(300px,0.86fr)] xl:grid-cols-[minmax(0,1.4fr)_420px]">
+          <div className={`mt-5 grid min-h-0 flex-1 gap-5 ${isLiveSessionVisible ? 'md:grid-cols-[minmax(0,1.2fr)_minmax(300px,0.86fr)] xl:grid-cols-[minmax(0,1.4fr)_420px]' : 'mx-auto w-full max-w-[980px]'}`}>
             <section className="flex min-h-0 flex-col rounded-[32px] border border-white/70 bg-[linear-gradient(180deg,_rgba(255,255,255,0.96)_0%,_rgba(252,249,243,0.96)_100%)] shadow-[0_28px_80px_-36px_rgba(41,37,36,0.42)] backdrop-blur">
               <div className="border-b border-stone-200/80 px-6 py-6 lg:px-8 lg:py-7">
                 <div className="space-y-4">
                   <div className="inline-flex items-center gap-2 rounded-full border border-stone-200 bg-stone-50/90 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-stone-500">
                     <Wand2 className="h-3.5 w-3.5" />
-                    Live note canvas
+                    {isLiveSessionVisible ? 'Live note canvas' : 'Draft note'}
                   </div>
                   <textarea
                     ref={titleRef}
@@ -1122,7 +1118,7 @@ export default function QuickNotePage() {
                   />
                   <div className="flex flex-wrap items-center gap-2 text-sm">
                     <StatusPill icon={<Mic className="h-3.5 w-3.5 text-stone-500" />}>
-                      {currentMeetingId ? 'Live note' : 'Preparing session'}
+                      {currentMeetingId ? 'Live note' : isLiveSessionVisible ? 'Preparing session' : 'Not recording'}
                     </StatusPill>
                     <StatusPill>{formatSavedAt(updatedAt)}</StatusPill>
                     {isSaving && <StatusPill>Saving notes...</StatusPill>}
@@ -1147,7 +1143,7 @@ export default function QuickNotePage() {
                       setDraftContent(event.target.value);
                       setUpdatedAt(Date.now());
                     }}
-                    placeholder="Write notes while recording spins up..."
+                    placeholder={isLiveSessionVisible ? 'Write notes while recording spins up...' : 'Write your notes. Changes are saved locally.'}
                     className="h-full min-h-[300px] w-full resize-none rounded-[28px] border border-stone-200/70 bg-[linear-gradient(180deg,_#fffdf8_0%,_#fbf7ef_100%)] px-6 py-6 text-lg leading-8 text-stone-800 outline-none placeholder:text-stone-400 md:min-h-[520px]"
                   />
                 ) : (
@@ -1158,7 +1154,7 @@ export default function QuickNotePage() {
               </div>
             </section>
 
-            <aside className="flex min-h-0 flex-col gap-4 md:sticky md:top-5 md:max-h-[calc(100vh-2.5rem)]">
+            <aside className={`${isLiveSessionVisible ? 'flex' : 'hidden'} min-h-0 flex-col gap-4 md:sticky md:top-5 md:max-h-[calc(100vh-2.5rem)]`}>
               <section className="rounded-[28px] border border-stone-200/80 bg-white/90 p-5 shadow-sm">
                 <div className="flex items-center justify-between">
                   <div>

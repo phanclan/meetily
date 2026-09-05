@@ -2,9 +2,11 @@
 
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
+import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { invoke } from '@tauri-apps/api/core';
-import { getMeetingNotes } from '@/meetnola/ipc';
+import { useMeetingNotes } from '@/hooks/useMeetingNotes';
+import { NoteSaveStatus } from '@/components/NoteSaveStatus';
 import {
   ArrowLeft,
   Copy,
@@ -22,7 +24,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '
 import { BlockNoteSummaryView } from '@/components/AISummary/BlockNoteSummaryView';
 import { EmptyStateSummary } from '@/components/EmptyStateSummary';
 import { SummaryGeneratorButtonGroup } from '@/components/MeetingDetails/SummaryGeneratorButtonGroup';
-import { blocksToPlainText, parseStoredMeetingNotesJson } from '@/lib/meetingNotes';
+import { blocksToPlainText } from '@/lib/meetingNotes';
 import { buildEnhanceNotesPrompt } from '@/lib/enhanceNotes';
 import Analytics from '@/lib/analytics';
 import { useMeetingData } from '@/hooks/meeting-details/useMeetingData';
@@ -34,6 +36,8 @@ import { useLiveMeetingChat } from '@/hooks/useLiveMeetingChat';
 import { useConfig } from '@/contexts/ConfigContext';
 import type { ModelConfig } from '@/components/ModelSettingsModal';
 import { EnhanceNotesCta } from '@/components/EnhanceNotesCta';
+
+const Editor = dynamic(() => import('@/components/BlockNoteEditor/Editor'), { ssr: false });
 
 type Recipe = {
   label: string;
@@ -120,7 +124,8 @@ export default function PageContent({
   const router = useRouter();
   const titleRef = useRef<HTMLTextAreaElement | null>(null);
   const openModelSettingsRef = useRef<(() => void) | null>(null);
-  const [notesText, setNotesText] = useState('');
+  const notes = useMeetingNotes(meeting.id);
+  const notesText = useMemo(() => blocksToPlainText(notes.blocks), [notes.blocks]);
   const [activeView, setActiveView] = useState<'notes' | 'summary'>('notes');
   const [isTranscriptOpen, setIsTranscriptOpen] = useState(false);
   const [isAiComposerOpen, setIsAiComposerOpen] = useState(false);
@@ -181,26 +186,7 @@ export default function PageContent({
   });
 
   useEffect(() => {
-    setNotesText('');
     setActiveView(summaryData ? 'summary' : 'notes');
-
-    getMeetingNotes<{ notes_json?: string | null; notes_markdown?: string | null } | null>(meeting.id)
-      .then((result) => {
-        const markdown = result?.notes_markdown?.trim();
-        if (markdown) {
-          setNotesText(markdown);
-          return;
-        }
-
-        const parsedBlocks = parseStoredMeetingNotesJson(result?.notes_json);
-        const fallbackText = blocksToPlainText(parsedBlocks);
-        if (fallbackText) {
-          setNotesText(fallbackText);
-        }
-      })
-      .catch(() => {
-        // no notes saved for this meeting
-      });
   }, [meeting.id, summaryData]);
 
   useEffect(() => {
@@ -242,10 +228,7 @@ export default function PageContent({
       return;
     }
 
-    if (!notesText.trim()) {
-      setActiveView('summary');
-    }
-  }, [meetingData.aiSummary, notesText]);
+  }, [meetingData.aiSummary]);
 
   const transcriptSegments = useMemo(() => {
     if (segments && segments.length > 0) {
@@ -271,6 +254,19 @@ export default function PageContent({
   const handleEnhanceNotes = () => {
     setActiveView('summary');
     void summaryGeneration.handleGenerateSummary(enhanceNotesPrompt);
+  };
+
+  const flushNoteChanges = async () => {
+    await Promise.all([notes.flushPendingSave(true), meetingData.titleSave.flush()]);
+  };
+
+  const handleGoHome = async () => {
+    try {
+      await flushNoteChanges();
+      router.push('/');
+    } catch {
+      toast.error('Changes are not saved. Retry before leaving.');
+    }
   };
 
   const handleRecipe = (recipe: Recipe) => {
@@ -317,7 +313,7 @@ export default function PageContent({
         <div className="flex flex-wrap items-center justify-between gap-4">
           <button
             type="button"
-            onClick={() => router.push('/')}
+            onClick={() => void handleGoHome()}
             className="inline-flex items-center gap-2 rounded-full border border-stone-200/80 bg-white/65 px-4 py-2 text-sm font-medium text-stone-600 transition-colors hover:border-stone-300 hover:bg-white/80"
           >
             <ArrowLeft className="h-4 w-4" />
@@ -329,10 +325,10 @@ export default function PageContent({
               <FolderOpen className="h-4 w-4" />
               Folder
             </Button>
-            <Button variant="outline" className="rounded-full border-stone-200/75 bg-white/65 text-stone-600 shadow-none" onClick={meetingData.saveAllChanges}>
+            {activeView === 'summary' && <Button variant="outline" className="rounded-full border-stone-200/75 bg-white/65 text-stone-600 shadow-none" onClick={meetingData.saveAllChanges}>
               {meetingData.isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              Save Changes
-            </Button>
+              Save enhanced notes
+            </Button>}
           </div>
         </div>
 
@@ -360,12 +356,8 @@ export default function PageContent({
                   <InlineMeta>{formatSavedAt(meeting.updated_at || meeting.created_at)}</InlineMeta>
                   <MetaDot />
                   <InlineMeta>{transcriptCount} transcript segment{transcriptCount === 1 ? '' : 's'}</InlineMeta>
-                  {meetingData.isSaving && (
-                    <>
-                      <MetaDot />
-                      <InlineMeta>Saving…</InlineMeta>
-                    </>
-                  )}
+                  <MetaDot />
+                  <NoteSaveStatus saving={notes.isSaving || meetingData.titleSave.status === 'saving'} failed={notes.saveError || meetingData.titleSave.status === 'error'} onRetry={() => { void flushNoteChanges().catch(() => {}); }} />
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3">
@@ -373,7 +365,6 @@ export default function PageContent({
                     <button
                       type="button"
                       onClick={() => setActiveView('notes')}
-                      disabled={isNotesEmpty}
                       className={`rounded-full px-4 py-2 text-sm font-medium transition-colors ${
                         activeView === 'notes'
                           ? 'bg-white text-stone-900 shadow-sm'
@@ -463,17 +454,13 @@ export default function PageContent({
                     />
                   </div>
                 )
-              ) : !isNotesEmpty ? (
-                <div className="h-full min-h-[420px] overflow-y-auto rounded-[24px] bg-white/76 px-6 py-6 text-base leading-8 text-stone-700 whitespace-pre-wrap ring-1 ring-stone-200/60 shadow-[0_18px_40px_-34px_rgba(41,37,36,0.18)]">
-                  {notesText}
+              ) : notes.isReady ? (
+                <div className="h-full min-h-[420px] w-full overflow-y-auto rounded-[24px] bg-white px-6 py-6 text-base leading-8 text-stone-700 ring-1 ring-stone-200/60">
+                  <Editor key={meeting.id} initialContent={notes.blocks} onChange={notes.saveNotes} editable />
                 </div>
               ) : (
                 <div className="flex h-full min-h-[420px] items-center justify-center rounded-[24px] bg-white/76 ring-1 ring-stone-200/60 shadow-[0_18px_40px_-34px_rgba(41,37,36,0.18)]">
-                  <EmptyStateSummary
-                    onGenerate={handleEnhanceNotes}
-                    hasModel={Boolean(modelConfig.provider && modelConfig.model)}
-                    isGenerating={summaryGeneration.summaryStatus === 'processing' || summaryGeneration.summaryStatus === 'summarizing' || summaryGeneration.summaryStatus === 'regenerating'}
-                  />
+                  <p>Loading notes… If this persists, reopen the meeting to retry.</p>
                 </div>
               )}
             </div>

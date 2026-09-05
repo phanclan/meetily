@@ -17,7 +17,7 @@ import { indexedDBService } from '@/services/indexedDBService';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 import { useImportDialog } from '@/contexts/ImportDialogContext';
-import { createQuickNotePath } from '@/lib/quickNoteRoute';
+import { createDraftNotePath, createQuickNotePath } from '@/lib/quickNoteRoute';
 
 export default function Home() {
   const [showRecoveryDialog, setShowRecoveryDialog] = useState(false);
@@ -218,6 +218,7 @@ export default function Home() {
         onImportAudio={() => openImportDialog()}
         importEnabled={betaFeatures.importAndRetranscribe}
         onStartRecording={() => router.push(createQuickNotePath())}
+        onOpenDraft={() => router.push(createDraftNotePath())}
         onDeleteMeeting={handleDeleteMeeting}
         isRecordingDisabled={false}
       />

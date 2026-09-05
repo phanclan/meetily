@@ -39,6 +39,110 @@ function loader(stubs = {}, globals = {}) {
 const blocks = [{ id: 'note-1', type: 'paragraph', content: [{ type: 'text', text: 'Synthetic recovery note', styles: {} }], children: [] }];
 const quietReact = { useCallback: f => f, useEffect: noop, useRef: value => ({ current: value }), useState: value => [value, noop] };
 
+test('draft navigation does not request a fresh recording while explicit recording entry does', () => {
+  const route = loader()('@/lib/quickNoteRoute');
+  assert.equal(route.createDraftNotePath(), '/quick-note');
+  assert.match(route.createQuickNotePath(), /^\/quick-note\?fresh=\d+$/);
+  assert.equal(route.createRecordingWorkspacePath(true), '/quick-note');
+  assert.match(route.createRecordingWorkspacePath(false), /fresh=/);
+});
+
+test('rapid title edits are serialized and navigation waits for the final write', async () => {
+  const requests = [];
+  let finishFirst;
+  const firstWrite = new Promise(resolve => { finishFirst = resolve; });
+  const load = loader({
+    react: quietReact,
+    '@tauri-apps/api/core': { invoke: async (command, args) => {
+      assert.equal(command, 'api_save_meeting_title');
+      requests.push(args.title);
+      if (requests.length === 1) await firstWrite;
+    } },
+  });
+  const title = load('@/hooks/useMeetingTitleSave').useMeetingTitleSave('saved-meeting');
+  const first = title.save('First');
+  const second = title.save('Final');
+  let navigated = false;
+  const flush = title.flush().then(() => { navigated = true; });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(requests, ['First']);
+  assert.equal(navigated, false);
+  finishFirst();
+  await Promise.all([first, second, flush]);
+  assert.deepEqual(requests, ['First', 'Final']);
+  assert.equal(navigated, true);
+});
+
+test('failed title writes retain the latest edit for retry and keep flush rejected until saved', async () => {
+  let fail = true;
+  const requests = [];
+  const statuses = [];
+  const load = loader({
+    react: { ...quietReact, useState: value => [value, status => statuses.push(status)] },
+    '@tauri-apps/api/core': { invoke: async (_command, args) => {
+      requests.push(args.title);
+      if (fail) throw new Error('synthetic unavailable storage');
+    } },
+  });
+  const title = load('@/hooks/useMeetingTitleSave').useMeetingTitleSave('saved-meeting');
+  await assert.rejects(title.save('Keep this title'));
+  await assert.rejects(title.flush());
+  assert.equal(statuses.at(-1), 'error');
+  fail = false;
+  await title.flush();
+  assert.deepEqual(requests, ['Keep this title', 'Keep this title', 'Keep this title']);
+  assert.equal(statuses.at(-1), 'saved');
+});
+
+test('leaving before notes load never overwrites stored notes with an empty document', async () => {
+  const writes = [];
+  const load = loader({
+    react: quietReact,
+    '@/meetnola/ipc': { getMeetingNotes: async () => null, saveMeetingNotes: async args => writes.push(args) },
+    sonner: { toast: { error: noop } },
+  });
+  await load('@/hooks/useMeetingNotes').useMeetingNotes('saved-meeting').flushPendingSave();
+  assert.deepEqual(writes, []);
+});
+
+test('legacy text notes load into the editor and a failed edit can be retried intact', async () => {
+  const effects = [];
+  const state = [];
+  let fail = true;
+  const writes = [];
+  const load = loader({
+    react: {
+      ...quietReact,
+      useEffect: effect => effects.push(effect),
+      useState: value => {
+        const index = state.length;
+        state.push(value);
+        return [value, next => { state[index] = next; }];
+      },
+    },
+    '@/meetnola/ipc': {
+      getMeetingNotes: async () => ({ notes_json: null, notes_markdown: 'Existing legacy note' }),
+      saveMeetingNotes: async args => {
+        writes.push(args);
+        if (fail) throw new Error('synthetic disk failure');
+      },
+    },
+    sonner: { toast: { error: noop } },
+  }, { crypto: { randomUUID: () => 'synthetic-block' }, setTimeout: () => 1 });
+  const hook = load('@/hooks/useMeetingNotes').useMeetingNotes('saved-meeting');
+  effects[0]();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(state[0][0].content[0].text, 'Existing legacy note');
+  hook.saveNotes(blocks);
+  await assert.rejects(hook.flushPendingSave(true));
+  assert.equal(state[3], true);
+  fail = false;
+  await hook.flushPendingSave(true);
+  assert.equal(state[3], false);
+  assert.equal(state[1], false);
+  assert.equal(writes.at(-1).notesMarkdown, 'Synthetic recovery note');
+});
+
 function stopFixture({ failNotes = false } = {}) {
   const localStorage = storage();
   const sessionStorage = storage();
