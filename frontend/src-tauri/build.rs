@@ -20,7 +20,24 @@ fn main() {
     // Download and bundle FFmpeg binary at build-time
     ffmpeg::ensure_ffmpeg_binary();
 
-    tauri_build::build()
+    // Inlined Meetnola plugin ACL (commands live in src/meetnola, registered via Builder::new)
+    let attrs = tauri_build::Attributes::new().plugin(
+        "meetnola",
+        tauri_build::InlinedPlugin::new()
+            .commands(&[
+                "append_frontend_log",
+                "live_query",
+                "start_call_detection",
+                "stop_call_detection",
+                "set_call_detection_enabled",
+                "get_call_detection_enabled",
+                "save_meeting_notes",
+                "get_meeting_notes",
+                "move_meeting_notes",
+            ])
+            .default_permission(tauri_build::DefaultPermissionRule::AllowAllCommands),
+    );
+    tauri_build::try_build(attrs).expect("failed to run tauri-build");
 }
 
 fn emit_build_metadata() {

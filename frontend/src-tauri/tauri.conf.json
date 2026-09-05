@@ -20,7 +20,12 @@
                 "fullscreen": false,
                 "theme": "Light",
                 "decorations": true,
-                "backgroundColor": [246, 242, 234, 255]
+                "backgroundColor": [
+                    246,
+                    242,
+                    234,
+                    255
+                ]
             }
         ],
         "macOSPrivateApi": true,
@@ -67,6 +72,7 @@
                         "notification:allow-is-permission-granted",
                         "updater:default",
                         "process:default",
+                        "meetnola:default",
                         {
                             "identifier": "fs:scope",
                             "allow": [
