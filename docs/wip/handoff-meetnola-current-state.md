@@ -5,10 +5,13 @@ Last updated: 2026-09-05
 ## Quality fixes (2026-09-05)
 
 - Code commit `32fb2ab` on `codex/meetnola-quality-fixes` addresses the seven review findings: checkpoint retention, Unicode-safe truncation, idempotent saves, editor clearing, saved-title persistence, accurate **New recording** behavior, and notes-only enhancement.
-- Packaged tester build `20260905-32fb2ab` replaces the earlier bundle at the recovery worktree's app path. This branch has not been merged into `main` or pushed.
+- Packaged tester build `20260905-32fb2ab` replaces the earlier bundle at the recovery worktree's app path. Local `main` was fast-forwarded through `3aee9b4`, which also refreshes Home's meeting list and finishes pending note/title saves before returning Home. Nothing was pushed.
 - Passed: TypeScript, 16 frontend regression checks, 3 Rust tests using Unicode inputs and isolated SQLite databases, markdown/onboarding checks, production frontend/native builds, and ad-hoc signature verification. Dependencies were synchronized to the existing lockfile.
 - Browser verification used the actual application editor: **Clear** emptied its visible document and stored state; subsequent typing did not restore old text.
-- Full native retesting remains blocked: startup waits inside CoreAudio during CPAL input-device discovery, including after restarting the tester. The sampled paths include `AudioStream::create` and `configure_macos_audio`. Saved-title reopening was not verified in the new native build. The tester was quit; the system audio service was not restarted. Live cloud summaries remain untested.
+- Earlier native retesting waited inside CoreAudio during CPAL input-device discovery. After the user's audio approval, two dev recordings started and stopped successfully. Native **Clear**, replacement notes, post-stop title edits, immediate Home navigation, and reopening passed. Synthetic audio produced two saved transcript segments; the transcript and a post-stop note edit survived reopening. TypeScript and all 16 frontend regression checks passed again after the Home fix.
+- Synthetic evidence remains as **Meetnola dev quality verified** (notes only) and **Meetnola dev audio verified** (two transcript segments). No test records were deleted.
+- Notes-only enhancement reached the configured Groq provider, which returned `expired_api_key`. Offline request-path tests pass; successful live enhancement still requires a valid provider key. Credentials were not inspected or changed. Local Parakeet remains selected.
+- The running development app is `/private/tmp/meetnola Dev.app`, a temporary ad-hoc-signed wrapper around the debug executable with the tester bundle ID. It loads the frontend hot-reload server on port 3118. Its native build badge is `20260905-1244-4957e34`; frontend code includes `3aee9b4`. This session uses a standalone Next dev server, so Rust changes require rebuilding and relaunching the native app. The packaged release bundle does not include the final Home refresh change.
 
 ## Verified recovery baseline
 
