@@ -233,11 +233,12 @@ test('legacy text notes load into the editor and a failed edit can be retried in
   assert.equal(writes.at(-1).notesMarkdown, 'Synthetic recovery note');
 });
 
-function stopFixture({ failNotes = false } = {}) {
+function stopFixture({ failNotes = false, meetingTitle = 'Synthetic meeting' } = {}) {
   const localStorage = storage();
   const sessionStorage = storage();
   const events = [];
   const transcripts = [{ text: 'Synthetic transcript', audio_start_time: 0, audio_end_time: 1 }];
+  const savedTitles = [];
   let saves = 0;
   const load = loader({
     react: quietReact,
@@ -245,11 +246,11 @@ function stopFixture({ failNotes = false } = {}) {
     '@tauri-apps/api/event': { listen: async () => noop },
     '@tauri-apps/plugin-store': { Store: { load: async () => ({ get: async () => 2 }) } },
     sonner: { toast: { success: () => events.push('toast'), warning: noop, error: noop } },
-    '@/contexts/TranscriptContext': { useTranscripts: () => ({ currentMeetingId: 'meeting-1', transcriptsRef: { current: transcripts }, flushBuffer: noop, clearTranscripts: noop, meetingTitle: 'Synthetic meeting', markMeetingAsSaved: async () => events.push('marked') }) },
+    '@/contexts/TranscriptContext': { useTranscripts: () => ({ currentMeetingId: 'meeting-1', transcriptsRef: { current: transcripts }, flushBuffer: noop, clearTranscripts: noop, meetingTitle, markMeetingAsSaved: async () => events.push('marked') }) },
     '@/components/Sidebar/SidebarProvider': { useSidebar: () => ({ refetchMeetings: async () => {}, setCurrentMeeting: noop, setMeetings: noop, meetings: [], setIsMeetingActive: noop }) },
     '@/contexts/RecordingStateContext': { useRecordingState: () => ({ setStatus: noop }), RecordingStatus: { STOPPING: 'stopping', IDLE: 'idle', COMPLETED: 'completed', SAVING: 'saving', ERROR: 'error', PROCESSING_TRANSCRIPTS: 'processing' } },
     '@/services/transcriptService': { transcriptService: { getTranscriptionStatus: async () => ({ is_processing: false, chunks_in_queue: 0 }) } },
-    '@/services/storageService': { storageService: { saveMeeting: async (_title, received, _folder, sourceId) => { assert.equal(sourceId, 'meeting-1'); assert.equal(received.length, 1); saves++; events.push('meeting'); return { meeting_id: 'meeting-a5ce2dc0-f470-485c-b35d-1b2bd0b49059' }; }, getMeeting: async () => ({ id: 'meeting-a5ce2dc0-f470-485c-b35d-1b2bd0b49059', title: 'Synthetic meeting' }) } },
+    '@/services/storageService': { storageService: { saveMeeting: async (title, received, _folder, sourceId) => { savedTitles.push(title); assert.equal(sourceId, 'meeting-1'); assert.equal(received.length, 1); saves++; events.push('meeting'); return { meeting_id: 'meeting-a5ce2dc0-f470-485c-b35d-1b2bd0b49059' }; }, getMeeting: async () => ({ id: 'meeting-a5ce2dc0-f470-485c-b35d-1b2bd0b49059', title: 'Synthetic meeting' }) } },
     '@/lib/analytics': { default: new Proxy({}, { get: () => async () => {} }), __esModule: true },
     '@/lib/summary-language-preferences': { applyPinnedSummaryLanguageToMeeting: async () => true },
     '@/meetnola/ipc': { saveMeetingNotes: async args => { events.push('notes'); if (failNotes) throw new Error('disk full'); assert.equal(args.meetingId, 'meeting-a5ce2dc0-f470-485c-b35d-1b2bd0b49059'); assert.match(args.notesMarkdown, /Synthetic recovery note/); } },
@@ -257,8 +258,62 @@ function stopFixture({ failNotes = false } = {}) {
   const notes = load('@/lib/liveMeetingNotes');
   notes.writeLiveMeetingNotes('meeting-1', blocks);
   const { useRecordingStop } = load('@/hooks/useRecordingStop');
-  return { notes, events, useRecordingStop, saves: () => saves };
+  return { notes, events, savedTitles, useRecordingStop, saves: () => saves };
 }
+
+function titleFixture() {
+  let currentTitle;
+  const load = loader({ react: { ...quietReact, useState: initial => {
+    currentTitle = initial;
+    return [initial, title => { currentTitle = title; }];
+  } } });
+  return { ...load('@/hooks/useRecordingTitle').useRecordingTitle(), title: () => currentTitle };
+}
+
+for (const source of ['UI', 'tray']) {
+  test(`${source} stop saves the edited title when recorder initialization resolves late`, async () => {
+    const title = titleFixture();
+    title.beginSession();
+    let resolveName;
+    const initialization = title.syncMeetingTitle(() => new Promise(resolve => { resolveName = resolve; }));
+    title.setMeetingTitle('Custom recording title');
+    resolveName('Meeting 2026-09-05_15-00-00');
+    await initialization;
+    assert.equal(title.title(), 'Custom recording title');
+    const f = stopFixture({ meetingTitle: title.title() });
+    await f.useRecordingStop(noop, noop).handleRecordingStop(true,
+      source === 'UI' ? { autoNavigate: false, showToast: false } : undefined);
+    assert.deepEqual(f.savedTitles, ['Custom recording title']);
+    assert.ok(f.events.includes('notes'));
+  });
+}
+
+test('background reload started after an edit also preserves the custom title', async () => {
+  const f = titleFixture();
+  f.beginSession();
+  f.setMeetingTitle('Edited during recording');
+  await f.syncMeetingTitle(async () => 'Meeting 2026-09-05_15-00-00');
+  assert.equal(f.title(), 'Edited during recording');
+});
+
+test('a new recording accepts its title and ignores pending metadata from the previous session', async () => {
+  const f = titleFixture();
+  f.beginSession();
+  let resolveOld;
+  const old = f.syncMeetingTitle(() => new Promise(resolve => { resolveOld = resolve; }));
+  f.setMeetingTitle('Previous custom title');
+  f.beginSession();
+  await f.syncMeetingTitle(async () => 'Meeting 2026-09-05_16-00-00');
+  resolveOld('Old generated title');
+  await old;
+  assert.equal(f.title(), 'Meeting 2026-09-05_16-00-00');
+});
+
+test('reload can restore a native session title before any local edits', async () => {
+  const f = titleFixture();
+  await f.syncMeetingTitle(async () => 'Restored session title');
+  assert.equal(f.title(), 'Restored session title');
+});
 
 test('UI stop persists live notes before callback and honors navigation/toast options', async () => {
   const f = stopFixture();

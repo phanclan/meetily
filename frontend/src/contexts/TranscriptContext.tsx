@@ -7,6 +7,7 @@ import { useRecordingState } from './RecordingStateContext';
 import { transcriptService } from '@/services/transcriptService';
 import { recordingService } from '@/services/recordingService';
 import { indexedDBService } from '@/services/indexedDBService';
+import { useRecordingTitle } from '@/hooks/useRecordingTitle';
 
 interface TranscriptContextType {
   transcripts: Transcript[];
@@ -26,7 +27,7 @@ const TranscriptContext = createContext<TranscriptContextType | undefined>(undef
 
 export function TranscriptProvider({ children }: { children: ReactNode }) {
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
-  const [meetingTitle, setMeetingTitle] = useState('+ New Call');
+  const { meetingTitle, setMeetingTitle, beginSession, syncMeetingTitle } = useRecordingTitle();
   const [currentMeetingId, setCurrentMeetingId] = useState<string | null>(null);
 
   // Recording state context - provides backend-synced state
@@ -96,33 +97,37 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
           try {
             // Reset only for a new native session, never when reopening its workspace.
             setTranscripts([]);
+            beginSession();
             // Generate unique meeting ID
             const meetingId = `meeting-${Date.now()}`;
-            setCurrentMeetingId(meetingId);
 
             // Store in sessionStorage as fallback for markMeetingAsSaved
             sessionStorage.setItem('indexeddb_current_meeting_id', meetingId);
             console.log('[Recording Started] 💾 IndexedDB meeting ID stored:', meetingId);
 
-            // Get meeting name
-            const meetingName = await recordingService.getRecordingMeetingName();
+            // Capture the title revision before exposing the session to the note editor.
+            const titleInitialization = syncMeetingTitle(async () => {
+              // Get meeting name
+              const meetingName = await recordingService.getRecordingMeetingName();
 
-            // Use a better fallback that matches the backend's naming pattern
-            const effectiveTitle = meetingName || `Meeting ${new Date().toISOString().slice(0, 19).replace('T', '_').replace(/:/g, '-')}`;
+              // Use a better fallback that matches the backend's naming pattern
+              const effectiveTitle = meetingName || `Meeting ${new Date().toISOString().slice(0, 19).replace('T', '_').replace(/:/g, '-')}`;
 
-            // Initialize meeting metadata in IndexedDB
-            await indexedDBService.saveMeetingMetadata({
-              meetingId,
-              title: effectiveTitle,
-              startTime: Date.now(),
-              lastUpdated: Date.now(),
-              transcriptCount: 0,
-              savedToSQLite: false,
-              folderPath: undefined // Will update shortly
+              // Initialize meeting metadata in IndexedDB
+              await indexedDBService.saveMeetingMetadata({
+                meetingId,
+                title: effectiveTitle,
+                startTime: Date.now(),
+                lastUpdated: Date.now(),
+                transcriptCount: 0,
+                savedToSQLite: false,
+                folderPath: undefined // Will update shortly
+              });
+
+              return effectiveTitle;
             });
-
-            // Synchronize meeting title to state (fixes tray stop title issue)
-            setMeetingTitle(effectiveTitle);
+            setCurrentMeetingId(meetingId);
+            await titleInitialization;
 
             // Fetch folder path from backend and update metadata
             // This ensures folder path is persisted even if app crashes
@@ -177,7 +182,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
         console.log('🧹 Recording stopped listener cleaned up');
       }
     };
-  }, [currentMeetingId]);
+  }, [currentMeetingId, beginSession, syncMeetingTitle]);
 
   // Main transcript buffering logic with sequence_id ordering
   useEffect(() => {
@@ -390,13 +395,11 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
           setTranscripts(formattedTranscripts);
           console.log('[Reload Sync] ✅ Transcript history synced successfully');
 
-          // Fetch meeting name from backend
-          const meetingName = await recordingService.getRecordingMeetingName();
-          if (meetingName) {
-            console.log('[Reload Sync] Retrieved meeting name:', meetingName);
-            setMeetingTitle(meetingName);
-            console.log('[Reload Sync] ✅ Meeting title synced successfully');
-          }
+          // The session holds edited titles; the recording manager retains its folder name.
+          await syncMeetingTitle(async () => {
+            const session = await recordingService.getMeetingSession();
+            return session?.title || await recordingService.getRecordingMeetingName();
+          });
         } catch (error) {
           console.error('[Reload Sync] Failed to sync from backend:', error);
         }
@@ -404,7 +407,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
     };
 
     syncFromBackend();
-  }, [recordingState.isRecording]); // Run when recording state changes
+  }, [recordingState.isRecording, syncMeetingTitle]); // Run when recording state changes
 
   // Manual transcript update handler (for RecordingControls component)
   const addTranscript = useCallback((update: TranscriptUpdate) => {
