@@ -187,30 +187,41 @@ pub async fn initialize_fresh_database(app: AppHandle) -> Result<(), String> {
     // Update app state with the new manager
     app.manage(AppState { db_manager: db_manager.clone() });
 
-    // Set default model configuration for fresh installs
+    // Set default model configuration for fresh installs only (existing DBs untouched).
     let pool = db_manager.pool();
-    
-    // Default Summary Model: Groq
-    if let Err(e) = crate::database::repositories::setting::SettingsRepository::save_model_config(
-        pool,
-        crate::config::DEFAULT_SUMMARY_PROVIDER,
-        crate::config::DEFAULT_GROQ_SUMMARY_MODEL,
-        crate::config::DEFAULT_WHISPER_MODEL,
-        None,
-    ).await {
-        error!("Failed to set default summary model config: {}", e);
+
+    #[cfg(feature = "meetnola")]
+    {
+        if let Err(e) = crate::meetnola::defaults::apply_fresh_install_defaults(pool).await {
+            error!("Failed to apply Meetnola fresh-install defaults: {}", e);
+        } else {
+            info!("Fresh database initialized with Meetnola defaults (local STT + AI Gateway)");
+        }
     }
 
-    // Default Transcription Model: Groq
-    if let Err(e) = crate::database::repositories::setting::SettingsRepository::save_transcript_config(
-        pool,
-        crate::config::DEFAULT_TRANSCRIPT_PROVIDER,
-        crate::config::DEFAULT_GROQ_TRANSCRIPT_MODEL,
-    ).await {
-        error!("Failed to set default transcription model config: {}", e);
-    }
+    #[cfg(not(feature = "meetnola"))]
+    {
+        // Meetily: Groq-first defaults
+        if let Err(e) = crate::database::repositories::setting::SettingsRepository::save_model_config(
+            pool,
+            crate::config::DEFAULT_SUMMARY_PROVIDER,
+            crate::config::DEFAULT_SUMMARY_MODEL,
+            crate::config::DEFAULT_WHISPER_MODEL,
+            None,
+        ).await {
+            error!("Failed to set default summary model config: {}", e);
+        }
 
-    info!("Fresh database initialized successfully with Groq-first default models");
+        if let Err(e) = crate::database::repositories::setting::SettingsRepository::save_transcript_config(
+            pool,
+            crate::config::DEFAULT_TRANSCRIPT_PROVIDER,
+            crate::config::DEFAULT_TRANSCRIPT_MODEL,
+        ).await {
+            error!("Failed to set default transcription model config: {}", e);
+        }
+
+        info!("Fresh database initialized successfully with Groq-first default models");
+    }
 
     // Emit event to notify frontend that database is ready
     app.emit("database-initialized", ())

@@ -382,17 +382,22 @@ impl SettingsRepository {
                 format!("Failed to serialize config to JSON: {}", e).into()
             ))?;
 
-        // Upsert into settings table
+        // Atomic upsert: keep provider + model in lockstep with the JSON config.
+        // Previously ON CONFLICT only updated customOpenAIConfig, leaving settings.provider
+        // (e.g. groq) stale when selecting a CustomOpenAI / Gateway preset.
         sqlx::query(
             r#"
             INSERT INTO settings (id, provider, model, whisperModel, customOpenAIConfig)
-            VALUES ('1', 'custom-openai', $1, 'large-v3', $2)
+            VALUES ('1', 'custom-openai', $1, $3, $2)
             ON CONFLICT(id) DO UPDATE SET
+                provider = 'custom-openai',
+                model = excluded.model,
                 customOpenAIConfig = excluded.customOpenAIConfig
             "#,
         )
         .bind(&config.model)
         .bind(config_json)
+        .bind(crate::config::DEFAULT_WHISPER_MODEL)
         .execute(pool)
         .await?;
 

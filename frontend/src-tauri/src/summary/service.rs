@@ -390,6 +390,28 @@ impl SummaryService {
             api_key
         };
 
+        // Vercel AI Gateway requires a user API key. Fail cleanly without blocking recording.
+        if provider == LLMProvider::CustomOpenAI {
+            if let Some(ref endpoint) = custom_openai_endpoint {
+                let is_gateway = {
+                    #[cfg(feature = "meetnola")]
+                    {
+                        crate::meetnola::defaults::is_gateway_endpoint(endpoint)
+                    }
+                    #[cfg(not(feature = "meetnola"))]
+                    {
+                        let trimmed = endpoint.trim().trim_end_matches('/');
+                        trimmed.eq_ignore_ascii_case("https://ai-gateway.vercel.sh/v1")
+                    }
+                };
+                if is_gateway && final_api_key.trim().is_empty() {
+                    let err_msg = "Vercel AI Gateway API key is missing. Add it under Settings → Summary (Custom Server / AI Gateway). Recording still works offline.";
+                    Self::update_process_failed(&pool, &meeting_id, err_msg).await;
+                    return;
+                }
+            }
+        }
+
         // Dynamically fetch context size based on provider and model
         let token_threshold = if provider == LLMProvider::Ollama {
             match METADATA_CACHE.get_or_fetch(&model_name, ollama_endpoint.as_deref()).await {

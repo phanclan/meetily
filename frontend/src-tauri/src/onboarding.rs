@@ -1,10 +1,13 @@
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Runtime};
 use tauri_plugin_store::StoreExt;
-use log::{info, warn, error};
+use log::{info, warn};
+#[cfg(not(feature = "meetnola"))]
+use log::error;
 use anyhow::Result;
 
 use crate::state::AppState;
+#[cfg(not(feature = "meetnola"))]
 use crate::database::repositories::setting::SettingsRepository;
 
 
@@ -170,49 +173,60 @@ pub async fn complete_onboarding<R: Runtime>(
     state: tauri::State<'_, AppState>,
     model: String,
 ) -> Result<(), String> {
-    let summary_model = if model.trim().is_empty() {
-        crate::config::DEFAULT_GROQ_SUMMARY_MODEL.to_string()
-    } else {
-        model
-    };
-    info!("Completing onboarding with Groq summary model: {}", summary_model);
-
-    // Step 1: Save model configuration to SQLite database FIRST
     let pool = state.db_manager.pool();
 
-    // Onboarding defaults to Groq and leaves local models opt-in.
-    if let Err(e) = SettingsRepository::save_model_config(
-        pool,
-        crate::config::DEFAULT_SUMMARY_PROVIDER,
-        &summary_model,
-        crate::config::DEFAULT_WHISPER_MODEL,
-        None,
-    ).await {
-        error!("Failed to save Groq summary model config: {}", e);
-        return Err(format!("Failed to save Groq summary model config: {}", e));
+    #[cfg(feature = "meetnola")]
+    {
+        // Meetnola: local Parakeet STT + Vercel AI Gateway summaries (CustomOpenAI).
+        // Ignore frontend-supplied Groq model ids on Meetnola builds; use Gateway default
+        // unless the caller already passed a Gateway-style model id.
+        let _ = model;
+        info!("Completing onboarding with Meetnola defaults (local STT + AI Gateway)");
+        crate::meetnola::defaults::apply_fresh_install_defaults(pool).await?;
     }
-    info!(
-        "Saved summary model config: provider={}, model={}",
-        crate::config::DEFAULT_SUMMARY_PROVIDER,
-        summary_model
-    );
 
-    // Save transcription model config using Groq by default.
-    if let Err(e) = SettingsRepository::save_transcript_config(
-        pool,
-        crate::config::DEFAULT_TRANSCRIPT_PROVIDER,
-        crate::config::DEFAULT_GROQ_TRANSCRIPT_MODEL,
-    ).await {
-        error!("Failed to save transcription model config: {}", e);
-        return Err(format!("Failed to save transcription model config: {}", e));
+    #[cfg(not(feature = "meetnola"))]
+    {
+        let summary_model = if model.trim().is_empty() {
+            crate::config::DEFAULT_SUMMARY_MODEL.to_string()
+        } else {
+            model
+        };
+        info!("Completing onboarding with summary model: {}", summary_model);
+
+        // Meetily: Groq-first defaults; local models remain opt-in.
+        if let Err(e) = SettingsRepository::save_model_config(
+            pool,
+            crate::config::DEFAULT_SUMMARY_PROVIDER,
+            &summary_model,
+            crate::config::DEFAULT_WHISPER_MODEL,
+            None,
+        ).await {
+            error!("Failed to save summary model config: {}", e);
+            return Err(format!("Failed to save summary model config: {}", e));
+        }
+        info!(
+            "Saved summary model config: provider={}, model={}",
+            crate::config::DEFAULT_SUMMARY_PROVIDER,
+            summary_model
+        );
+
+        if let Err(e) = SettingsRepository::save_transcript_config(
+            pool,
+            crate::config::DEFAULT_TRANSCRIPT_PROVIDER,
+            crate::config::DEFAULT_TRANSCRIPT_MODEL,
+        ).await {
+            error!("Failed to save transcription model config: {}", e);
+            return Err(format!("Failed to save transcription model config: {}", e));
+        }
+        info!(
+            "Saved transcription model config: provider={}, model={}",
+            crate::config::DEFAULT_TRANSCRIPT_PROVIDER,
+            crate::config::DEFAULT_TRANSCRIPT_MODEL
+        );
     }
-    info!(
-        "Saved transcription model config: provider={}, model={}",
-        crate::config::DEFAULT_TRANSCRIPT_PROVIDER,
-        crate::config::DEFAULT_GROQ_TRANSCRIPT_MODEL
-    );
 
-    // Step 2: Only NOW mark onboarding as complete (after DB operations succeed)
+    // Mark onboarding as complete only after DB operations succeed.
     let mut status = load_onboarding_status(&app)
         .await
         .map_err(|e| format!("Failed to load onboarding status: {}", e))?;
@@ -226,6 +240,6 @@ pub async fn complete_onboarding<R: Runtime>(
         .await
         .map_err(|e| format!("Failed to save completed onboarding status: {}", e))?;
 
-    info!("Onboarding completed successfully with Groq-first defaults");
+    info!("Onboarding completed successfully");
     Ok(())
 }
