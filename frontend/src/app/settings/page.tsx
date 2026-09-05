@@ -112,7 +112,8 @@ export default function SettingsPage() {
 
           {/* Tabs */}
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="bg-transparent relative rounded-none border-b border-gray-200 p-0 h-auto">
+            <div className="max-w-full overflow-x-auto">
+            <TabsList className="w-max bg-transparent relative rounded-none border-b border-gray-200 p-0 h-auto">
               {TABS.map((tab, index) => {
                 const Icon = tab.icon;
                 return (
@@ -135,6 +136,7 @@ export default function SettingsPage() {
                 transition={{ type: 'spring', stiffness: 400, damping: 40 }}
               />
             </TabsList>
+            </div>
 
             <TabsContent value="general">
               <PreferenceSettings />

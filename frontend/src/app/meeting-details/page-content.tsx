@@ -6,6 +6,7 @@ import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { invoke } from '@tauri-apps/api/core';
 import { useMeetingNotes } from '@/hooks/useMeetingNotes';
+import { useAutoSizeTitle } from '@/hooks/useAutoSizeTitle';
 import { NoteSaveStatus } from '@/components/NoteSaveStatus';
 import {
   ArrowLeft,
@@ -214,14 +215,7 @@ export default function PageContent({
     };
   }, [meeting.id, meetingData.transcripts.length, onAutoGenerateComplete, shouldAutoGenerate]);
 
-  useEffect(() => {
-    const element = titleRef.current;
-    if (!element) return;
-
-    element.style.height = '0px';
-    const nextHeight = Math.min(element.scrollHeight, 180);
-    element.style.height = `${nextHeight}px`;
-  }, [meetingData.meetingTitle]);
+  useAutoSizeTitle(titleRef, meetingData.meetingTitle);
 
   useEffect(() => {
     if (!meetingData.aiSummary) {
@@ -471,7 +465,7 @@ export default function PageContent({
             </div>
           </section>
 
-          <div className="sticky bottom-4 z-30 mt-auto">
+          <div className="mt-auto lg:sticky lg:bottom-4 lg:z-30">
             {showEnhanceNotesCta && (
               <div className="mb-3 flex justify-center">
                 <EnhanceNotesCta onClick={handleEnhanceNotes} />
@@ -487,7 +481,7 @@ export default function PageContent({
                 <WaveGlyph />
               </button>
 
-              <div className="flex-1 overflow-hidden rounded-[24px] border border-stone-200/70 bg-white/84 shadow-[0_16px_36px_-28px_rgba(41,37,36,0.2)]">
+              <div className="min-w-0 flex-1 overflow-hidden rounded-[24px] border border-stone-200/70 bg-white/84 shadow-[0_16px_36px_-28px_rgba(41,37,36,0.2)]">
                 {isComposerExpanded ? (
                   <div className="p-4">
                     {messages.length > 0 && (
@@ -559,13 +553,14 @@ export default function PageContent({
                           }
                         }}
                         placeholder="Ask anything about this meeting"
-                        className="flex-1 border-0 bg-transparent px-2 py-2 text-sm text-stone-700 outline-none placeholder:text-stone-400"
+                        className="min-w-0 flex-1 border-0 bg-transparent px-2 py-2 text-sm text-stone-700 outline-none placeholder:text-stone-400"
                       />
                       <button
                         type="button"
                         onClick={handleSendChat}
-                        disabled={isChatLoading || !chatInput.trim() || meetingData.transcripts.length === 0}
-                        className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-stone-900 text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
+                        disabled={isChatLoading || !chatInput.trim() || (!notesText.trim() && meetingData.transcripts.length === 0)}
+                        aria-label="Send question"
+                        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-stone-900 text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         <Send className="h-4 w-4" />
                       </button>
@@ -577,12 +572,12 @@ export default function PageContent({
                     onClick={() => setIsAiComposerOpen(true)}
                     className="flex w-full items-center gap-3 px-5 py-3.5 text-left"
                   >
-                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-stone-100/85 text-stone-700">
+                    <div className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-full bg-stone-100/85 md:flex text-stone-700">
                       <Sparkles className="h-4 w-4" />
                     </div>
                     <div className="flex-1">
                       <p className="text-sm font-medium text-stone-900">Ask anything</p>
-                      <p className="text-xs text-stone-500">Open follow-up prompts, recap recipes, and Q&A for this meeting.</p>
+                      <p className="hidden text-xs text-stone-500 md:block">Open follow-up prompts, recap recipes, and Q&A for this meeting.</p>
                     </div>
                     <div className="rounded-full border border-stone-200 px-3 py-1.5 text-xs font-medium text-stone-600">
                       View recipes

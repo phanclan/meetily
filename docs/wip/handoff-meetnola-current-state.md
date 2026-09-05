@@ -20,9 +20,24 @@ Passed: TypeScript, 21 recording/workflow regression tests, 3 markdown tests, an
 
 The follow-up batch adds notes-aware meeting questions/recipes, stored dates in the native meeting-list response, and **View all meetings** with title search and an empty-results recovery action. TypeScript, 22 frontend regression checks, four native quality tests, and the native dev build passed. Live checks confirmed a local Qwen answer on a notes-only meeting, all 42 meetings in the full list, matching and empty searches, clearing search, and dates displayed after restarting the rebuilt app.
 
-Navigation accessibility is implemented: named collapsed controls, a navigation landmark, selected/expanded states, keyboard-operable meeting rows, visible focus and row actions, focused search/meeting expansion, and focus return after closing the title dialog. TypeScript and all 22 workflow regression tests passed. Native dev checks passed for Tab/Enter meeting navigation, Escape from the title dialog, Space to collapse meetings with hidden rows removed from the tab order, and search expansion/clearing. This closes the six findings from the bounded design review; a full VoiceOver audit and narrow-window testing remain outside the verified coverage. Enhanced-note editing still uses its explicit save action.
+Navigation accessibility is implemented: named collapsed controls, a navigation landmark, selected/expanded states, keyboard-operable meeting rows, visible focus and row actions, focused search/meeting expansion, and focus return after closing the title dialog. TypeScript and all 22 workflow regression tests passed. Native dev checks passed for Tab/Enter meeting navigation, Escape from the title dialog, Space to collapse meetings with hidden rows removed from the tab order, and search expansion/clearing. This closes the six findings from the bounded design review; a full VoiceOver audit remains outside the verified coverage. Narrow-window checks are recorded below. Enhanced-note editing still uses its explicit save action.
 
 Current dev build: `20260905-1329-discovery` in `/private/tmp/meetnola Dev.app`, with frontend hot reload on port 3118, including the navigation changes. The temporary app contains its helper binaries and resources; strict ad-hoc signature verification passed. The design changes have not been merged into local `main` or pushed.
+
+## Compact-window and package verification
+
+Scope: preserve navigation, note saving, model choices, and page actions; improve shared content width, title wrapping, and compact AI controls. No navigation or editor replacement.
+
+| Behavior | Decision |
+| --- | --- |
+| Sidebar collapse, page navigation, Home discovery, Settings tabs | Preserve; remove duplicate content margin and contain tab scrolling |
+| Title autosave and editing | Preserve; recalculate title height on width changes |
+| AI follow-up recipes and source context | Preserve; enable the Send button for notes-only context as Enter already does |
+| Sticky AI panel | Preserve at large widths; use normal document flow at compact widths to avoid covering notes |
+
+Native dev checks passed at an 834 × 768 capture and a compact 556 × 812 capture (window-image dimensions, not a measured CSS viewport). Before: expanded navigation left an extra 256px margin plus 32px padding in `MainContent`; narrow titles clipped, the sticky AI panel covered note text, and Settings tabs widened the page. After: the duplicate 288px spacing is gone, titles wrap when resizing/collapsing the sidebar, compact controls scroll below the editor, and keyboard End reaches Beta within the scrolling tab strip. Home and **New note** fit; the draft stays **Not recording**. The notes-only **Send question** button returned “Autosave was verified” from local Qwen on the synthetic reopened-edit record.
+
+Passed: TypeScript, 22 workflow regression tests, three markdown tests, and the onboarding check. Packaged build and verification are in progress. This is compact desktop validation, not a mobile-support or full accessibility claim.
 
 ## Quality fixes (2026-09-05)
 

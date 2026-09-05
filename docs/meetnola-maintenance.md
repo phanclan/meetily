@@ -46,4 +46,4 @@ git diff --check
 
 Use a packaged tester for macOS audio validation. The release bundle can be built with `frontend/build-meetnola.sh`; when only an app is needed, pass `--bundles app` to the Tauri build command. Do not launch a dev instance and packaged tester with the same bundle ID simultaneously.
 
-Verify **New note** starts recording, synthetic speech produces a transcript, notes/title/transcript survive leaving the workspace, **Stop** saves once, and reopening shows the saved content. Edit the saved note and reopen again. Repeat a recording to catch stale session state. Check the visible build badge against the intended build.
+Verify **New note** opens a draft without recording, **Start recording** begins capture, synthetic speech produces a transcript, notes/title/transcript survive leaving the workspace, **Stop** saves once, and reopening shows the saved content. Edit the saved note and reopen again. Repeat a recording to catch stale session state. Check the visible build badge against the intended build.
