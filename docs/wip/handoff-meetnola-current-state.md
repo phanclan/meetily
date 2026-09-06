@@ -2,7 +2,19 @@
 
 Last updated: 2026-09-05
 
-Current checkout: local `main`, including visual polish `42c9976` and title persistence `09859c3` by fast-forward. Continue work directly on `main`; branches and worktrees require an explicit request. Nothing was pushed. Earlier branch references below describe historical validation state.
+Current checkout: local `main`. Continue work directly on `main`; branches and worktrees require an explicit request. Nothing was pushed. Earlier branch references below describe historical validation state.
+
+## Summary source coverage and quality evaluation
+
+Fixed two ways long meetings could produce incomplete summaries: sentence-boundary splitting could skip source text, and a failed transcript part was silently omitted. Chunking now advances from the actual boundary, including Unicode text; any failed part stops generation with a retry message. Existing cancellation and previous-summary recovery remain in place.
+
+The standard template uses concise action checklists instead of a five-column table that demanded timestamps even for typed notes. It preserves discussion context and unresolved issues. Extraction prompts distinguish proposals, agreements, and commitments; local Qwen uses temperature 0.2 with direct answers. These are improvements to formatting and source handling, not a claim that factual accuracy is solved.
+
+Validation: 87 native summary tests passed, including real HTTP request serialization and stopping before final synthesis after a failed second part. The dev executable built as `20260905-1702-summary-quality`. It has **not** been copied into the running dev bundle or visually checked: computer control reported the Mac locked. Activation still requires quitting the dev app, copying the executable and updated `standard_meeting.json` resource into its bundle, signing, and reopening. The running app remains on `20260905-1612-fast-qwen`; standalone tester unchanged.
+
+Five synthetic source cases and the opt-in real-model harness are tracked in `frontend/tests/fixtures/summary-quality.json` and `frontend/src-tauri/src/summary/quality_evals.rs`. Run with `CARGO_TARGET_DIR=target/meetnola MEETNOLA_EVAL_MODEL=qwen3.5:9b-mxfp8 cargo test --manifest-path frontend/src-tauri/Cargo.toml --features meetnola --lib live_summary_quality -- --ignored --nocapture`. Reports default to `/private/tmp/meetnola-summary-quality.json`; `MEETNOLA_EVAL_REPORT` overrides this. Phrase checks are bounded regressions; manually inspect the prose for omissions and unsupported claims.
+
+Accuracy remains open. Final 4B output misclassified an unapproved budget as rejected and omitted the assurance that existing records were intact. Final 9B output passed four of five cases, but promoted an explicitly uncommitted offer into an action item. Its five short-case calls took 1.48–3.88 seconds; this is not a long-meeting benchmark. Low reasoning was abandoned after the five-case run exceeded three minutes. Higher-precision `qwen3.5:4b-mxfp8` and `qwen3.5:9b-mxfp8` were downloaded for comparison; neither was selected in the app. Keep current local Parakeet and `qwen3.5:4b-mlx` selection until a candidate clears factual review. Next quality work should address commitment extraction with source evidence, then repeat real-app validation after unlocking the Mac.
 
 ## Granola comparison: meeting browsing and note workspace
 

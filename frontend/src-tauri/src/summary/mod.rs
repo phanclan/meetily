@@ -75,3 +75,5 @@ pub use processor::{
     generate_meeting_summary, rough_token_count,
 };
 pub use service::SummaryService;
+#[cfg(test)]
+mod quality_evals;

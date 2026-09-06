@@ -223,6 +223,9 @@ pub async fn generate_summary(
         // For CustomOpenAI, apply optional parameters if provided
         let (max_tokens_val, temperature_val, top_p_val) = if provider == &LLMProvider::CustomOpenAI {
             (max_tokens, temperature, top_p)
+        } else if meeting_reasoning_effort(provider, model_name).is_some() {
+            // Local Qwen's default sampling is too variable for factual notes.
+            (None, Some(0.2), None)
         } else {
             (None, None, None)
         };
