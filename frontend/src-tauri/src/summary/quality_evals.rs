@@ -12,7 +12,77 @@ struct Case {
     absent: Vec<String>,
     #[serde(default)]
     action_absent: Vec<String>,
+    #[serde(default)]
+    section_required_any: std::collections::BTreeMap<String, Vec<Vec<String>>>,
     max_words: usize,
+}
+
+fn summary_section(markdown: &str, title: &str) -> String {
+    let titles = ["summary", "key decisions", "action items", "discussion highlights"];
+    let mut found = false;
+    let mut content = Vec::new();
+    for line in markdown.lines() {
+        let trimmed = line.trim();
+        let heading = trimmed.trim_start_matches('#').trim().trim_end_matches(':')
+            .trim_matches('*').trim_end_matches(':').trim();
+        if (trimmed.starts_with('#') || trimmed.starts_with("**")) && titles.contains(&heading) {
+            if found { break; }
+            found = heading == title;
+        } else if found {
+            content.push(line);
+        }
+    }
+    content.join("\n")
+}
+
+fn evaluate_case(case: &Case, answer: &str) -> Vec<String> {
+    let lower = answer.to_lowercase();
+    let mut failures = Vec::new();
+    for alternatives in &case.required_any {
+        if !alternatives.iter().any(|value| lower.contains(&value.to_lowercase())) {
+            failures.push(format!("Missing fact: {}", alternatives.join(" / ")));
+        }
+    }
+    for forbidden in &case.absent {
+        if lower.contains(&forbidden.to_lowercase()) {
+            failures.push(format!("Unsupported or disallowed claim: {forbidden}"));
+        }
+    }
+    let actions = summary_section(&lower, "action items");
+    for forbidden in &case.action_absent {
+        if actions.contains(&forbidden.to_lowercase()) {
+            failures.push(format!("Disallowed action content: {forbidden}"));
+        }
+    }
+    for (section, required) in &case.section_required_any {
+        let text = summary_section(&lower, &section.to_lowercase());
+        for alternatives in required {
+            if !alternatives.iter().any(|value| text.contains(&value.to_lowercase())) {
+                failures.push(format!("Missing fact in {section}: {}", alternatives.join(" / ")));
+            }
+        }
+    }
+    let words = answer.split_whitespace().count();
+    if words > case.max_words {
+        failures.push(format!("Over-expansion: {words} words (limit {})", case.max_words));
+    }
+    failures
+}
+
+#[test]
+fn mentioning_the_right_person_elsewhere_does_not_validate_the_action_owner() {
+    let cases: Vec<Case> = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/summary-quality.json"
+    )).unwrap();
+    let case = cases.iter().find(|case| case.id == "conditional-offer-and-confirmed-task").unwrap();
+    for heading in ["**Action Items**", "## Action Items", "**Action Items**:"] {
+        let draft = format!("**Summary**\nCasey offered to write the announcement. Encryption rollout approved.\n\n{heading}\n- [ ] Export attendance by Wednesday (Dana)\n\n**Discussion Highlights**\nCasey is mentioned here too.");
+        let failures = evaluate_case(case, &draft);
+        assert!(failures.iter().any(|failure| failure == "Missing fact in Action Items: Casey"));
+        assert!(failures.iter().any(|failure| failure == "Disallowed action content: Dana"));
+        let corrected = draft.replace("Wednesday (Dana)", "Wednesday (Casey)");
+        assert!(evaluate_case(case, &corrected).is_empty());
+    }
 }
 
 #[tokio::test]
@@ -45,30 +115,8 @@ async fn live_summary_quality() {
             Ok((answer, _, _)) => (answer, vec![]),
             Err(error) => (String::new(), vec![error]),
         };
-        let lower = answer.to_lowercase();
-        for alternatives in case.required_any {
-            if !alternatives.iter().any(|value| lower.contains(&value.to_lowercase())) {
-                failures.push(format!("Missing fact: {}", alternatives.join(" / ")));
-            }
-        }
-        for forbidden in case.absent {
-            if lower.contains(&forbidden.to_lowercase()) {
-                failures.push(format!("Unsupported or disallowed claim: {forbidden}"));
-            }
-        }
-        // A quoted instruction can legitimately appear in the report, but it
-        // must not be promoted to an assigned task.
-        let action_section = lower.split("**action items**").nth(1)
-            .unwrap_or("").split("\n**").next().unwrap_or("");
-        for forbidden in case.action_absent {
-            if action_section.contains(&forbidden.to_lowercase()) {
-                failures.push(format!("Disallowed action content: {forbidden}"));
-            }
-        }
+        failures.extend(evaluate_case(&case, &answer));
         let words = answer.split_whitespace().count();
-        if words > case.max_words {
-            failures.push(format!("Over-expansion: {words} words (limit {})", case.max_words));
-        }
         eprintln!("{}: {:.2}s, {} checks failed", case.id, started.elapsed().as_secs_f64(), failures.len());
         results.push(serde_json::json!({
             "case": case.id,

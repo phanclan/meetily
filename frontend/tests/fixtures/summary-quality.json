@@ -51,7 +51,8 @@
       "prior to any subsequent budget",
       "strategic direction"
     ],
-    "max_words": 180
+    "max_words": 180,
+    "section_required_any": {"Key Decisions": [["Parakeet"]], "Action Items": [["Morgan"], ["Friday"]]}
   },
   {
     "id": "proposal-is-not-a-decision",
@@ -88,7 +89,8 @@
       "strict instruction",
       "budget were both rejected"
     ],
-    "max_words": 220
+    "max_words": 220,
+    "section_required_any": {"Key Decisions": [["local"]], "Action Items": [["Alex"], ["Tuesday"], ["document"]]}
   },
   {
     "id": "quoted-instruction-is-not-an-action",
@@ -147,6 +149,119 @@
       "September 10",
       "investigate SSO"
     ],
-    "max_words": 240
+    "max_words": 240,
+    "section_required_any": {"Action Items": [["Lee"], ["September 12", "Sept 12", "Sep 12"]]}
+  },
+  {
+    "id": "conditional-offer-and-confirmed-task",
+    "text": "[00:08] Casey: I can write the announcement if Legal approves, but there is no approval yet. This is only an offer.\n[00:20] Dana: Please export the attendance list by Wednesday.\n[00:26] Casey: Yes, I will export it by Wednesday.\n[00:34] Dana: The encryption rollout is approved. An announcement has not been authorized.",
+    "notes": "",
+    "required_any": [
+      [
+        "Casey"
+      ],
+      [
+        "Wednesday"
+      ],
+      [
+        "attendance"
+      ],
+      [
+        "encryption"
+      ],
+      [
+        "approved"
+      ]
+    ],
+    "absent": [
+      "announcement was approved",
+      "announcement is approved"
+    ],
+    "action_absent": [
+      "write the announcement",
+      "draft the announcement",
+      "send the announcement",
+      "Dana"
+    ],
+    "max_words": 180,
+    "section_required_any": {"Action Items": [["Casey"], ["Wednesday"], ["attendance"]]}
+  },
+  {
+    "id": "reassigned-task-and-corrected-deadline",
+    "text": "[00:04] Avery: We originally assigned Noah the capacity report due Monday.\n[00:18] Avery: That assignment is canceled because Noah is on leave. Liam has accepted the report, due Tuesday instead.\n[00:28] Liam: Confirmed. I will deliver the capacity report Tuesday.",
+    "notes": "",
+    "required_any": [
+      [
+        "Liam"
+      ],
+      [
+        "Tuesday"
+      ],
+      [
+        "capacity report"
+      ],
+      [
+        "canceled",
+        "cancelled",
+        "reassigned",
+        "replaced"
+      ]
+    ],
+    "absent": [],
+    "action_absent": [
+      "Noah",
+      "Monday"
+    ],
+    "max_words": 160,
+    "section_required_any": {"Action Items": [["Liam"], ["Tuesday"], ["capacity report"]]}
+  },
+  {
+    "id": "negative-wording-in-a-confirmed-task",
+    "text": "[00:12] Ruth: Do not forget to disable the old webhook by Friday. Sam, can you own that?\n[00:21] Sam: Yes. I commit to disabling the old webhook by Friday.\n[00:30] Ruth: Keep the new webhook enabled. We are not removing all webhooks.",
+    "notes": "",
+    "required_any": [
+      [
+        "Sam"
+      ],
+      [
+        "Friday"
+      ],
+      [
+        "old webhook"
+      ],
+      [
+        "new webhook"
+      ]
+    ],
+    "absent": [
+      "disable all webhooks",
+      "remove all webhooks"
+    ],
+    "max_words": 160,
+    "section_required_any": {"Action Items": [["Sam"], ["Friday"], ["old webhook"]]}
+  },
+  {
+    "id": "unassigned-issue-in-typed-notes",
+    "text": "Meeting notes (no transcript available):\nThe export file is missing Japanese characters. No owner, deadline, or mitigation was decided. Existing stored records are unaffected.",
+    "notes": "",
+    "required_any": [
+      [
+        "Japanese"
+      ],
+      [
+        "unaffected",
+        "intact"
+      ]
+    ],
+    "absent": [
+      "00:",
+      "01:"
+    ],
+    "action_absent": [
+      "[ ]",
+      "fix the export",
+      "investigate"
+    ],
+    "max_words": 130
   }
 ]
