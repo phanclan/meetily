@@ -167,7 +167,7 @@ export default function PageContent({
   };
 
   const summaryGeneration = useSummaryGeneration({
-    meeting,
+    meeting: { ...meeting, title: meetingData.meetingTitle },
     transcripts: meetingData.transcripts,
     notesText,
     modelConfig,
@@ -240,6 +240,7 @@ export default function PageContent({
   const handleGoHome = async () => {
     try {
       await flushNoteChanges();
+      if (meetingData.blockNoteSummaryRef.current?.isDirty && !await meetingData.saveAllChanges()) return;
       router.push('/');
     } catch {
       toast.error('Changes are not saved. Retry before leaving.');
@@ -308,10 +309,11 @@ export default function PageContent({
                 <Button variant="ghost" size="icon" aria-label="Meeting actions"><MoreHorizontal /></Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={() => activeView === 'notes' ? handleCopyNotes() : copyOperations.handleCopySummary()}><Copy className="mr-2 h-4 w-4" />{activeView === 'notes' ? 'Copy meeting notes' : 'Copy enhanced notes'}</DropdownMenuItem>
                 <DropdownMenuItem onSelect={meetingOperations.handleOpenMeetingFolder}><FolderOpen className="mr-2 h-4 w-4" />Open recording folder</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-            {activeView === 'summary' && <Button variant="outline" className="rounded-md border-stone-200/75 bg-white/65 text-stone-600 shadow-none" onClick={meetingData.saveAllChanges}>
+            {activeView === 'summary' && <Button variant="outline" disabled={meetingData.isSaving || !meetingData.isSummaryDirty} className="rounded-md border-stone-200/75 text-stone-600 shadow-none" onClick={meetingData.saveAllChanges}>
               {meetingData.isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
               Save enhanced notes
             </Button>}
@@ -338,7 +340,7 @@ export default function PageContent({
                   <MetaDot />
                   <InlineMeta>{transcriptCount} transcript segment{transcriptCount === 1 ? '' : 's'}</InlineMeta>
                   <MetaDot />
-                  <NoteSaveStatus saving={notes.isSaving || meetingData.titleSave.status === 'saving'} failed={notes.saveError || meetingData.titleSave.status === 'error'} onRetry={() => { void flushNoteChanges().catch(() => {}); }} />
+                  <NoteSaveStatus saving={notes.isSaving || meetingData.isSaving || meetingData.titleSave.status === 'saving'} dirty={meetingData.isSummaryDirty} failed={notes.saveError || meetingData.summarySaveError || meetingData.titleSave.status === 'error'} onRetry={() => { if (meetingData.summarySaveError) void meetingData.saveAllChanges(); else void flushNoteChanges().catch(() => {}); }} />
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3">
@@ -367,19 +369,7 @@ export default function PageContent({
 
                   <div className="ml-auto flex flex-wrap items-center gap-2">
                     {showEnhanceNotesCta && <EnhanceNotesCta onClick={handleEnhanceNotes} />}
-                    {activeView === 'notes' ? (
-                      <Button variant="outline" className="rounded-md border-stone-200/75 bg-white/65 text-stone-600 shadow-none" onClick={handleCopyNotes}>
-                        <Copy className="h-4 w-4" />
-                        Copy Notes
-                      </Button>
-                    ) : meetingData.aiSummary ? (
-                      <Button variant="outline" className="rounded-md border-stone-200/75 bg-white/65 text-stone-600 shadow-none" onClick={copyOperations.handleCopySummary}>
-                        <Copy className="h-4 w-4" />
-                        Copy Summary
-                      </Button>
-                    ) : null}
-
-                    <div className="rounded-md bg-white/65 p-1 ring-1 ring-stone-200/60">
+                    <div>
                       <SummaryGeneratorButtonGroup
                         modelConfig={modelConfig}
                         setModelConfig={setModelConfig}
@@ -395,6 +385,7 @@ export default function PageContent({
                         isModelConfigLoading={false}
                         onOpenModelSettings={handleRegisterModalOpen}
                         showPrimaryAction={Boolean(meetingData.aiSummary) || isSummaryGenerating}
+                        hasSummary={Boolean(meetingData.aiSummary)}
                       />
                     </div>
                   </div>
@@ -403,8 +394,8 @@ export default function PageContent({
             </div>
 
             <div className="w-full py-5">
-              {activeView === 'summary' ? (
-                meetingData.aiSummary ? (
+              <div hidden={activeView !== 'summary'}>
+                {meetingData.aiSummary ? (
                   <div className="document-editor [&_.bn-editor]:!px-0">
                     <div className="h-full overflow-y-auto">
                       <BlockNoteSummaryView
@@ -412,6 +403,7 @@ export default function PageContent({
                         summaryData={meetingData.aiSummary}
                         onSave={meetingData.handleSaveSummary}
                         onSummaryChange={meetingData.handleSummaryChange}
+                        onDirtyChange={meetingData.setIsSummaryDirty}
                         status={summaryGeneration.summaryStatus}
                         error={summaryGeneration.summaryError}
                         onRegenerateSummary={() => void summaryGeneration.handleRegenerateSummary()}
@@ -431,8 +423,9 @@ export default function PageContent({
                       isGenerating={summaryGeneration.summaryStatus === 'processing' || summaryGeneration.summaryStatus === 'summarizing' || summaryGeneration.summaryStatus === 'regenerating'}
                     />
                   </div>
-                )
-              ) : notes.isReady ? (
+                )}
+              </div>
+              {activeView === 'notes' && (notes.isReady ? (
                 <div className="document-editor [&_.bn-editor]:!px-0">
                   <Editor key={meeting.id} initialContent={notes.blocks} onChange={notes.saveNotes} editable />
                 </div>
@@ -440,7 +433,7 @@ export default function PageContent({
                 <div className="flex h-full min-h-[240px] items-center justify-center rounded-lg bg-white/76 ring-1 ring-stone-200/60">
                   <p>Loading notes… If this persists, reopen the meeting to retry.</p>
                 </div>
-              )}
+              ))}
             </div>
           </section>
 

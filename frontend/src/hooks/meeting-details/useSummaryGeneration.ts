@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { Transcript, Summary } from '@/types';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 import { CurrentMeeting, useSidebar } from '@/components/Sidebar/SidebarProvider';
@@ -77,6 +77,8 @@ export function useSummaryGeneration({
 }: UseSummaryGenerationProps) {
   const [summaryStatus, setSummaryStatus] = useState<SummaryStatus>('idle');
   const [summaryError, setSummaryError] = useState<string | null>(null);
+  const currentMeeting = useRef(meeting);
+  currentMeeting.current = meeting;
 
   const { startSummaryPolling, stopSummaryPolling } = useSidebar();
 
@@ -269,7 +271,7 @@ export function useSummaryGeneration({
 
           // Update meeting title if available
           const meetingName = pollingResult.data.MeetingName || pollingResult.meetingName;
-          if (meetingName) {
+          if (meetingName && ['', '+ New Call', 'Untitled meeting', 'Untitled'].includes((currentMeeting.current.title || '').trim())) {
             updateMeetingTitle(meetingName);
           }
 

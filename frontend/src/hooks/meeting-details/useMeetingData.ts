@@ -22,7 +22,8 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
   const isTitleDirty = titleSave.status !== 'saved';
   const [aiSummary, setAiSummary] = useState<Summary | null>(summaryData);
   const [isSaving, setIsSaving] = useState(false);
-  const [, setIsSummaryDirty] = useState(false);
+  const [isSummaryDirty, setIsSummaryDirty] = useState(false);
+  const [summarySaveError, setSummarySaveError] = useState(false);
   const [, setError] = useState<string>('');
 
   // Ref for BlockNoteSummaryView
@@ -104,15 +105,17 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
         meetingId: meeting.id,
         summary: formattedSummary,
       });
-
+      setSummarySaveError(false);
       console.log('✅ Save meeting summary success');
     } catch (error) {
       console.error('❌ Failed to save meeting summary:', error);
+      setSummarySaveError(true);
       if (error instanceof Error) {
         setError(error.message);
       } else {
         setError('Failed to save meeting summary: Unknown error');
       }
+      throw error;
     }
   }, [meeting.id, meetingTitle]);
 
@@ -121,7 +124,7 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
     try {
       // Save meeting title only if changed
       if (isTitleDirty) {
-        await handleSaveMeetingTitle();
+        if (!await handleSaveMeetingTitle()) throw new Error('Meeting title could not be saved');
       }
 
       // Save BlockNote editor changes if dirty
@@ -133,9 +136,11 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
       }
 
       toast.success("Changes saved successfully");
+      return true;
     } catch (error) {
       console.error('Failed to save changes:', error);
       toast.error("Failed to save changes", { description: String(error) });
+      return false;
     } finally {
       setIsSaving(false);
     }
@@ -160,6 +165,8 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
     isTitleDirty,
     aiSummary,
     isSaving,
+    isSummaryDirty,
+    summarySaveError,
     titleSave,
     blockNoteSummaryRef,
 

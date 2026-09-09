@@ -201,15 +201,33 @@ impl MeetingsRepository {
         meeting_id: &str,
         new_title: &str,
     ) -> Result<bool, SqlxError> {
+        Self::write_meeting_name(pool, meeting_id, new_title, false).await
+    }
+
+    pub async fn suggest_meeting_name(
+        pool: &SqlitePool,
+        meeting_id: &str,
+        new_title: &str,
+    ) -> Result<bool, SqlxError> {
+        Self::write_meeting_name(pool, meeting_id, new_title, true).await
+    }
+
+    async fn write_meeting_name(
+        pool: &SqlitePool,
+        meeting_id: &str,
+        new_title: &str,
+        only_if_untitled: bool,
+    ) -> Result<bool, SqlxError> {
         let mut transaction = pool.begin().await?;
         let now = Utc::now();
 
         // Update meetings table
         let meeting_update =
-            sqlx::query("UPDATE meetings SET title = ?, updated_at = ? WHERE id = ?")
+            sqlx::query("UPDATE meetings SET title = ?, updated_at = ? WHERE id = ? AND (? = 0 OR trim(title) IN ('', '+ New Call', 'Untitled meeting', 'Untitled'))")
                 .bind(new_title)
                 .bind(now)
                 .bind(meeting_id)
+                .bind(only_if_untitled)
                 .execute(&mut *transaction)
                 .await?;
 
@@ -271,4 +289,42 @@ async fn delete_meeting_with_transaction(
         .await?;
 
     Ok(result.rows_affected() > 0)
+}
+
+#[cfg(test)]
+mod suggested_title_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn suggested_titles_preserve_named_meetings_and_explicit_renames_still_work() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new().max_connections(1)
+            .connect("sqlite::memory:").await.unwrap();
+        sqlx::query("CREATE TABLE meetings (id TEXT PRIMARY KEY, title TEXT, updated_at TEXT)")
+            .execute(&pool).await.unwrap();
+        sqlx::query("CREATE TABLE transcript_chunks (meeting_id TEXT, meeting_name TEXT)")
+            .execute(&pool).await.unwrap();
+        for (i, (title, should_apply)) in [
+            ("", true), ("+ New Call", true), ("Untitled meeting", true),
+            ("Custom customer meeting", false), ("Title edited while enhancing", false),
+        ].iter().enumerate() {
+            let id = i.to_string();
+            sqlx::query("INSERT INTO meetings (id, title) VALUES (?, ?)")
+                .bind(&id).bind(title).execute(&pool).await.unwrap();
+            sqlx::query("INSERT INTO transcript_chunks VALUES (?, ?)")
+                .bind(&id).bind(title).execute(&pool).await.unwrap();
+            assert_eq!(MeetingsRepository::suggest_meeting_name(&pool, &id, "AI suggestion").await.unwrap(), *should_apply);
+            let expected = if *should_apply { "AI suggestion" } else { title };
+            let stored: String = sqlx::query_scalar("SELECT title FROM meetings WHERE id = ?")
+                .bind(&id).fetch_one(&pool).await.unwrap();
+            let chunk_name: String = sqlx::query_scalar("SELECT meeting_name FROM transcript_chunks WHERE meeting_id = ?")
+                .bind(&id).fetch_one(&pool).await.unwrap();
+            assert_eq!(stored, expected);
+            assert_eq!(chunk_name, expected);
+            assert!(MeetingsRepository::update_meeting_name(&pool, &id, "Explicit user rename").await.unwrap());
+            assert!(!MeetingsRepository::suggest_meeting_name(&pool, &id, "Late AI result").await.unwrap());
+            let stored: String = sqlx::query_scalar("SELECT title FROM meetings WHERE id = ?")
+                .bind(&id).fetch_one(&pool).await.unwrap();
+            assert_eq!(stored, "Explicit user rename");
+        }
+    }
 }

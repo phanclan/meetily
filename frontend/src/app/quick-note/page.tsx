@@ -477,6 +477,7 @@ export default function QuickNotePage() {
     } catch (error) {
       console.error('Failed to save quick note summary:', error);
       toast.error('Failed to save summary');
+      throw error;
     }
   };
 
@@ -489,12 +490,6 @@ export default function QuickNotePage() {
     selectedTemplate: templates.selectedTemplate,
     updateMeetingTitle: (title: string) => {
       setNoteTitle(title);
-      void invoke('api_save_meeting_title', {
-        meetingId: savedMeetingId,
-        title,
-      }).catch(error => {
-        console.error('Failed to persist AI-generated meeting title:', error);
-      });
     },
     setAiSummary,
     onOpenModelSettings: handleOpenModelSettings,

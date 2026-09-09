@@ -612,3 +612,135 @@ test('late search results cannot cross into a different meeting', async () => {
   finish({ transcripts: [{ id: 'old', text: 'Needle in old meeting' }] }); await Promise.resolve();
   assert.match(f.html(), /Needle in new meeting/); assert.ok(!f.html().includes('Needle in old meeting'));
 });
+
+test('enhanced-note save failures reach the caller and cannot announce success', async () => {
+  const events = [];
+  const load = loader({
+    react: quietReact,
+    sonner: { toast: { error: () => events.push('error'), success: () => events.push('success') } },
+    '@/hooks/useMeetingTitleSave': { useMeetingTitleSave: () => ({ status: 'saved', save: noop, flush: async () => {} }) },
+    '@/components/Sidebar/SidebarProvider': { useSidebar: () => ({ setCurrentMeeting: noop, setMeetings: noop, meetings: [] }) },
+    '@tauri-apps/api/core': { invoke: async () => { throw new Error('Synthetic disk failure'); } },
+  });
+  const hook = load('@/hooks/meeting-details/useMeetingData').useMeetingData({
+    meeting: { id: 'synthetic', title: 'Custom title', transcripts: [] }, summaryData: { markdown: '# Notes' },
+  });
+  await assert.rejects(hook.handleSaveSummary({ markdown: '# Edited' }), /disk failure/);
+  assert.equal(await hook.saveAllChanges(), false);
+  assert.deepEqual(events, ['error']);
+});
+
+test('save status distinguishes unsaved enhanced notes from persisted notes', () => {
+  const { NoteSaveStatus } = loader()(path.join(root, 'src/components/NoteSaveStatus.tsx'));
+  const html = props => renderToStaticMarkup(createElement(NoteSaveStatus, { saving: false, failed: false, onRetry: noop, ...props }));
+  assert.match(html({ dirty: true }), /Unsaved changes/);
+  assert.match(html({ dirty: true, saving: true }), /Saving/);
+  assert.match(html({ dirty: true, failed: true }), /Changes not saved/);
+  assert.match(html({ dirty: false }), /Saved locally/);
+});
+
+for (const title of ['Custom title', '+ New Call']) {
+  test(`enhancement respects the existing title: ${title}`, async () => {
+    let completion;
+    const titles = [];
+    const load = loader({
+      react: quietReact,
+      sonner: { toast: { error: noop, warning: noop, info: noop, success: noop } },
+      '@/components/Sidebar/SidebarProvider': { useSidebar: () => ({ startSummaryPolling: (_id, _process, done) => { completion = done; } }) },
+      '@tauri-apps/api/core': { invoke: async cmd => cmd === 'api_get_meeting_transcripts' ? { total_count: 0, transcripts: [] } : { process_id: 'synthetic' } },
+      '@/lib/analytics': { default: new Proxy({}, { get: () => async () => {} }), __esModule: true },
+      '@/lib/utils': { isOllamaNotInstalledError: () => false },
+      '@/lib/summary-language-preferences': { readMeetingSummaryLanguage: async () => ({ language: 'en' }) },
+    });
+    const hook = load('@/hooks/meeting-details/useSummaryGeneration').useSummaryGeneration({
+      meeting: { id: 'synthetic', title }, transcripts: [], notesText: 'An explicit synthetic note.',
+      modelConfig: { provider: 'ollama', model: 'synthetic' }, isModelConfigLoading: false,
+      selectedTemplate: 'standard_meeting', updateMeetingTitle: value => titles.push(value), setAiSummary: noop,
+    });
+    await hook.handleGenerateSummary('');
+    await completion({ status: 'completed', data: { markdown: '## Summary\n\nSaved notes.', MeetingName: 'AI suggestion' } });
+    assert.deepEqual(titles, title === '+ New Call' ? ['AI suggestion'] : []);
+  });
+}
+
+async function enhancedEditorFixture(onSave, summaryData = { summary_json: blocks }) {
+  const slots = []; let cursor = 0, effects = [];
+  const ref = { current: null };
+  const editor = {
+    document: [],
+    blocksToMarkdownLossy: async () => '# Edited notes',
+    tryParseMarkdownToBlocks: async markdown => [{ type: 'paragraph', content: markdown }],
+    replaceBlocks(_old, next) { this.document = next; tree.props.children.props.children.props.onChange(); },
+  };
+  const react = {
+    useState: initial => { const i = cursor++; if (!(i in slots)) slots[i] = initial; return [slots[i], value => { slots[i] = value; }]; },
+    useRef: initial => { const i = cursor++; return slots[i] ||= { current: initial }; },
+    useCallback: fn => fn,
+    useEffect: (fn, deps) => { const i = cursor++; if (!slots[i] || deps.some((dep, j) => dep !== slots[i][j])) { slots[i] = deps; effects.push(fn); } },
+    useImperativeHandle: (target, create) => { target.current = create(); },
+    forwardRef: render => render,
+  };
+  const load = loader({
+    react,
+    'next/dynamic': { __esModule: true, default: () => () => null },
+    './index': { AISummary: () => null },
+    '@blocknote/react': { useCreateBlockNote: () => editor },
+    '@blocknote/shadcn': { BlockNoteView: () => null },
+    '@blocknote/shadcn/style.css': {},
+  });
+  const { BlockNoteSummaryView } = load(path.join(root, 'src/components/AISummary/BlockNoteSummaryView.tsx'));
+  const props = { summaryData, onSave };
+  let tree;
+  function render() { cursor = 0; effects = []; tree = BlockNoteSummaryView(props, ref); effects.forEach(fn => fn()); }
+  render(); await new Promise(setImmediate);
+  return {
+    render, ref,
+    async replaceSummary(next) { props.summaryData = next; render(); await new Promise(setImmediate); render(); },
+    edit(value) { tree.props.children.props.children.props.onChange(value); render(); },
+  };
+}
+
+test('enhanced editor keeps edits dirty until persistence resolves', async () => {
+  let finish;
+  const pending = new Promise(resolve => { finish = resolve; });
+  const saved = [];
+  const f = await enhancedEditorFixture(data => { saved.push(data); return pending; });
+  f.edit(blocks);
+  const saving = f.ref.current.saveSummary();
+  await Promise.resolve(); await Promise.resolve(); f.render();
+  assert.equal(f.ref.current.isDirty, true);
+  finish(); await saving; f.render();
+  assert.equal(f.ref.current.isDirty, false);
+  assert.equal(saved[0].summary_json, blocks);
+});
+
+test('loading regenerated markdown stays saved while subsequent edits become dirty', async () => {
+  const f = await enhancedEditorFixture(async () => {}, { markdown: 'Original summary' });
+  f.render();
+  assert.equal(f.ref.current.isDirty, false);
+  f.edit();
+  assert.equal(f.ref.current.isDirty, true);
+  await f.replaceSummary({ markdown: 'Regenerated summary' });
+  assert.equal(f.ref.current.isDirty, false);
+  f.edit();
+  assert.equal(f.ref.current.isDirty, true);
+});
+
+test('enhanced editor preserves dirty state when persistence fails', async () => {
+  const f = await enhancedEditorFixture(async () => { throw new Error('Synthetic save rejected'); });
+  f.edit(blocks);
+  await assert.rejects(f.ref.current.saveSummary(), /save rejected/);
+  f.render(); assert.equal(f.ref.current.isDirty, true);
+});
+
+test('edits made during an enhanced-note save remain unsaved afterwards', async () => {
+  let finish;
+  const pending = new Promise(resolve => { finish = resolve; });
+  const f = await enhancedEditorFixture(() => pending);
+  f.edit(blocks);
+  const saving = f.ref.current.saveSummary();
+  await Promise.resolve(); await Promise.resolve();
+  f.edit([{ ...blocks[0], id: 'newer-edit' }]);
+  finish(); await saving; f.render();
+  assert.equal(f.ref.current.isDirty, true);
+});

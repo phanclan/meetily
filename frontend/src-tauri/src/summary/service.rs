@@ -567,12 +567,10 @@ impl SummaryService {
                     .filter(|n| !n.is_empty())
                 {
                     info!("Extracted meeting name from summary: '{}'", name);
-                    if let Err(e) =
-                        MeetingsRepository::update_meeting_name(&pool, &meeting_id, &name).await
-                    {
-                        error!("Failed to update meeting name for {}: {}", meeting_id, e);
-                    } else {
-                        info!("Successfully updated meeting name for {}", meeting_id);
+                    match MeetingsRepository::suggest_meeting_name(&pool, &meeting_id, &name).await {
+                        Ok(true) => info!("Named previously untitled meeting {}", meeting_id),
+                        Ok(false) => info!("Preserved existing title for meeting {}", meeting_id),
+                        Err(e) => error!("Failed to update meeting name for {}: {}", meeting_id, e),
                     }
                 }
 

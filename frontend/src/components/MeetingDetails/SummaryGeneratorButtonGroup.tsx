@@ -267,7 +267,7 @@ export function SummaryGeneratorButtonGroup({
             <Button
               variant="outline"
               size="sm"
-              className="bg-gradient-to-r from-blue-50 to-purple-50 hover:from-blue-100 hover:to-purple-100 border-blue-200 xl:px-4"
+              className="border-stone-900 bg-stone-900 text-white hover:bg-stone-800 hover:text-white"
               onClick={() => {
                 Analytics.trackButtonClick('generate_summary', 'meeting_details');
                 checkOllamaModelsAndGenerate();
@@ -289,7 +289,7 @@ export function SummaryGeneratorButtonGroup({
               ) : (
                 <>
                   <Sparkles className="xl:mr-2" size={18} />
-                  <span className="hidden lg:inline xl:inline">Generate Summary</span>
+                  <span>{hasSummary ? 'Enhance again' : 'Enhance notes'}</span>
                 </>
               )}
             </Button>
@@ -306,9 +306,9 @@ export function SummaryGeneratorButtonGroup({
             variant="outline"
             size="sm"
             title="Summary Settings"
+            aria-label="Enhancement model"
           >
             <Settings />
-            <span className="hidden lg:inline">AI Model</span>
           </Button>
         </DialogTrigger>
         <DialogContent
@@ -337,9 +337,9 @@ export function SummaryGeneratorButtonGroup({
               variant="outline"
               size="sm"
               title="Select summary template"
+              aria-label="Summary template"
             >
               <FileText />
-              <span className="hidden lg:inline">Template</span>
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">

@@ -15,7 +15,7 @@ const Editor = dynamic(() => import('../BlockNoteEditor/Editor'), { ssr: false }
 
 interface BlockNoteSummaryViewProps {
   summaryData: SummaryDataResponse | Summary | null;
-  onSave?: (data: { markdown?: string; summary_json?: BlockNoteBlock[] }) => void;
+  onSave?: (data: { markdown?: string; summary_json?: BlockNoteBlock[] }) => Promise<void> | void;
   onSummaryChange?: (summary: Summary) => void;
   status?: 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
   error?: string | null;
@@ -80,6 +80,7 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
   const [currentBlocks, setCurrentBlocks] = useState<Block[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const isContentLoaded = useRef(false);
+  const editRevision = useRef(0);
 
   // Create BlockNote editor for markdown parsing
   const editor = useCreateBlockNote({
@@ -88,33 +89,36 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
 
   // Parse markdown to blocks when format is markdown
   useEffect(() => {
+    let cancelled = false;
     if (format === 'markdown' && data?.markdown && editor) {
+      isContentLoaded.current = false;
       const loadMarkdown = async () => {
         try {
           console.log('📝 Parsing markdown to BlockNote blocks...');
           const blocks = await editor.tryParseMarkdownToBlocks(data.markdown);
+          if (cancelled) return;
           editor.replaceBlocks(editor.document, blocks);
+          setCurrentBlocks(editor.document);
+          editRevision.current += 1;
+          setIsDirty(false);
+          isContentLoaded.current = true;
           console.log('✅ Markdown parsed successfully');
-
-          // Delay to ensure editor has finished rendering before allowing onChange
-          setTimeout(() => {
-            isContentLoaded.current = true;
-          }, 100);
         } catch (err) {
           console.error('❌ Failed to parse markdown:', err);
         }
       };
       loadMarkdown();
     }
+    return () => { cancelled = true; };
   }, [format, data?.markdown, editor]);
 
   // Set content loaded flag for blocknote format
   useEffect(() => {
     if (format === 'blocknote' && data?.summary_json) {
-      // Delay to ensure editor has finished rendering
-      setTimeout(() => {
-        isContentLoaded.current = true;
-      }, 100);
+      setCurrentBlocks(data.summary_json as unknown as Block[]);
+      editRevision.current += 1;
+      setIsDirty(false);
+      isContentLoaded.current = true;
     }
   }, [format, data?.summary_json]);
 
@@ -122,6 +126,7 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
     // Only set dirty flag if content has finished loading
     if (isContentLoaded.current) {
       setCurrentBlocks(blocks);
+      editRevision.current += 1;
       setIsDirty(true);
     }
   }, []);
@@ -137,6 +142,7 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
     if (!onSave || !isDirty) return;
 
     setIsSaving(true);
+    const savingRevision = editRevision.current;
     try {
       console.log('💾 Saving BlockNote content...');
 
@@ -153,13 +159,13 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
         saveData.markdown = markdownResult.markdown;
       }
 
-      onSave(saveData);
+      await onSave(saveData);
 
-      setIsDirty(false);
+      if (editRevision.current === savingRevision) setIsDirty(false);
       console.log('✅ Save successful');
     } catch (err) {
       console.error('❌ Save failed:', err);
-      alert('Failed to save changes. Please try again.');
+      throw err;
     } finally {
       setIsSaving(false);
     }
