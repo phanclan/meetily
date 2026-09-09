@@ -19,6 +19,7 @@
       "standard template",
       "confirming the intended behavior"
     ],
+    "action_absent": ["implement", "develop", "feature"],
     "max_words": 130
   },
   {

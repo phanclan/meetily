@@ -85,6 +85,28 @@ fn mentioning_the_right_person_elsewhere_does_not_validate_the_action_owner() {
     }
 }
 
+#[test]
+fn a_preservation_check_does_not_validate_an_invented_implementation_task() {
+    let cases: Vec<Case> = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/summary-quality.json"
+    )).unwrap();
+    let case = cases.iter().find(|case| case.id == "sparse-title-check").unwrap();
+    let report = "## Summary\nThe check requires preserving the custom meeting title when saving.\n\n## Key Decisions\nNone noted.\n\n## Action Items\nNone noted.\n\n## Discussion Highlights\nSynthetic notes have a different first line.";
+    assert!(evaluate_case(case, report).is_empty());
+    let faithful_checklist = report.replace(
+        "## Action Items\nNone noted.",
+        "## Action Items\n- [ ] Preserve the custom meeting title when saving.",
+    );
+    assert!(evaluate_case(case, &faithful_checklist).is_empty());
+    let invented = report.replace(
+        "## Action Items\nNone noted.",
+        "## Action Items\n- [ ] Implement a feature to preserve the custom meeting title.",
+    );
+    assert!(evaluate_case(case, &invented).iter().any(|failure| {
+        failure == "Disallowed action content: implement"
+    }));
+}
+
 #[tokio::test]
 #[ignore = "Calls the local Ollama model; run explicitly when evaluating summary quality"]
 async fn live_summary_quality() {
