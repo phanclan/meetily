@@ -20,7 +20,7 @@
     },
     {
       "title": "Discussion Highlights",
-      "instruction": "List relevant context and explicitly unresolved issues not covered above. Preserve limitations and uncertainty, without inventing questions, explanations, or next steps.",
+      "instruction": "List relevant context and explicitly unresolved issues not covered above. Put pending proposals and uncommitted offers here, never in Key Decisions or Action Items. Preserve limitations and uncertainty, without inventing questions, explanations, or next steps.",
       "format": "list"
     }
   ]

@@ -185,7 +185,7 @@
       "Dana"
     ],
     "max_words": 180,
-    "section_required_any": {"Action Items": [["Casey"], ["Wednesday"], ["attendance"]]}
+    "section_required_any": {"Key Decisions": [["encryption"]], "Action Items": [["Casey"], ["Wednesday"], ["attendance"]]}
   },
   {
     "id": "reassigned-task-and-corrected-deadline",
@@ -265,5 +265,196 @@
       "investigate"
     ],
     "max_words": 130
+  },
+  {
+    "id": "two-owners-two-deliverables",
+    "text": "[00:03] Nina: We have the rehearsal and the release notes left. I can take the release notes, due Thursday.\n[00:15] Omar: Thursday works for your notes. I'll run the rehearsal Tuesday, before that.\n[00:24] Nina: Right, I am writing, you are rehearsing. The launch date itself is not decided.\n[00:35] Jules: My calendar still says Nina owns the rehearsal. That's from last week.\n[00:43] Omar: That entry is stale. I accepted the rehearsal today, for Tuesday. Nina has the release notes for Thursday.\n[00:55] Jules: Got it. I am observing the rehearsal, not taking either deliverable.",
+    "notes": "",
+    "required_any": [
+      [
+        "launch"
+      ],
+      [
+        "not decided",
+        "undecided",
+        "unresolved",
+        "not been decided",
+        "not yet been decided"
+      ]
+    ],
+    "absent": [],
+    "action_absent": [],
+    "max_words": 240,
+    "action_required_together": [
+      [
+        [
+          "rehearsal"
+        ],
+        [
+          "Omar"
+        ],
+        [
+          "Tuesday"
+        ]
+      ],
+      [
+        [
+          "release notes"
+        ],
+        [
+          "Nina"
+        ],
+        [
+          "Thursday"
+        ]
+      ]
+    ]
+  },
+  {
+    "id": "completed-work-and-new-follow-up",
+    "section_absent": {"Key Decisions": ["complete", "finished"]},
+    "text": "[00:02] Chen: I finished the access audit yesterday and uploaded the report. There is no audit work left for me.\n[00:14] Priya: The report says two service accounts are unused. Did we disable them?\n[00:23] Chen: No. The accounts remain enabled while we check their owners. The report isn't authorization to disable anything.\n[00:37] Priya: Understood. I will ask the application owners about those two accounts by Friday. I won't disable them.\n[00:48] Mateo: Let's keep both enabled until the owners reply. Agreed?\n[00:54] Chen: Agreed. The access audit is complete; Priya's owner check is the only new follow-up.",
+    "notes": "",
+    "required_any": [
+      [
+        "complete",
+        "finished"
+      ],
+      [
+        "enabled"
+      ]
+    ],
+    "absent": [
+      "accounts were disabled",
+      "accounts have been disabled"
+    ],
+    "action_absent": [
+      "Chen",
+      "Mateo",
+      "disable"
+    ],
+    "max_words": 250,
+    "action_required_together": [
+      [
+        [
+          "owners",
+          "owner"
+        ],
+        [
+          "Priya"
+        ],
+        [
+          "Friday"
+        ]
+      ]
+    ],
+    "section_required_any": {
+      "Key Decisions": [
+        [
+          "enabled"
+        ]
+      ]
+    }
+  },
+  {
+    "id": "pending-approval-and-approved-spend",
+    "text": "[00:06] Eva: We have two requests. The $240 captioning trial is within my budget and I approve it. The $1,800 recording hardware request still needs Finance.\n[00:19] Leo: Does that mean Finance rejected the hardware?\n[00:26] Eva: No, they have not reviewed it. It is pending, not rejected. The approved $240 applies only to captioning.\n[00:38] Farah: I'll place the captioning trial order tomorrow, for $240. I won't buy hardware.\n[00:49] Leo: I could chase Finance if you need help, but I haven't agreed to own that.\n[01:02] Eva: No hardware follow-up is assigned today. We'll leave that request open.",
+    "notes": "",
+    "required_any": [
+      [
+        "$240",
+        "240"
+      ],
+      [
+        "$1,800",
+        "1,800",
+        "1800"
+      ],
+      [
+        "pending",
+        "not reviewed",
+        "not been reviewed"
+      ]
+    ],
+    "absent": [
+      "hardware was rejected",
+      "hardware is rejected",
+      "both requests were approved"
+    ],
+    "action_absent": [
+      "Leo",
+      "hardware"
+    ],
+    "max_words": 280,
+    "action_required_together": [
+      [
+        [
+          "captioning"
+        ],
+        [
+          "Farah"
+        ],
+        [
+          "tomorrow"
+        ]
+      ]
+    ],
+    "section_absent": {
+      "Key Decisions": [
+        "1,800",
+        "1800"
+      ]
+    }
+  },
+  {
+    "id": "interrupted-handoff-with-date-correction",
+    "text": "[00:02] Rosa: I looked at the import failures. The source data is fine; the date parser assumes month first.\n[00:18] Ben: I can fix the parser by Monday.\n[00:24] Jo: Sorry to interrupt, is that the mobile display issue too?\n[00:30] Rosa: Separate issue. The mobile display truncates long titles, but we haven't assigned it.\n[00:44] Ben: Back to the parser: I just checked my schedule. I cannot own it this week. Cancel my offer.\n[00:56] Rosa: I can take the parser correction, due Wednesday instead.\n[01:05] Jo: Wednesday is fine. Rosa owns it now, not Ben. Keep the import button enabled; users can choose the date format manually until then.\n[01:22] Ben: We should not describe this as lost source data. Nothing in the original files was changed.\n[01:35] Rosa: Confirmed, I'll deliver the date parser correction Wednesday. The mobile title issue remains unassigned.",
+    "notes": "",
+    "required_any": [
+      [
+        "source",
+        "original"
+      ],
+      [
+        "unchanged",
+        "not changed",
+        "fine",
+        "intact",
+        "nothing",
+        "no data",
+        "not related to lost source data",
+        "not lost source data"
+      ]
+    ],
+    "absent": [
+      "data was lost",
+      "source files were corrupted"
+    ],
+    "action_absent": [
+      "Ben",
+      "Monday",
+      "mobile"
+    ],
+    "max_words": 300,
+    "action_required_together": [
+      [
+        [
+          "parser"
+        ],
+        [
+          "Rosa"
+        ],
+        [
+          "Wednesday"
+        ]
+      ]
+    ],
+    "section_required_any": {
+      "Key Decisions": [
+        [
+          "enabled"
+        ]
+      ]
+    }
   }
 ]
