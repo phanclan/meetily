@@ -2,7 +2,7 @@ import { useEffect, type RefObject } from 'react';
 
 /** Keep wrapped titles visible when the window or sidebar changes width. */
 export function useAutoSizeTitle(
-  ref: RefObject<HTMLTextAreaElement>,
+  ref: RefObject<HTMLTextAreaElement | null>,
   value: string,
   layoutKey?: boolean,
 ) {
