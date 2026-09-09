@@ -6,6 +6,18 @@ export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   sources?: MeetingSource[];
+  requestId?: string;
+  notice?: string;
+}
+
+// Local models sometimes emit plain markers despite the link-format instruction.
+// Only known source IDs become links; code examples and existing links stay intact.
+export function linkMeetingCitations(text: string, sources: MeetingSource[] = []): string {
+  const known = new Set(sources.map(source => source.id));
+  return text.replace(/```[\s\S]*?```|`[^`]*`|\[S\d+\](?!\()/g, marker => {
+    const id = marker.slice(1, -1);
+    return known.has(id) ? `${marker}(#source-${id})` : marker;
+  });
 }
 
 export function useLiveMeetingChat(meetingId?: string) {
@@ -16,7 +28,11 @@ export function useLiveMeetingChat(meetingId?: string) {
   const epoch = useRef(0);
   const history = useRef<MeetingExchange[]>([]);
   const requestId = useRef<string | null>(null);
+  const partial = useRef<{ flush: () => void; dispose: () => void } | null>(null);
   const cancelCurrent = useCallback(() => {
+    partial.current?.flush();
+    partial.current?.dispose();
+    partial.current = null;
     epoch.current += 1;
     active.current = false;
     const id = requestId.current;
@@ -44,6 +60,8 @@ export function useLiveMeetingChat(meetingId?: string) {
     setError(null);
 
     let id: string | null = null;
+    let pending: { flush: () => void; dispose: () => void } | null = null;
+    let settled = false;
     try {
       const context = typeof source === 'string' ? { context: source, sources: undefined } : await source();
       if (epoch.current !== requestEpoch) return;
@@ -51,24 +69,55 @@ export function useLiveMeetingChat(meetingId?: string) {
       id = await prepareLiveQuery();
       if (epoch.current !== requestEpoch) return;
       requestId.current = id;
+      let text = '';
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      let shown = false;
+      const publish = (content: string) => {
+        if (epoch.current !== requestEpoch) return;
+        setMessages(prev => {
+          if (epoch.current !== requestEpoch) return prev;
+          const message: ChatMessage = { role: 'assistant', content: linkMeetingCitations(content, context.sources), sources: context.sources, requestId: id! };
+          return prev.some(item => item.requestId === id)
+            ? prev.map(item => item.requestId === id ? message : item) : [...prev, message];
+        });
+      };
+      pending = {
+        flush: () => { if (text && !settled) publish(text); },
+        dispose: () => { if (timer !== null) clearTimeout(timer); timer = null; },
+      };
+      partial.current = pending;
       const response = await liveQuery({
         requestId: id,
         userMessage,
         transcriptContext: context.context,
         history: history.current,
+      }, delta => {
+        if (settled || epoch.current !== requestEpoch || !delta) return;
+        text += delta;
+        // Show the first text immediately; batch subsequent tokens to 20 updates/sec.
+        if (!shown) { shown = true; pending?.flush(); }
+        else if (timer === null) timer = setTimeout(() => { timer = null; pending?.flush(); }, 50);
       });
+      pending.dispose();
+      settled = true;
       if (epoch.current === requestEpoch) {
         // Earlier citation IDs refer to older source snapshots, not today's context.
-        const answer = response.replace(/\[S\d+\]\(#source-S\d+\)/g, '');
+        const answer = linkMeetingCitations(response, context.sources).replace(/\[S\d+\]\(#source-S\d+\)/g, '');
         history.current = [...history.current, { question: userMessage, answer }].slice(-6);
-        setMessages(prev => [...prev, { role: 'assistant', content: response, sources: context.sources }]);
+        publish(response);
       }
     } catch (err) {
       if (epoch.current !== requestEpoch) return;
+      pending?.flush();
       const msg = err instanceof Error ? err.message : String(err);
       setError(msg);
-      setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${msg}` }]);
+      setMessages(prev => id && prev.some(item => item.requestId === id)
+        ? prev.map(item => item.requestId === id ? { ...item, notice: `Incomplete answer: ${msg}` } : item)
+        : [...prev, { role: 'assistant', content: `Error: ${msg}` }]);
     } finally {
+      settled = true;
+      pending?.dispose();
+      if (partial.current === pending) partial.current = null;
       if (id) {
         if (requestId.current === id) requestId.current = null;
         // Also release a registration cancelled before liveQuery was dispatched.
@@ -79,7 +128,9 @@ export function useLiveMeetingChat(meetingId?: string) {
   }, []);
 
   const stop = useCallback(() => {
+    const id = requestId.current;
     cancelCurrent();
+    if (id) setMessages(prev => prev.map(item => item.requestId === id ? { ...item, notice: "Stopped. This answer is incomplete." } : item));
     setIsLoading(false);
     setError(null);
   }, [cancelCurrent]);

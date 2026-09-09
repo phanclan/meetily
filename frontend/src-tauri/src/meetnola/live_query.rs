@@ -2,7 +2,7 @@ use crate::database::repositories::setting::SettingsRepository;
 use crate::state::AppState;
 use crate::summary::llm_client::{query_with_context, LLMProvider, MeetingExchange};
 use reqwest::Client;
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::{AppHandle, Manager, Runtime, ipc::Channel};
 use tracing::info;
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -53,12 +53,13 @@ pub async fn live_query<R: Runtime>(
     history: Option<Vec<MeetingExchange>>,
     request_id: String,
     requests: tauri::State<'_, QueryRequests>,
+    on_delta: Channel<String>,
 ) -> Result<String, String> {
     let token = requests.token(&request_id)?;
     let result = tokio::select! {
         biased;
         _ = token.cancelled() => Err("Meeting question was cancelled".to_string()),
-        result = run_query(app, state, user_message, transcript_context, history, &token) => result,
+        result = run_query(app, state, user_message, transcript_context, history, &token, on_delta) => result,
     };
     requests.cancel(&request_id);
     result
@@ -71,6 +72,7 @@ async fn run_query<R: Runtime>(
     transcript_context: String,
     history: Option<Vec<MeetingExchange>>,
     token: &CancellationToken,
+    on_delta: Channel<String>,
 ) -> Result<String, String> {
     info!("live_query called");
     let pool = state.db_manager.pool();
@@ -131,6 +133,7 @@ async fn run_query<R: Runtime>(
 
     let client = Client::new();
 
+    let emit = |text: &str| on_delta.send(text.to_string()).map_err(|_| "Assistant view closed".to_string());
     query_with_context(
         &client,
         &provider,
@@ -143,6 +146,7 @@ async fn run_query<R: Runtime>(
         custom_openai_endpoint.as_deref(),
         app_data_dir.as_ref(),
         Some(token),
+        Some(&emit),
     )
     .await
 }

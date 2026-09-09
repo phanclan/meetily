@@ -130,10 +130,10 @@ async fn live_meeting_follow_up_quality() {
     let context = "[S1] Written notes\nPreserve the custom meeting title when saving. No implementation task, owner, or deadline was assigned.\n\n[S2] Transcript · 0:30\nKeep local Parakeet for transcription.";
     let question = "What must be preserved when saving?";
     let first = query_with_context(&client, &LLMProvider::Ollama, &model, "", context,
-        question, &[], Some("http://localhost:11434"), None, None, None).await.unwrap();
+        question, &[], Some("http://localhost:11434"), None, None, None, None).await.unwrap();
     let history = [MeetingExchange { question: question.into(), answer: first.replace("[S1](#source-S1)", "") }];
     let follow_up = query_with_context(&client, &LLMProvider::Ollama, &model, "", context,
-        "Turn that into one short reminder.", &history, Some("http://localhost:11434"), None, None, None).await.unwrap();
+        "Turn that into one short reminder.", &history, Some("http://localhost:11434"), None, None, None, None).await.unwrap();
     // A prior generated answer must not become evidence for an invented assignment.
     let incorrect_history = [MeetingExchange {
         question: "What was assigned?".into(),
@@ -141,7 +141,7 @@ async fn live_meeting_follow_up_quality() {
     }];
     let correction = query_with_context(&client, &LLMProvider::Ollama, &model, "", context,
         "Was that actually assigned in the meeting?", &incorrect_history,
-        Some("http://localhost:11434"), None, None, None).await.unwrap();
+        Some("http://localhost:11434"), None, None, None, None).await.unwrap();
     println!("{}", serde_json::json!({"model": model, "first": first, "follow_up": follow_up, "correction": correction}));
     assert!(first.to_lowercase().contains("custom meeting title"));
     assert!(follow_up.to_lowercase().contains("title"));
@@ -276,4 +276,33 @@ async fn failed_transcript_part_never_produces_a_partial_report() {
     let error = result.expect("Pipeline should finish promptly").unwrap_err();
     assert!(error.contains("transcript part 2 of"), "{error}");
     assert_eq!(calls.load(Ordering::SeqCst), 2, "Do not synthesize a report after losing source material");
+}
+
+#[tokio::test]
+#[ignore = "Requires the selected local Gemma MLX model; uses only synthetic meeting text"]
+async fn live_meeting_stream_latency() {
+    use super::llm_client::query_with_context;
+    use std::sync::Mutex;
+    use std::time::Instant;
+    let client = reqwest::Client::new();
+    let context = "[S1] Written notes\nPreserve the custom meeting title when saving. Parakeet Compact stays selected. Morgan will verify saved notes by Friday. No implementation work was assigned.";
+    for sample in 1..=3 {
+        let start = Instant::now();
+        let first = Mutex::new(None);
+        let emit = |text: &str| {
+            if !text.trim().is_empty() { first.lock().unwrap().get_or_insert(start.elapsed()); }
+            Ok(())
+        };
+        let answer = query_with_context(&client, &LLMProvider::Ollama, "gemma4:e4b-mlx", "", context,
+            "Summarize the decisions and explicit follow-ups with citations.", &[], Some("http://localhost:11434"),
+            None, None, None, Some(&emit)).await.unwrap();
+        let total = start.elapsed();
+        let first = first.lock().unwrap().unwrap();
+        assert!(first < total);
+        assert!(answer.to_lowercase().contains("title"));
+        // The UI links plain markers only when the ID exists in the source snapshot.
+        assert!(answer.contains("[S1]"), "Synthetic response omitted source citations: {answer}");
+        println!("{}", serde_json::json!({ "sample": sample, "first_text_ms": first.as_millis(),
+            "completion_ms": total.as_millis(), "words": answer.split_whitespace().count() }));
+    }
 }

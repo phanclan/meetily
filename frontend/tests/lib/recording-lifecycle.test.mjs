@@ -1267,3 +1267,72 @@ test('search debounces input, ignores stale results and errors, and clears pendi
   runner.unmount();
   assert.equal(timers.size, 0);
 });
+
+
+test('streamed text appears before completion and becomes one cited final answer', async () => {
+  let finish, emit;
+  const fixture = chatFixture((args, onText) => { emit = onText; return new Promise(resolve => { finish = resolve; }); });
+  const pending = fixture.chat.send('Question', async () => ({ context: '[S1] Source', sources: [{ id: 'S1', text: 'Source', label: 'Notes' }] }));
+  await new Promise(setImmediate);
+  emit('First');
+  assert.equal(fixture.states[0][1].content, 'First');
+  assert.equal(fixture.states[1], true);
+  emit(' text'); emit(' [S1](#source-S1).');
+  await new Promise(setImmediate);
+  finish('First text [S1](#source-S1).');
+  await pending;
+  emit('late packet');
+  assert.equal(fixture.states[0].length, 2);
+  assert.equal(fixture.states[0][1].content, 'First text [S1](#source-S1).');
+  assert.equal(fixture.states[0][1].sources[0].id, 'S1');
+  assert.equal(fixture.states[0][1].notice, undefined);
+  assert.equal(fixture.states[1], false);
+});
+
+test('stopped and failed streams keep labeled partial text out of follow-up history', async () => {
+  for (const boundary of ['stop', 'failure']) {
+    let emit, finish, fail;
+    const calls = [];
+    const fixture = chatFixture((args, onText) => {
+      calls.push(args);
+      if (calls.length > 1) return Promise.resolve('Completed answer');
+      emit = onText;
+      return new Promise((resolve, reject) => { finish = resolve; fail = reject; });
+    }, { prepareLiveQuery: async () => `request-${calls.length}` });
+    const pending = fixture.chat.send('Old question', 'Source');
+    await new Promise(setImmediate);
+    emit('Partial text');
+    if (boundary === 'stop') { fixture.chat.stop(); finish('Late completed answer'); }
+    else fail(new Error('Connection interrupted'));
+    await pending;
+    assert.equal(fixture.states[0][1].content, 'Partial text');
+    assert.match(fixture.states[0][1].notice, /incomplete/i);
+    await fixture.chat.send('New question', 'Source');
+    emit('stale token');
+    assert.equal(calls[1].history.length, 0);
+    assert.equal(fixture.states[0].at(-1).content, 'Completed answer');
+  }
+});
+
+test('clear drops both rendered and buffered streaming text', async () => {
+  let emit, finish;
+  const fixture = chatFixture((_, onText) => { emit = onText; return new Promise(resolve => { finish = resolve; }); });
+  const pending = fixture.chat.send('Question', 'Source');
+  await new Promise(setImmediate);
+  emit('First'); emit(' buffered');
+  fixture.chat.clearMessages();
+  emit('stale'); finish('Old answer');
+  await pending;
+  await new Promise(setImmediate);
+  assert.equal(fixture.states[0].length, 0);
+});
+
+
+test('plain model citations link only to known sources and leave code and existing links intact', () => {
+  const { linkMeetingCitations } = loader()('@/hooks/useLiveMeetingChat');
+  const sources = [{ id: 'S1', text: 'Known source', label: 'Notes' }];
+  assert.equal(linkMeetingCitations('Fact [S1]. Unknown [S9]. Linked [S1](#source-S1).', sources),
+    'Fact [S1](#source-S1). Unknown [S9]. Linked [S1](#source-S1).');
+  assert.equal(linkMeetingCitations('`[S1]` and ```\n[S1]\n```', sources), '`[S1]` and ```\n[S1]\n```');
+  assert.equal(linkMeetingCitations('Fact [S1].'), 'Fact [S1].');
+});

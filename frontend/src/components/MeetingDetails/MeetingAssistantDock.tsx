@@ -36,10 +36,10 @@ export function MeetingAssistantDock(props: Props) {
               <button type="button" aria-label="Collapse assistant" onClick={collapse}
                 className="ml-auto rounded-md p-1.5 text-stone-500 hover:bg-stone-100"><X className="h-4 w-4" /></button>
             </div>
-            <div aria-live="polite" className="max-h-[32vh] space-y-3 overflow-y-auto pb-3 text-sm leading-6">
+            <div aria-live="polite" aria-busy={props.loading} className="max-h-[32vh] space-y-3 overflow-y-auto pb-3 text-sm leading-6">
               {props.messages.map((message, index) => <div key={index}
                 className={message.role === 'user' ? 'ml-8 rounded-lg bg-stone-100 px-3 py-2' : 'px-1 text-stone-700'}>
-                {message.role === 'assistant' ? <AssistantMessage content={message.content} sources={message.sources} /> : message.content}
+                {message.role === 'assistant' ? <AssistantMessage content={message.content} sources={message.sources} notice={message.notice} /> : message.content}
               </div>)}
               {props.loading && <p className="flex items-center gap-2 text-stone-500"><Loader2 className="h-4 w-4 animate-spin" />Writing an answer…</p>}
             </div>

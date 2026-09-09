@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core'
+import { invoke, Channel } from '@tauri-apps/api/core'
 
 /**
  * Meetnola commands are registered on the internal Tauri plugin `meetnola`.
@@ -36,8 +36,10 @@ export function liveQuery(args: {
   userMessage: string
   transcriptContext: string
   history?: MeetingExchange[]
-}): Promise<string> {
-  return meetnolaInvoke<string>('live_query', args as Record<string, unknown>)
+}, onText?: (text: string) => void): Promise<string> {
+  const onDelta = new Channel<string>()
+  onDelta.onmessage = onText ?? (() => {})
+  return meetnolaInvoke<string>('live_query', { ...args, onDelta })
 }
 
 export function setCallDetectionEnabled(enabled: boolean): Promise<void> {

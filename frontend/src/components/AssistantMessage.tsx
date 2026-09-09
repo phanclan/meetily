@@ -9,7 +9,7 @@ import type { MeetingSource } from '@/lib/meetingAnswerContext';
 const noSources: MeetingSource[] = [];
 
 /** Model output is Markdown, never trusted HTML. */
-export function AssistantMessage({ content, sources = noSources }: { content: string; sources?: MeetingSource[] }) {
+export function AssistantMessage({ content, sources = noSources, notice }: { content: string; sources?: MeetingSource[]; notice?: string }) {
   const [selected, setSelected] = useState<MeetingSource | null>(null);
   const trigger = useRef<HTMLButtonElement | null>(null);
   const excerpt = useRef<HTMLQuoteElement | null>(null);
@@ -30,6 +30,7 @@ export function AssistantMessage({ content, sources = noSources }: { content: st
   return (
     <div className="assistant-markdown min-w-0 break-words">
       <Markdown remarkPlugins={[remarkGfm]} skipHtml components={components}>{content}</Markdown>
+      {notice && <p role="status" className="mt-2 text-xs text-stone-500">{notice}</p>}
       {selected && <section aria-label="Source cited by this answer" className="my-3 rounded-lg border border-stone-200 bg-stone-50 p-3"
         onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); closeSource(); } }}>
         <div className="flex items-center justify-between gap-3 text-xs text-stone-600">

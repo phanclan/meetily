@@ -417,6 +417,7 @@ pub async fn generate_meeting_summary(
                     top_p,
                     app_data_dir,
                     cancellation_token,
+                    None,
                 )
                 .await
                 {
@@ -474,6 +475,7 @@ pub async fn generate_meeting_summary(
                     top_p,
                     app_data_dir,
                     cancellation_token,
+                    None,
                 )
                 .await?
             } else {
@@ -522,6 +524,7 @@ pub async fn generate_meeting_summary(
             top_p,
             app_data_dir,
             cancellation_token,
+            None,
         )
         .await?;
 
@@ -624,6 +627,7 @@ async fn run_markdown_transform(
         top_p,
         app_data_dir,
         cancellation_token,
+        None,
     )
     .await
     .map_err(|e| format!("{failure_label} failed: {e}"))?;
