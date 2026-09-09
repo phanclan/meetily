@@ -26,7 +26,7 @@ export function SavedTranscriptRows({ transcripts, query = '' }: { transcripts: 
       <div className="pt-1 text-xs tabular-nums text-stone-500">
         {formatTranscriptTime(item.audio_start_time)}
       </div>
-      <p className="text-sm leading-7 text-stone-700">{query
+      <p className="break-words text-sm leading-7 text-stone-700">{query
         ? item.text.split(new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi')).map((part, index) =>
             index % 2 === 1 ? <mark key={index} className="rounded-sm bg-amber-100 text-stone-900">{part}</mark> : part)
         : item.text}</p>

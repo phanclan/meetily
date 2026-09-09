@@ -5,8 +5,8 @@ import type { Transcript } from '@/types';
 import { storageService } from '@/services/storageService';
 import { SavedTranscriptRows } from './SavedTranscriptRows';
 
-export function SearchableTranscript({ meetingId, transcripts, hasMore }: {
-  meetingId: string; transcripts: Transcript[]; hasMore: boolean;
+export function SearchableTranscript({ meetingId, transcripts, hasMore, autoFocus = true }: {
+  meetingId: string; transcripts: Transcript[]; hasMore: boolean; autoFocus?: boolean;
 }) {
   const [query, setQuery] = useState('');
   const [complete, setComplete] = useState<Transcript[] | null>(null);
@@ -34,7 +34,7 @@ export function SearchableTranscript({ meetingId, transcripts, hasMore }: {
   return (
     <div>
       <div className="mb-4 flex items-center gap-3">
-        <input autoFocus type="search" aria-label="Search transcript" placeholder="Find a word or phrase"
+        <input autoFocus={autoFocus} type="search" aria-label="Search transcript" placeholder="Find a word or phrase"
           value={query} onChange={event => setQuery(event.target.value)}
           className="min-w-0 flex-1 rounded-md border border-stone-300 bg-white px-3 py-2 text-sm" />
         {query && <button type="button" onClick={() => setQuery('')} className="text-sm text-stone-600 underline">Clear search</button>}

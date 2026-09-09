@@ -18,6 +18,10 @@ export function useMeetingNotes(meetingId: string | null) {
   const [isSaving, setIsSaving] = useState(false);
   const [isReady, setIsReady] = useState(false);
   const [saveError, setSaveError] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const loadedFor = useRef<string | null>(null);
+  const failedFor = useRef<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestBlocksRef = useRef<Block[]>([]);
   const hasPendingSaveRef = useRef(false);
@@ -61,6 +65,9 @@ export function useMeetingNotes(meetingId: string | null) {
 
   // Load existing notes when meetingId becomes available
   useEffect(() => {
+    loadedFor.current = null;
+    failedFor.current = null;
+    setLoadError(false);
     setSaveError(false);
     setIsSaving(false);
     if (!meetingId) {
@@ -75,6 +82,7 @@ export function useMeetingNotes(meetingId: string | null) {
       const restored = readLiveMeetingNotes(meetingId) ?? [];
       setBlocks(restored);
       latestBlocksRef.current = restored;
+      loadedFor.current = meetingId;
       setIsReady(true);
       hasPendingSaveRef.current = false;
       return;
@@ -93,17 +101,28 @@ export function useMeetingNotes(meetingId: string | null) {
         const restored = parsedBlocks.length ? parsedBlocks : plainTextToBlocks(result?.notes_markdown || '');
         setBlocks(restored);
         latestBlocksRef.current = restored;
+        loadedFor.current = meetingId;
         setIsReady(true);
       })
       .catch(() => {
         if (cancelled) return;
-        toast.error('Could not load saved notes. Reopen this meeting to retry.');
+        failedFor.current = meetingId;
+        setLoadError(true);
+        toast.error('Could not load saved notes. Retry loading notes.');
         setIsReady(false);
       });
 
     return () => {
       cancelled = true;
     };
+  }, [meetingId, loadAttempt]);
+
+  // A load retry must never replace successfully loaded or locally edited notes.
+  const retryLoad = useCallback(() => {
+    if (!meetingId || failedFor.current !== meetingId || hasPendingSaveRef.current) return;
+    failedFor.current = null;
+    setLoadError(false);
+    setLoadAttempt(attempt => attempt + 1);
   }, [meetingId]);
 
   const queueSave = useCallback(
@@ -177,5 +196,7 @@ export function useMeetingNotes(meetingId: string | null) {
     };
   }, [flushSave, meetingId]);
 
-  return { blocks, saveNotes, replaceNotes, flushPendingSave, isSaving, isReady, saveError };
+  return { blocks, saveNotes, replaceNotes, flushPendingSave, isSaving,
+    isReady: isReady && loadedFor.current === meetingId, saveError,
+    loadError: loadError && failedFor.current === meetingId, retryLoad };
 }

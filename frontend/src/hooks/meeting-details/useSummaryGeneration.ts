@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import Analytics from '@/lib/analytics';
 import { isOllamaNotInstalledError } from '@/lib/utils';
 import { BuiltInModelInfo } from '@/lib/builtin-ai';
+import { buildEnhanceNotesPrompt } from '@/lib/enhanceNotes';
 import {
   detectAndCacheSummaryLanguage,
   readMeetingSummaryLanguage,
@@ -54,6 +55,7 @@ interface UseSummaryGenerationProps {
   meeting: any;
   transcripts: Transcript[];
   notesText?: string;
+  notesReady?: boolean;
   modelConfig: ModelConfig;
   isModelConfigLoading: boolean;
   selectedTemplate: string;
@@ -68,6 +70,7 @@ export function useSummaryGeneration({
   meeting,
   transcripts,
   notesText = '',
+  notesReady = true,
   modelConfig,
   isModelConfigLoading,
   selectedTemplate,
@@ -453,7 +456,7 @@ export function useSummaryGeneration({
     }
   }, []);
 
-  const buildSummaryTranscriptPayload = useCallback((allTranscripts: Transcript[]) => {
+  const buildSummarySourcePayload = useCallback((allTranscripts: Transcript[], customPrompt = '') => {
     const formatTime = (seconds: number | undefined, fallbackTimestamp: string): string => {
       if (seconds === undefined) {
         return fallbackTimestamp;
@@ -465,15 +468,20 @@ export function useSummaryGeneration({
     };
 
     return {
-      transcriptText: allTranscripts
+      transcriptText: allTranscripts.length ? allTranscripts
         .map(t => `${formatTime(t.audio_start_time, t.timestamp)} ${t.text}`)
-        .join('\n'),
-      transcriptTexts: allTranscripts.map(t => t.text),
+        .join('\n') : `Meeting notes (no transcript available):\n${notesText.trim()}`,
+      transcriptTexts: allTranscripts.length ? allTranscripts.map(t => t.text) : [notesText.trim()],
+      // Every entry point includes original notes. Notes-only input is already
+      // carried above, so do not duplicate it in the additional context.
+      customPrompt: [allTranscripts.length ? buildEnhanceNotesPrompt(notesText) : '', customPrompt.trim()]
+        .filter(Boolean).join('\n\n'),
     };
-  }, []);
+  }, [notesText]);
 
   // Public API: Generate summary from transcripts
   const handleGenerateSummary = useCallback(async (customPrompt: string = '') => {
+    if (!notesReady) { toast.error('Load the written notes before enhancing this meeting.'); return; }
     // Check if model config is still loading
     if (isModelConfigLoading) {
       console.log('⏳ Model configuration is still loading, please wait...');
@@ -630,19 +638,12 @@ export function useSummaryGeneration({
       }
     }
 
-    const summaryPayload = allTranscripts.length ? buildSummaryTranscriptPayload(allTranscripts) : {
-      transcriptText: `Meeting notes (no transcript available):\n${notesText.trim()}`,
-      transcriptTexts: [notesText.trim()],
-    };
-
-    await processSummary({
-      ...summaryPayload,
-      customPrompt,
-    });
-  }, [meeting.id, notesText, fetchAllTranscripts, buildSummaryTranscriptPayload, processSummary, modelConfig, isModelConfigLoading, selectedTemplate]);
+    await processSummary(buildSummarySourcePayload(allTranscripts, customPrompt));
+  }, [meeting.id, notesText, notesReady, fetchAllTranscripts, buildSummarySourcePayload, processSummary, modelConfig, isModelConfigLoading, selectedTemplate]);
 
   // Public API: Regenerate summary from the current saved transcript
   const handleRegenerateSummary = useCallback(async () => {
+    if (!notesReady) { toast.error('Load the written notes before enhancing this meeting.'); return; }
     let allTranscripts: Transcript[];
     try { allTranscripts = await fetchAllTranscripts(meeting.id); }
     catch { return; }
@@ -654,13 +655,10 @@ export function useSummaryGeneration({
     }
 
     await processSummary({
-      ...(allTranscripts.length ? buildSummaryTranscriptPayload(allTranscripts) : {
-        transcriptText: `Meeting notes (no transcript available):\n${notesText.trim()}`,
-        transcriptTexts: [notesText.trim()],
-      }),
+      ...buildSummarySourcePayload(allTranscripts),
       isRegeneration: true
     });
-  }, [meeting.id, notesText, fetchAllTranscripts, buildSummaryTranscriptPayload, processSummary]);
+  }, [meeting.id, notesText, notesReady, fetchAllTranscripts, buildSummarySourcePayload, processSummary]);
 
   // Keep polling until the backend confirms cancellation or completion.
   // A failed cancellation request must not make an active job look stopped.

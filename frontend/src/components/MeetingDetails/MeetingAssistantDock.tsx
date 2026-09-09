@@ -20,6 +20,7 @@ interface Props {
   recipes: { label: string; onSelect: () => void }[];
   historyStatus?: string;
   onRetryHistory?: () => void;
+  onReviewSources?: (trigger: HTMLButtonElement) => void;
   title?: string;
   inputLabel?: string;
   emptyMessage?: string;
@@ -78,10 +79,14 @@ export function MeetingAssistantDock(props: Props) {
             <div className="mb-3 flex items-center gap-2">
               <MessageCircle aria-hidden="true" className="h-3.5 w-3.5 text-stone-400" />
               <h2 className="text-xs font-medium text-stone-600">{props.title || 'Chat with this meeting'}</h2>
-              {props.messages.length > 0 && !props.readOnly && <button type="button" onClick={() => { props.onClear(); inputRef.current?.focus(); }}
-                className="ml-auto rounded-md px-2 py-1 text-xs text-stone-500 hover:bg-stone-100">Clear</button>}
+              <div className="ml-auto flex shrink-0 items-center">
+                {props.onReviewSources && <button type="button" onClick={event => props.onReviewSources?.(event.currentTarget)}
+                  className="rounded-md px-2 py-1 text-xs text-stone-600 hover:bg-stone-100">Review sources</button>}
+                {props.messages.length > 0 && !props.readOnly && <button type="button" onClick={() => { props.onClear(); inputRef.current?.focus(); }}
+                  className="rounded-md px-2 py-1 text-xs text-stone-500 hover:bg-stone-100">Clear</button>}
+              </div>
               <button type="button" aria-label="Collapse assistant" onClick={collapse}
-                className={`${props.messages.length ? '' : 'ml-auto'} rounded-md p-1.5 text-stone-500 hover:bg-stone-100`}><X className="h-4 w-4" /></button>
+                className="rounded-md p-1.5 text-stone-500 hover:bg-stone-100"><X className="h-4 w-4" /></button>
             </div>
             <div ref={messagesRef} role="region" aria-label="Conversation" tabIndex={0}
               onScroll={event => {

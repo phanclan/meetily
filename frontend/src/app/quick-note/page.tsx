@@ -42,7 +42,6 @@ import { SummaryGeneratorButtonGroup } from '@/components/MeetingDetails/Summary
 import { EmptyStateSummary } from '@/components/EmptyStateSummary';
 import { BlockNoteSummaryView, BlockNoteSummaryViewRef } from '@/components/AISummary/BlockNoteSummaryView';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { buildEnhanceNotesPrompt } from '@/lib/enhanceNotes';
 import { buildMeetingContext } from '@/lib/meetingContext';
 import { EnhanceNotesCta } from '@/components/EnhanceNotesCta';
 
@@ -210,6 +209,8 @@ export default function QuickNotePage() {
     isSaving,
     isReady,
     saveError,
+    loadError,
+    retryLoad,
   } = useMeetingNotes(activeNotesMeetingId);
   const { messages, isLoading: isChatLoading, send, clearMessages, stop } = useLiveMeetingChat();
 
@@ -423,11 +424,11 @@ export default function QuickNotePage() {
     draftContent.trim().length > 0 &&
     blocks.length === 0;
   const shouldRenderEditor = Boolean(activeNotesMeetingId) && isReady && !shouldWaitForSessionHydration;
+  const notesSourceReady = (!activeNotesMeetingId || isReady) && !shouldWaitForSessionHydration;
   const shouldRenderPendingTextarea = !shouldRenderEditor && !isPostRecording;
   const isNoteEmpty = noteText.trim().length === 0;
   const showSavedSummary = isPostRecording && activeSavedView === 'summary' && Boolean(aiSummary);
   const isComposerExpanded = isAiComposerOpen || isChatLoading;
-  const enhanceNotesPrompt = useMemo(() => buildEnhanceNotesPrompt(noteText), [noteText]);
 
 
   const handleRegisterModalOpen = (openFn: () => void) => {
@@ -490,6 +491,7 @@ export default function QuickNotePage() {
     meeting: summaryMeeting,
     transcripts: [],
     notesText: noteText,
+    notesReady: notesSourceReady,
     modelConfig,
     isModelConfigLoading: false,
     selectedTemplate: templates.selectedTemplate,
@@ -681,12 +683,14 @@ export default function QuickNotePage() {
   };
 
   const handleEnhanceNotes = () => {
+    if (!notesSourceReady) return;
     if (!savedMeetingId) return;
     setActiveSavedView('summary');
-    void summaryGeneration.handleGenerateSummary(enhanceNotesPrompt);
+    void summaryGeneration.handleGenerateSummary();
   };
 
   const handleRecipe = (recipe: Recipe) => {
+    if (!notesSourceReady || isChatLoading) return;
     setIsAiComposerOpen(true);
     const transcriptContext = buildMeetingContext(getScopedTranscript(transcripts, recipe.scope), noteText);
     if (!transcriptContext.trim()) {
@@ -697,6 +701,7 @@ export default function QuickNotePage() {
   };
 
   const handleSendChat = () => {
+    if (!notesSourceReady || isChatLoading) return;
     setIsAiComposerOpen(true);
     const userPrompt = chatInput.trim();
     const transcriptContext = buildMeetingContext(transcripts.map(item => item.text).join('\n'), noteText);
@@ -806,6 +811,7 @@ export default function QuickNotePage() {
           </div>
         </div>
 
+        {loadError && <p role="status" className="mt-3 text-sm text-stone-600">Could not load written notes. <button type="button" onClick={retryLoad} className="underline">Retry loading notes</button></p>}
         {isPostRecording ? (
           <div className="mt-3 flex min-h-0 flex-col gap-4 pb-8">
             <section className="flex min-h-0 flex-1 flex-col">
@@ -858,7 +864,7 @@ export default function QuickNotePage() {
                     </div>
 
                     <Button variant="ghost" onClick={() => setIsTranscriptOpen(true)}>Transcript</Button>
-                    {showEnhanceNotesCta && <EnhanceNotesCta onClick={handleEnhanceNotes} />}
+                    {showEnhanceNotesCta && <EnhanceNotesCta disabled={!notesSourceReady} onClick={handleEnhanceNotes} />}
                     <div className="ml-auto rounded-md bg-white/75 p-1 ring-1 ring-stone-200/70">
                       <SummaryGeneratorButtonGroup
                         modelConfig={modelConfig}
@@ -866,12 +872,12 @@ export default function QuickNotePage() {
                         onSaveModelConfig={handleSaveModelConfig}
                         onGenerateSummary={summaryGeneration.handleGenerateSummary}
                         onStopGeneration={summaryGeneration.handleStopGeneration}
-                        customPrompt={enhanceNotesPrompt}
+                        customPrompt=""
                         summaryStatus={summaryGeneration.summaryStatus}
                         availableTemplates={templates.availableTemplates}
                         selectedTemplate={templates.selectedTemplate}
                         onTemplateSelect={templates.handleTemplateSelection}
-                        hasTranscripts={savedTranscriptCount > 0 || !isNoteEmpty}
+                        hasTranscripts={notesSourceReady && (savedTranscriptCount > 0 || !isNoteEmpty)}
                         isModelConfigLoading={false}
                         onOpenModelSettings={handleRegisterModalOpen}
                         showPrimaryAction={Boolean(aiSummary) || isSummaryGenerating}
@@ -923,7 +929,7 @@ export default function QuickNotePage() {
                   </div>
                 ) : (
                   <div className="flex min-h-[240px] items-center justify-center rounded-lg bg-white/76 px-6 py-6 text-sm text-stone-500 ring-1 ring-stone-200/60">
-                    Loading saved note...
+                    {loadError ? 'Written notes are unavailable.' : 'Loading saved note…'}
                   </div>
                 )}
               </div>
@@ -965,7 +971,7 @@ export default function QuickNotePage() {
                             key={recipe.label}
                             type="button"
                             onClick={() => handleRecipe(recipe)}
-                            disabled={isChatLoading}
+                            disabled={isChatLoading || !notesSourceReady}
                             className="rounded-md border border-stone-200/75 bg-stone-50/80 px-3 py-1.5 text-xs font-medium text-stone-700 transition-colors hover:border-stone-300 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             {recipe.label}
@@ -1000,7 +1006,7 @@ export default function QuickNotePage() {
                         <button
                           type="button"
                           onClick={handleSendChat}
-                          disabled={isChatLoading || !chatInput.trim() || (!noteText.trim() && transcripts.length === 0)}
+                          disabled={isChatLoading || !notesSourceReady || !chatInput.trim() || (!noteText.trim() && transcripts.length === 0)}
                           aria-label="Send question"
                           className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-stone-900 text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
                         >
@@ -1130,7 +1136,7 @@ export default function QuickNotePage() {
                   />
                 ) : (
                   <div className="document-editor flex items-center justify-center text-sm text-stone-500">
-                    Loading saved note...
+                    {loadError ? 'Written notes are unavailable.' : 'Loading saved note…'}
                   </div>
                 )}
               </div>
@@ -1200,7 +1206,7 @@ export default function QuickNotePage() {
                       key={recipe.label}
                       type="button"
                       onClick={() => handleRecipe(recipe)}
-                      disabled={isChatLoading}
+                      disabled={isChatLoading || !notesSourceReady}
                       className="rounded-md border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-700 transition-colors hover:border-stone-300 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {recipe.label}
@@ -1256,7 +1262,7 @@ export default function QuickNotePage() {
                   <button
                     type="button"
                     onClick={isChatLoading ? stop : handleSendChat}
-                    disabled={!isChatLoading && (!chatInput.trim() || (!noteText.trim() && transcripts.length === 0))}
+                    disabled={!isChatLoading && (!notesSourceReady || !chatInput.trim() || (!noteText.trim() && transcripts.length === 0))}
                     aria-label={isChatLoading ? "Stop answer" : "Send question"}
                     className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-stone-900 text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
                   >

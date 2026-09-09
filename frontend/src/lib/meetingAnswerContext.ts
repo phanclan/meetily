@@ -31,8 +31,9 @@ export function buildMeetingAnswerContext(transcripts: Transcript[], notes: stri
   return { sources, context: sources.map(source => `[${source.id}] ${source.label}\n${source.text}`).join('\n\n') };
 }
 
-export async function loadMeetingAnswerContext(meetingId: string, notes: string, scope: 'full' | 'last5min' = 'full'): Promise<MeetingAnswerContext> {
+export async function loadMeetingAnswerContext(meetingId: string, notes: { text: string; isReady: boolean }, scope: 'full' | 'last5min' = 'full'): Promise<MeetingAnswerContext> {
+  if (!notes.isReady) throw new Error('Load the written notes before asking about this meeting.');
   const meeting = await storageService.getMeeting(meetingId);
   if (!Array.isArray(meeting.transcripts)) throw new Error('Could not load the complete meeting transcript. Try again.');
-  return buildMeetingAnswerContext(meeting.transcripts, notes, scope);
+  return buildMeetingAnswerContext(meeting.transcripts, notes.text, scope);
 }

@@ -193,6 +193,51 @@ async fn live_meeting_follow_up_quality() {
 }
 
 #[tokio::test]
+#[ignore = "Run node frontend/scripts/eval-summary-claims.cjs; calls local Ollama with synthetic inputs"]
+async fn live_summary_claim_checks() {
+    use super::llm_client::query_with_context;
+    #[derive(Deserialize)]
+    struct ClaimCase { id: String, context: String, claim: String, question: String, expected: String }
+    let input = std::env::var("MEETNOLA_CLAIM_EVAL_INPUT")
+        .expect("Use the frontend script so evaluations use the production selection prompt");
+    let cases: Vec<ClaimCase> = serde_json::from_str(&std::fs::read_to_string(input).unwrap()).unwrap();
+    let model = std::env::var("MEETNOLA_EVAL_MODEL").unwrap_or_else(|_| "gemma4:e4b-mlx".into());
+    let output = std::env::var("MEETNOLA_EVAL_REPORT")
+        .unwrap_or_else(|_| "/private/tmp/meetnola-claim-quality.json".into());
+    let client = reqwest::Client::new();
+    let mut results = Vec::new();
+    for case in cases {
+        let started = std::time::Instant::now();
+        // The UI uses streaming, which also selects its no-reasoning profile.
+        let first_text = std::sync::Mutex::new(None);
+        let emit = |text: &str| {
+            if !text.trim().is_empty() { first_text.lock().unwrap().get_or_insert(started.elapsed().as_millis()); }
+            Ok(())
+        };
+        let result = query_with_context(&client, &LLMProvider::Ollama, &model, "", &case.context,
+            &case.question, &[], Some("http://localhost:11434"), None, None, None, Some(&emit)).await;
+        let (answer, error) = match result {
+            Ok(answer) => (answer, None),
+            Err(error) => (String::new(), Some(error)),
+        };
+        eprintln!("{}: {:.2}s", case.id, started.elapsed().as_secs_f64());
+        results.push(serde_json::json!({
+            "case": case.id, "model": model, "context": case.context, "claim": case.claim,
+            "question": case.question, "expected": case.expected, "answer": answer,
+            "error": error, "seconds": started.elapsed().as_secs_f64(), "requires_manual_review": true,
+            "first_text_ms": *first_text.lock().unwrap(),
+        }));
+        std::fs::write(&output, serde_json::to_string_pretty(&results).unwrap()).unwrap();
+    }
+    // Transport success is not a semantic quality pass. Review every answer
+    // against its expected result and original sources before accepting changes.
+    assert!(!results.is_empty());
+    assert!(results.iter().all(|row| row["error"].is_null() && !row["answer"].as_str().unwrap().trim().is_empty()),
+        "A model request failed; inspect {output}");
+    println!("Claim-check responses saved to {output}; semantic review is required.");
+}
+
+#[tokio::test]
 #[ignore = "Calls the local Ollama model; run explicitly when evaluating summary quality"]
 async fn live_summary_quality() {
     let cases: Vec<Case> = serde_json::from_str(include_str!(

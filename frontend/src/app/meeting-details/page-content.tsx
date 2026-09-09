@@ -23,14 +23,16 @@ import { Summary } from '@/types';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem } from '@/components/ui/dropdown-menu';
 import { MeetingAssistantDock } from '@/components/MeetingDetails/MeetingAssistantDock';
+import { SummaryClaimCheck } from '@/components/MeetingDetails/SummaryClaimCheck';
+import { summaryClaimQuestion } from '@/lib/summaryClaim';
 import { SearchableTranscript } from '@/components/MeetingDetails/SearchableTranscript';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { BlockNoteSummaryView } from '@/components/AISummary/BlockNoteSummaryView';
 import { EmptyStateSummary } from '@/components/EmptyStateSummary';
 import { SummaryGeneratorButtonGroup } from '@/components/MeetingDetails/SummaryGeneratorButtonGroup';
 import { blocksToPlainText } from '@/lib/meetingNotes';
-import { buildEnhanceNotesPrompt } from '@/lib/enhanceNotes';
 import { loadMeetingAnswerContext } from '@/lib/meetingAnswerContext';
 import Analytics from '@/lib/analytics';
 import { useMeetingData } from '@/hooks/meeting-details/useMeetingData';
@@ -103,12 +105,19 @@ export default function PageContent({
 }) {
   const router = useRouter();
   const titleRef = useRef<HTMLTextAreaElement | null>(null);
-  const transcriptButtonRef = useRef<HTMLButtonElement | null>(null);
+  const sourceTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const sourcePanelRef = useRef<HTMLDivElement | null>(null);
   const openModelSettingsRef = useRef<(() => void) | null>(null);
   const notes = useMeetingNotes(meeting.id);
   const notesText = useMemo(() => blocksToPlainText(notes.blocks), [notes.blocks]);
   const [activeView, setActiveView] = useState<'notes' | 'summary'>('notes');
-  const [isTranscriptOpen, setIsTranscriptOpen] = useState(false);
+  const [isSourcesOpen, setIsSourcesOpen] = useState(false);
+  const [sourceView, setSourceView] = useState<'notes' | 'transcript'>('transcript');
+  const openSources = (view: 'notes' | 'transcript', trigger: HTMLButtonElement) => {
+    sourceTriggerRef.current = trigger;
+    setSourceView(view);
+    setIsSourcesOpen(true);
+  };
   const [isAiComposerOpen, setIsAiComposerOpen] = useState(false);
   const [isClearChatOpen, setIsClearChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState('');
@@ -158,6 +167,7 @@ export default function PageContent({
     meeting: { ...meeting, title: meetingData.meetingTitle },
     transcripts: meetingData.transcripts,
     notesText,
+    notesReady: notes.isReady,
     modelConfig,
     isModelConfigLoading: false,
     selectedTemplate: templates.selectedTemplate,
@@ -180,9 +190,9 @@ export default function PageContent({
     let cancelled = false;
 
     const autoGenerate = async () => {
-      if (shouldAutoGenerate && meetingData.transcripts.length > 0 && !cancelled) {
+      if (shouldAutoGenerate && notes.isReady && meetingData.transcripts.length > 0 && !cancelled) {
         setActiveView('summary');
-        await summaryGeneration.handleGenerateSummary('');
+        await summaryGeneration.handleGenerateSummary();
         if (onAutoGenerateComplete && !cancelled) {
           onAutoGenerateComplete();
         }
@@ -194,7 +204,7 @@ export default function PageContent({
     return () => {
       cancelled = true;
     };
-  }, [meeting.id, meetingData.transcripts.length, onAutoGenerateComplete, shouldAutoGenerate]);
+  }, [meeting.id, meetingData.transcripts.length, onAutoGenerateComplete, shouldAutoGenerate, notes.isReady]);
 
   useAutoSizeTitle(titleRef, meetingData.meetingTitle);
 
@@ -213,13 +223,13 @@ export default function PageContent({
     summaryGeneration.summaryStatus === 'summarizing' ||
     summaryGeneration.summaryStatus === 'regenerating';
   const isComposerExpanded = isAiComposerOpen || isChatLoading;
-  const enhanceNotesPrompt = useMemo(() => buildEnhanceNotesPrompt(notesText), [notesText]);
   const showEnhanceNotesCta = !meetingData.aiSummary && !isSummaryGenerating;
 
 
   const handleEnhanceNotes = () => {
+    if (!notes.isReady) return;
     setActiveView('summary');
-    void summaryGeneration.handleGenerateSummary(enhanceNotesPrompt);
+    void summaryGeneration.handleGenerateSummary();
   };
 
   const flushNoteChanges = async () => {
@@ -237,16 +247,23 @@ export default function PageContent({
   };
 
   const handleRecipe = (recipe: Recipe) => {
+    if (!chatReady || !notes.isReady || isChatLoading) return;
     setIsAiComposerOpen(true);
-    void send(recipe.prompt, () => loadMeetingAnswerContext(meeting.id, notesText, recipe.scope));
+    void send(recipe.prompt, () => loadMeetingAnswerContext(meeting.id, { text: notesText, isReady: notes.isReady }, recipe.scope));
   };
 
   const handleSendChat = () => {
     const userPrompt = chatInput.trim();
-    if (!userPrompt) return;
+    if (!userPrompt || !chatReady || !notes.isReady || isChatLoading) return;
     setIsAiComposerOpen(true);
-    void send(userPrompt, () => loadMeetingAnswerContext(meeting.id, notesText));
+    void send(userPrompt, () => loadMeetingAnswerContext(meeting.id, { text: notesText, isReady: notes.isReady }));
     setChatInput('');
+  };
+
+  const handleCheckClaim = (claim: string) => {
+    if (!chatReady || !notes.isReady || isChatLoading) return;
+    setIsAiComposerOpen(true);
+    void send(summaryClaimQuestion(claim), () => loadMeetingAnswerContext(meeting.id, { text: notesText, isReady: notes.isReady }));
   };
 
   const handleCopyNotes = async () => {
@@ -324,11 +341,11 @@ export default function PageContent({
                       </DropdownMenuRadioGroup>
                     </DropdownMenuContent>
                   </DropdownMenu>
-                  <Button ref={transcriptButtonRef} variant="ghost" size="sm" title={`${transcriptCount} transcript segment${transcriptCount === 1 ? '' : 's'}`} className="rounded-full text-stone-500" onClick={() => setIsTranscriptOpen(true)}>Transcript</Button>
+                  <Button variant="ghost" size="sm" title={`${transcriptCount} transcript segment${transcriptCount === 1 ? '' : 's'}`} className="rounded-full text-stone-500" onClick={event => openSources('transcript', event.currentTarget)}>Transcript</Button>
                   <span title={formatSavedAt(meeting.updated_at || meeting.created_at)} className="text-xs text-stone-500">{new Date(meeting.created_at).toLocaleDateString([], { month: 'short', day: 'numeric' })}</span>
 
                   <div className="ml-auto flex flex-wrap items-center gap-2">
-                    {showEnhanceNotesCta && <EnhanceNotesCta onClick={handleEnhanceNotes} />}
+                    {showEnhanceNotesCta && <EnhanceNotesCta disabled={!notes.isReady} onClick={handleEnhanceNotes} />}
                     <div>
                       <SummaryGeneratorButtonGroup
                         modelConfig={modelConfig}
@@ -336,12 +353,12 @@ export default function PageContent({
                         onSaveModelConfig={handleSaveModelConfig}
                         onGenerateSummary={summaryGeneration.handleGenerateSummary}
                         onStopGeneration={summaryGeneration.handleStopGeneration}
-                        customPrompt={enhanceNotesPrompt}
+                        customPrompt=""
                         summaryStatus={summaryGeneration.summaryStatus}
                         availableTemplates={templates.availableTemplates}
                         selectedTemplate={templates.selectedTemplate}
                         onTemplateSelect={templates.handleTemplateSelection}
-                        hasTranscripts={meetingData.transcripts.length > 0 || !isNotesEmpty}
+                        hasTranscripts={notes.isReady && (meetingData.transcripts.length > 0 || !isNotesEmpty)}
                         isModelConfigLoading={false}
                         onOpenModelSettings={handleRegisterModalOpen}
                         showPrimaryAction={Boolean(meetingData.aiSummary) || isSummaryGenerating}
@@ -356,27 +373,31 @@ export default function PageContent({
             <div className="w-full pt-3 pb-5">
               <div hidden={activeView !== 'summary'}>
                 {meetingData.aiSummary ? (
-                  <div className="document-editor [&_.bn-editor]:!px-0">
-                    <div className="h-full overflow-y-auto">
-                      <BlockNoteSummaryView
-                        ref={meetingData.blockNoteSummaryRef}
-                        summaryData={meetingData.aiSummary}
-                        onSave={meetingData.handleSaveSummary}
-                        onSummaryChange={meetingData.handleSummaryChange}
-                        onDirtyChange={meetingData.setIsSummaryDirty}
-                        autoSave
-                        onSavingChange={meetingData.setIsSummarySaving}
-                        status={summaryGeneration.summaryStatus}
-                        error={summaryGeneration.summaryError}
-                        onRegenerateSummary={() => void summaryGeneration.handleRegenerateSummary()}
-                        meeting={{
-                          id: meeting.id,
-                          title: meetingData.meetingTitle,
-                          created_at: meeting.created_at,
-                        }}
-                      />
+                  <SummaryClaimCheck key={meeting.id}
+                    enabled={activeView === 'summary' && chatReady && notes.isReady && !isChatLoading && !isSummaryGenerating}
+                    onCheck={handleCheckClaim}>
+                    <div className="document-editor [&_.bn-editor]:!px-0">
+                      <div className="h-full overflow-y-auto">
+                        <BlockNoteSummaryView
+                          ref={meetingData.blockNoteSummaryRef}
+                          summaryData={meetingData.aiSummary}
+                          onSave={meetingData.handleSaveSummary}
+                          onSummaryChange={meetingData.handleSummaryChange}
+                          onDirtyChange={meetingData.setIsSummaryDirty}
+                          autoSave
+                          onSavingChange={meetingData.setIsSummarySaving}
+                          status={summaryGeneration.summaryStatus}
+                          error={summaryGeneration.summaryError}
+                          onRegenerateSummary={() => void summaryGeneration.handleRegenerateSummary()}
+                          meeting={{
+                            id: meeting.id,
+                            title: meetingData.meetingTitle,
+                            created_at: meeting.created_at,
+                          }}
+                        />
+                      </div>
                     </div>
-                  </div>
+                  </SummaryClaimCheck>
                 ) : (
                   <div className="flex h-full min-h-[240px] items-center justify-center rounded-lg bg-white/76 ring-1 ring-stone-200/60">
                     <EmptyStateSummary
@@ -393,29 +414,35 @@ export default function PageContent({
                 </div>
               ) : (
                 <div className="flex h-full min-h-[240px] items-center justify-center rounded-lg bg-white/76 ring-1 ring-stone-200/60">
-                  <p>Loading notes… If this persists, reopen the meeting to retry.</p>
+                  <p role="status">{notes.loadError ? 'Could not load written notes.' : 'Loading written notes…'} {notes.loadError && <button type="button" onClick={notes.retryLoad} className="underline">Retry loading notes</button>}</p>
                 </div>
               ))}
             </div>
           </section>
 
-          <Sheet open={isTranscriptOpen} onOpenChange={setIsTranscriptOpen}>
+          <Sheet open={isSourcesOpen} onOpenChange={setIsSourcesOpen}>
             <SheetContent
-              onCloseAutoFocus={event => { event.preventDefault(); transcriptButtonRef.current?.focus(); }}
+              ref={sourcePanelRef}
+              onOpenAutoFocus={event => {
+                event.preventDefault();
+                sourcePanelRef.current?.querySelector<HTMLElement>(sourceView === 'transcript'
+                  ? 'input[type="search"]' : '[role="tab"][data-state="active"]')?.focus();
+              }}
+              onCloseAutoFocus={event => { event.preventDefault(); sourceTriggerRef.current?.focus(); }}
               side="bottom"
               className="h-[78vh] rounded-t-xl border-stone-200 bg-white px-0 pb-0 pt-4"
             >
-              <div className="flex h-full flex-col">
+              <Tabs value={sourceView} onValueChange={value => setSourceView(value as 'notes' | 'transcript')} className="flex h-full flex-col">
                 <SheetHeader className="border-b border-stone-200 px-6 pb-4">
-                  <div className="flex items-start justify-between gap-4 pr-10">
+                  <div className="flex flex-wrap items-start justify-between gap-4 pr-10">
                     <div>
-                      <SheetTitle className="text-stone-900">Transcript</SheetTitle>
+                      <SheetTitle className="text-stone-900">Meeting sources</SheetTitle>
                       <SheetDescription className="text-stone-600">
-                        Review everything captured in this meeting and copy it when needed.
+                        Current originals. Answer citations keep the excerpts used at the time.
                       </SheetDescription>
                     </div>
                     <div className="flex items-center gap-2">
-                      {onRefetchTranscripts && (
+                      {sourceView === 'transcript' && onRefetchTranscripts && (
                         <Button
                           variant="outline"
                           size="sm"
@@ -430,18 +457,30 @@ export default function PageContent({
                         variant="outline"
                         size="sm"
                         className="rounded-md border-stone-200 bg-white"
-                        onClick={copyOperations.handleCopyTranscript}
+                        disabled={sourceView === 'notes' && (!notes.isReady || !notesText.trim())}
+                        onClick={sourceView === 'notes' ? handleCopyNotes : copyOperations.handleCopyTranscript}
                       >
                         <Copy className="h-4 w-4" />
-                        Copy Transcript
+                        {sourceView === 'notes' ? 'Copy notes' : 'Copy Transcript'}
                       </Button>
                     </div>
                   </div>
+                  <TabsList aria-label="Meeting source type" className="w-fit">
+                    <TabsTrigger value="notes" className="transition-none">Written notes</TabsTrigger>
+                    <TabsTrigger value="transcript" className="transition-none">Transcript</TabsTrigger>
+                  </TabsList>
                 </SheetHeader>
 
-                <div className="flex-1 overflow-y-auto px-6 py-5">
+                <TabsContent value="notes" forceMount hidden={sourceView !== 'notes'} className="mt-0 min-h-0 flex-1 overflow-y-auto px-6 py-5">
+                  <div className="mx-auto max-w-4xl">
+                    {!notes.isReady ? <p role="status" className="text-sm text-stone-500">{notes.loadError ? 'Could not load written notes.' : 'Loading written notes…'} {notes.loadError && <button type="button" onClick={notes.retryLoad} className="underline">Retry loading notes</button>}</p>
+                      : notesText.trim() ? <p className="whitespace-pre-wrap break-words text-sm leading-7 text-stone-700">{notesText}</p>
+                      : <p className="py-8 text-sm text-stone-500">No written notes for this meeting.</p>}
+                  </div>
+                </TabsContent>
+                <TabsContent value="transcript" forceMount hidden={sourceView !== 'transcript'} className="mt-0 min-h-0 flex-1 overflow-y-auto px-6 py-5">
                   <div className="mx-auto max-w-4xl space-y-3">
-                    <SearchableTranscript meetingId={meeting.id} transcripts={meetingData.transcripts} hasMore={Boolean(hasMore)} />
+                    <SearchableTranscript meetingId={meeting.id} transcripts={meetingData.transcripts} hasMore={Boolean(hasMore)} autoFocus={false} />
 
                     {hasMore && onLoadMore && (
                       <div className="flex justify-center pt-2">
@@ -457,8 +496,8 @@ export default function PageContent({
                       </div>
                     )}
                   </div>
-                </div>
-              </div>
+                </TabsContent>
+              </Tabs>
             </SheetContent>
           </Sheet>
         </div>
@@ -480,9 +519,10 @@ export default function PageContent({
         expanded={isComposerExpanded} onExpandedChange={setIsAiComposerOpen}
         messages={messages} loading={isChatLoading} input={chatInput} onInputChange={setChatInput}
         onSend={handleSendChat} onClear={() => setIsClearChatOpen(true)} onStop={stop}
-        canSend={chatReady && Boolean(notesText.trim() || meetingData.transcripts.length)}
-        historyStatus={historyError || (!chatReady ? 'Loading conversation…' : undefined)}
-        onRetryHistory={historyError ? retryHistory : undefined}
+        canSend={chatReady && notes.isReady && Boolean(notesText.trim() || meetingData.transcripts.length)}
+        historyStatus={notes.loadError ? 'Could not load written notes. Retry before asking a question.' : historyError || (!notes.isReady ? 'Loading written notes…' : !chatReady ? 'Loading conversation…' : undefined)}
+        onRetryHistory={notes.loadError ? notes.retryLoad : historyError ? retryHistory : undefined}
+        onReviewSources={trigger => openSources('notes', trigger)}
         recipes={RECIPES.map(recipe => ({ label: recipe.label, onSelect: () => handleRecipe(recipe) }))}
       />
     </div>
