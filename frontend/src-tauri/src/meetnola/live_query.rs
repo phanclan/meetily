@@ -1,11 +1,11 @@
 use crate::database::repositories::setting::SettingsRepository;
 use crate::state::AppState;
-use crate::summary::llm_client::{query_with_context, LLMProvider};
+use crate::summary::llm_client::{query_with_context, LLMProvider, MeetingExchange};
 use reqwest::Client;
 use tauri::{AppHandle, Manager, Runtime};
 use tracing::info;
 
-/// Sends a single-shot question to the configured LLM using the live meeting transcript as context.
+/// Answers a question using meeting sources and recent conversation for follow-up references.
 ///
 /// # Arguments
 /// * `user_message` - The user's question or recipe prompt
@@ -16,8 +16,9 @@ pub async fn live_query<R: Runtime>(
     state: tauri::State<'_, AppState>,
     user_message: String,
     transcript_context: String,
+    history: Option<Vec<MeetingExchange>>,
 ) -> Result<String, String> {
-    info!("live_query called: {}", user_message.chars().take(80).collect::<String>());
+    info!("live_query called");
     let pool = state.db_manager.pool();
 
     // Load LLM settings
@@ -83,6 +84,7 @@ pub async fn live_query<R: Runtime>(
         &final_api_key,
         &transcript_context,
         &user_message,
+        history.as_deref().unwrap_or_default(),
         ollama_endpoint.as_deref(),
         custom_openai_endpoint.as_deref(),
         app_data_dir.as_ref(),

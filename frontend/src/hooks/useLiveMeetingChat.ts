@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { liveQuery } from '@/meetnola/ipc';
+import { liveQuery, type MeetingExchange } from '@/meetnola/ipc';
 import type { MeetingAnswerContext, MeetingSource } from '@/lib/meetingAnswerContext';
 
 export interface ChatMessage {
@@ -14,10 +14,12 @@ export function useLiveMeetingChat(meetingId?: string) {
   const [error, setError] = useState<string | null>(null);
   const active = useRef(false);
   const epoch = useRef(0);
+  const history = useRef<MeetingExchange[]>([]);
 
   useEffect(() => {
     epoch.current += 1;
     active.current = false;
+    history.current = [];
     setMessages([]);
     setIsLoading(false);
     setError(null);
@@ -41,8 +43,14 @@ export function useLiveMeetingChat(meetingId?: string) {
       const response = await liveQuery({
         userMessage,
         transcriptContext: context.context,
+        history: history.current,
       });
-      if (epoch.current === requestEpoch) setMessages(prev => [...prev, { role: 'assistant', content: response, sources: context.sources }]);
+      if (epoch.current === requestEpoch) {
+        // Earlier citation IDs refer to older source snapshots, not today's context.
+        const answer = response.replace(/\[S\d+\]\(#source-S\d+\)/g, '');
+        history.current = [...history.current, { question: userMessage, answer }].slice(-6);
+        setMessages(prev => [...prev, { role: 'assistant', content: response, sources: context.sources }]);
+      }
     } catch (err) {
       if (epoch.current !== requestEpoch) return;
       const msg = err instanceof Error ? err.message : String(err);
@@ -56,6 +64,7 @@ export function useLiveMeetingChat(meetingId?: string) {
   const clearMessages = useCallback(() => {
     epoch.current += 1;
     active.current = false;
+    history.current = [];
     setIsLoading(false);
     setMessages([]);
     setError(null);

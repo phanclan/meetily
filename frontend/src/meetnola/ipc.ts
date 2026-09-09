@@ -18,9 +18,15 @@ export function appendFrontendLog(args: {
   return meetnolaInvoke('append_frontend_log', args as Record<string, unknown>)
 }
 
+export interface MeetingExchange {
+  question: string
+  answer: string
+}
+
 export function liveQuery(args: {
   userMessage: string
   transcriptContext: string
+  history?: MeetingExchange[]
 }): Promise<string> {
   return meetnolaInvoke<string>('live_query', args as Record<string, unknown>)
 }

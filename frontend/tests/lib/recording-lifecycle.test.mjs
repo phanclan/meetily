@@ -1101,3 +1101,38 @@ test('cleared, unmounted and changed-meeting requests cannot append stale answer
     assert.equal(JSON.stringify(fixture.states), snapshot, boundary);
   }
 });
+
+test('follow-up questions receive recent successful exchanges without old citation IDs', async () => {
+  const calls = [];
+  const { chat, states } = chatFixture(async args => {
+    calls.push(args);
+    if (args.userMessage === 'Failed question') throw new Error('Unavailable');
+    return `Answer to ${args.userMessage} [S1](#source-S1).`;
+  });
+  await chat.send('First', 'Initial sources');
+  await chat.send('Failed question', 'Initial sources');
+  await chat.send('Who owns that?', 'Updated sources');
+  const followUp = calls[2];
+  assert.equal(followUp.transcriptContext, 'Updated sources');
+  assert.equal(followUp.history.length, 1);
+  assert.equal(followUp.history[0].question, 'First');
+  assert.equal(followUp.history[0].answer, 'Answer to First .');
+  assert.match(states[0][1].content, /\[S1\]\(#source-S1\)/);
+  for (let i = 0; i < 7; i++) await chat.send(`Question ${i}`, 'Sources');
+  const last = calls.at(-1).history;
+  assert.equal(last.length, 6);
+  assert.equal(last[0].question, 'Question 0');
+  assert.equal(last[5].question, 'Question 5');
+});
+
+test('clearing or changing meetings clears follow-up history', async () => {
+  for (const boundary of ['clear', 'switch']) {
+    const calls = [];
+    const fixture = chatFixture(async args => { calls.push(args); return 'Old answer'; });
+    await fixture.chat.send('Old question', 'Old source');
+    if (boundary === 'clear') fixture.chat.clearMessages();
+    else fixture.switchMeeting();
+    await fixture.chat.send('New question', 'New source');
+    assert.equal(calls[1].history.length, 0, boundary);
+  }
+});

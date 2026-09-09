@@ -107,6 +107,51 @@ fn a_preservation_check_does_not_validate_an_invented_implementation_task() {
     }));
 }
 
+#[test]
+fn reassignment_paraphrases_still_require_the_new_action_owner_and_deadline() {
+    let cases: Vec<Case> = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/summary-quality.json"
+    )).unwrap();
+    let case = cases.iter().find(|case| case.id == "reassigned-task-and-corrected-deadline").unwrap();
+    let report = "## Summary\nThe capacity report assignment was moved from Noah to Liam.\n\n## Action Items\n- [ ] Deliver the capacity report (Liam, Tuesday)";
+    assert!(evaluate_case(case, report).is_empty());
+    let incorrect = report.replace("(Liam, Tuesday)", "(Noah, Monday)");
+    let failures = evaluate_case(case, &incorrect);
+    assert!(failures.iter().any(|failure| failure == "Disallowed action content: Noah"));
+    assert!(failures.iter().any(|failure| failure == "Missing fact in Action Items: Tuesday"));
+}
+
+#[tokio::test]
+#[ignore = "Calls the local Ollama model; run explicitly when evaluating follow-up answers"]
+async fn live_meeting_follow_up_quality() {
+    use super::llm_client::{query_with_context, MeetingExchange};
+    let client = reqwest::Client::new();
+    let model = std::env::var("MEETNOLA_EVAL_MODEL").unwrap_or_else(|_| "gemma4:e4b-mlx".into());
+    let context = "[S1] Written notes\nPreserve the custom meeting title when saving. No implementation task, owner, or deadline was assigned.\n\n[S2] Transcript · 0:30\nKeep local Parakeet for transcription.";
+    let question = "What must be preserved when saving?";
+    let first = query_with_context(&client, &LLMProvider::Ollama, &model, "", context,
+        question, &[], Some("http://localhost:11434"), None, None).await.unwrap();
+    let history = [MeetingExchange { question: question.into(), answer: first.replace("[S1](#source-S1)", "") }];
+    let follow_up = query_with_context(&client, &LLMProvider::Ollama, &model, "", context,
+        "Turn that into one short reminder.", &history, Some("http://localhost:11434"), None, None).await.unwrap();
+    // A prior generated answer must not become evidence for an invented assignment.
+    let incorrect_history = [MeetingExchange {
+        question: "What was assigned?".into(),
+        answer: "Morgan agreed to implement title preservation by Friday.".into(),
+    }];
+    let correction = query_with_context(&client, &LLMProvider::Ollama, &model, "", context,
+        "Was that actually assigned in the meeting?", &incorrect_history,
+        Some("http://localhost:11434"), None, None).await.unwrap();
+    println!("{}", serde_json::json!({"model": model, "first": first, "follow_up": follow_up, "correction": correction}));
+    assert!(first.to_lowercase().contains("custom meeting title"));
+    assert!(follow_up.to_lowercase().contains("title"));
+    assert!(!follow_up.to_lowercase().contains("parakeet"));
+    assert!(follow_up.contains("#source-S1"));
+    assert!(follow_up.split_whitespace().count() <= 50);
+    assert!(correction.to_lowercase().contains("no") || correction.to_lowercase().contains("not"));
+    assert!(correction.contains("#source-S1"));
+}
+
 #[tokio::test]
 #[ignore = "Calls the local Ollama model; run explicitly when evaluating summary quality"]
 async fn live_summary_quality() {
