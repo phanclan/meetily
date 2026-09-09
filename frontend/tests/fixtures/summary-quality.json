@@ -456,5 +456,122 @@
         ]
       ]
     }
+  },
+  {
+    "id": "varied-release-review",
+    "text": "[00:00] Dana: This is the release readiness review for our internal meeting-notes pilot. We need to leave with a small set of decisions we can actually stand behind. I have three topics on the agenda: the date-import defect, whether the support team can prepare for the pilot, and the change in our storage costs. We are not setting a public launch date in this meeting. The pilot has twelve employees in the first group. None of the people in that group are external customers.\n[00:42] Max: I reproduced the date problem with a sample export. The source file uses day first. Our parser assumes month first whenever both numbers are twelve or less, so 4 May becomes 5 April. The problem happens after the file is read, when we interpret that date column. It does not rewrite the source file. The records in the source are intact, including the original date strings. I can probably take the parser correction by Monday.\n[01:30] Dana: Let's put Max and Monday down for the parser correction for now. We will come back to staffing after the on-call update. Until the fix is ready, people can select the date format manually. I want to keep that distinction clear in the internal explanation: a displayed date can be wrong even when no stored source information has been lost. Do not tell the pilot group they need to recreate their original exports.\n[02:08] Rosa: There is also a mobile title issue, but it is separate. A long meeting name is clipped in the narrow layout. The full title is still stored and appears when the note is reopened on a wider screen. I demonstrated it with a deliberately long synthetic name. We have not decided who will fix the mobile display. Please don't attach that task to the date-parser work simply because both issues showed up during the same review.\n[02:52] Mateo: I ran the staging load test yesterday. That run is complete, and the output is in the shared engineering notes. The queue recovered after the simulated connection interruption. It was an internal test with generated note text, not a test with actual customer recordings. The test doesn't establish how accurate summaries are, and it doesn't tell us whether imported audio is transcribed correctly. It only covered the request queue and recovery after a temporary failure.\n[03:38] Dana: Thanks. There is no need to turn yesterday's completed test into another action item. I do want one new measurement after the parser correction lands, but let's decide the timing after we know who can do the parser work. We shouldn't promise a repeat on Monday if the correction itself won't exist then. The readiness list should distinguish evidence we already have from work that somebody is actually agreeing to do next.\n[04:12] Kim: On the storage estimate, we are currently retaining audio longer than we need for the pilot. The estimate assumes everybody records every working day and that every file is kept indefinitely. That is a capacity-planning assumption, not the retention policy. Changing the policy could lower the estimate, but a lower estimate by itself is not an approval to delete anyone's recordings. We should decide a retention period explicitly and explain it before it takes effect.\n[05:04] Dana: For this pilot, I approve a ninety-day audio retention period. Keep written notes and transcripts under the existing policy. This decision is about audio only. Existing recordings should not be deleted as part of today's meeting; we need the normal rollout process before any cleanup happens. The policy decision is approved, but I am not assigning someone a deletion task or inventing a cleanup deadline right now.\n[05:47] Kim: Understood. Ninety days applies to the pilot's audio. Notes and transcripts stay as they are. I will send the revised storage estimate on Thursday, using that audio retention assumption and the same twelve-person pilot size. That is my new action. I am not proposing that we increase the pilot population yet. If the actual usage differs from the assumption, we can revisit the estimate using the measured figures.\n[06:29] Lee: Support has the draft briefing outline. I can deliver the customer briefing on Thursday. I know the document is called a customer briefing even though this phase is internal; it is an outline for later use and it will not be sent outside the company. My task is the briefing draft itself. I am not taking ownership of the help-center redesign, and nobody has committed to translating the guide into other languages in this meeting.\n[07:11] Dana: Lee, Thursday for the briefing draft is confirmed in this discussion. Please keep the distinction between preparing material and publishing it. We do not have authorization for an external announcement. Our internal participants can use the existing onboarding checklist. The draft should describe the manual date-format choice and avoid implying that a source export was damaged. The mobile title issue can be called out as a known display limitation.\n[08:03] Priya: The accessibility review is still open. Keyboard focus reaches the source drawer and returns to the question when the drawer closes, which is better than last week's build. I have not tested every screen reader announcement. My observation isn't a general accessibility sign-off, and it doesn't establish conformance to a standard. I could investigate the remaining announcements if I have room after my current project, but that is an offer, not a commitment.\n[08:44] Dana: Let's leave that investigation unassigned. We should not put Priya on the action list based on an offer that depends on her availability. We can still record the missing screen reader coverage as an unresolved limitation. The positive keyboard observation is evidence from the screen we tested, not approval for all of the application's workflows. That distinction matters when somebody reads these notes without being in this call.\n[09:26] Max: Quick on-call update before I forget. I am taking the incident shift tomorrow and the coverage may run into next week. I cannot commit to the parser correction after all. Please cancel my earlier Monday assignment. I haven't written the change, so there isn't a finished patch to hand over. I can describe the reproduction now, but that doesn't mean I'm still the owner of the fix.\n[10:01] Rosa: I can take the date-parser correction, due Wednesday instead. I will keep the manual date-format selection available while I work on it. To be explicit, this is the parser correction only; the mobile title truncation remains separate and unassigned. The reproduction should include both an ambiguous date and an unambiguous date, so the check distinguishes the wrong default from an input that already specifies its format.\n[10:43] Dana: Confirmed: Rosa owns the parser correction for Wednesday. Max's Monday assignment is withdrawn. Mateo, could you rerun the staging load test on Friday after that correction has been reviewed? I want a repeat of the same queue and recovery scenario, not a broader performance certification. It should be possible to compare the behavior without changing the test population or describing a different workload as though it were the same one.\n[11:22] Mateo: Yes. I'll rerun the staging load test Friday. Yesterday's completed run remains our baseline. The Friday run will use the same generated note text and the same simulated connection interruption. I will record any differences separately. This does not add a new audio-recording test, and it does not measure the factual accuracy of generated summaries. Those are separate evidence gaps, not extra tasks I'm accepting here.\n[12:05] Evan: I had suggested paying for another hosted environment so support could test independently. The request is for eighteen hundred dollars. I have not submitted it for approval, and I don't have a firm quote that includes the ongoing service costs. We should not treat the number as an approved purchase or as the final amount. It is a proposal to investigate, and the group has not assigned that investigation to anyone.\n[12:51] Dana: The eighteen-hundred-dollar environment remains proposed, without approval or rejection. We can run the current internal pilot in staging. Separately, I approved the captioning subscription in yesterday's email for three hundred dollars. That approval is not part of the environment request. I want both items recorded correctly so a future reader doesn't think one decision covers the other. We are not making a new purchase assignment during this call.\n[13:38] Kim: There is one change to the captioning approval. The vendor clarified that the quoted tier excludes the feature our pilot needs. I recommend we withdraw that approval until we have a quote for the correct tier. This is not a rejection of captioning in principle. It means that yesterday's three-hundred-dollar approval no longer matches the thing we would actually be buying. We can leave the need open while getting the facts right.\n[14:21] Dana: Agreed. I withdraw the three-hundred-dollar captioning approval. Do not place that order. We are not approving an alternative subscription today. Record that the earlier approval was withdrawn, and that the captioning need remains unresolved. The eighteen-hundred-dollar environment proposal is still a separate, unapproved proposal. Neither amount should appear as an approved spend in the final notes.\n[15:10] Rosa: One concern with the reporting view: it currently adds completed imports and retry attempts together in a chart caption. Those categories overlap. A retry can eventually lead to one completed import, but it isn't another completed import. I am flagging the caption as confusing. I haven't agreed to change the reporting view as part of the date-parser fix. No one has been assigned that caption change during this conversation.\n[15:56] Lee: The briefing draft can explain what we know without claiming that everything is finished. We have the queue recovery observation, the date-parser reproduction, and the narrow keyboard-focus check. We don't yet have summary-accuracy results from a real long meeting, complete screen reader coverage, or a corrected reporting caption. I won't describe those missing checks as passed. The draft also won't state that the pilot is ready for external customers.\n[16:42] Mateo: On the twelve-person pilot, I suggest starting with only six employees until the new load-test result is available. That is a proposal for a smaller first group. It doesn't change the total planned pilot population unless Dana agrees. I would rather be clear about that than have two different participant counts appear as separate approved plans in the notes. We can keep the test workload unchanged even if the enrollment timing changes.\n[17:20] Dana: I am not deciding the six-person suggestion today. The planned pilot remains twelve employees; the smaller first-group idea is unresolved. Keep the pilot internal. No external release or public announcement is approved. The review gives us some useful evidence, but I am not declaring release readiness. The open accuracy and accessibility checks still matter, and nobody should read this meeting as permission to publish the application broadly.\n[18:11] Priya: Before we close, the written-note view has a customer-briefing owner and date that differ from what was said here. I don't know whether that entry is older or comes from another discussion. There is no timestamp on it. We haven't checked that discrepancy with the note's author, so I can't say that either source corrects the other. Please preserve the disagreement rather than silently treating one source as newer.\n[18:50] Dana: Agreed that we have not resolved the briefing discrepancy. Don't invent a reconciliation task or choose an owner on behalf of the group. The unambiguous new commitments from this call are Rosa's parser correction on Wednesday, Mateo's staging load-test rerun on Friday, and Kim's revised storage estimate on Thursday. Other observations, suggestions, and unresolved source differences should remain clearly labeled as such.\n[19:30] Kim: That matches my notes for the storage action. I will send the estimate Thursday. The ninety-day audio retention decision stays approved; withdrawing the captioning purchase doesn't reverse that retention decision. Notes and transcripts keep their existing policy. Keeping those as separate facts should make the review useful when we check what changed next week.\n[20:02] Dana: Closing recap: internal pilot only, no public launch date, and no purchase order for the withdrawn captioning approval. Max is no longer assigned the parser correction. The separate environment proposal, the smaller pilot-group suggestion, the mobile title fix, and broader accessibility coverage remain unresolved. We have not assigned owners or deadlines to those unresolved items just by discussing them.",
+    "notes": "Customer briefing draft: Alex, Tuesday.\nKeep original written notes editable after enhancement.\nThere is no timestamp on this written entry.",
+    "required_any": [
+      [
+        "Alex"
+      ],
+      [
+        "Tuesday"
+      ],
+      [
+        "Lee"
+      ],
+      [
+        "Thursday"
+      ],
+      [
+        "conflict",
+        "disagree",
+        "discrepancy",
+        "inconsistent"
+      ],
+      [
+        "editable"
+      ],
+      [
+        "intact",
+        "not lost",
+        "unchanged"
+      ]
+    ],
+    "absent": [
+      "public launch approved",
+      "source data was lost",
+      "source files were corrupted"
+    ],
+    "action_absent": [
+      "Max",
+      "Monday",
+      "Priya",
+      "mobile title",
+      "Alex",
+      "Lee",
+      "1800",
+      "1,800"
+    ],
+    "action_required_together": [
+      [
+        [
+          "parser"
+        ],
+        [
+          "Rosa"
+        ],
+        [
+          "Wednesday"
+        ]
+      ],
+      [
+        [
+          "load test",
+          "load-test"
+        ],
+        [
+          "Mateo"
+        ],
+        [
+          "Friday"
+        ]
+      ],
+      [
+        [
+          "storage estimate"
+        ],
+        [
+          "Kim"
+        ],
+        [
+          "Thursday"
+        ]
+      ]
+    ],
+    "section_required_any": {
+      "Key Decisions": [
+        [
+          "ninety",
+          "90"
+        ],
+        [
+          "audio"
+        ],
+        [
+          "captioning"
+        ],
+        [
+          "withdraw",
+          "not place",
+          "do not order",
+          "no order",
+          "cancel"
+        ],
+        [
+          "internal"
+        ]
+      ]
+    },
+    "section_absent": {
+      "Key Decisions": [
+        "1,800",
+        "1800",
+        "six-person",
+        "six employees"
+      ]
+    },
+    "max_words": 650
   }
 ]

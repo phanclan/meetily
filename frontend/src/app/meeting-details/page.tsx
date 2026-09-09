@@ -30,11 +30,12 @@ function MeetingDetailsContent() {
   const searchParams = useSearchParams();
   const meetingId = searchParams.get('id');
   const source = searchParams.get('source'); // Check if navigated from recording
-  const { setCurrentMeeting, refetchMeetings, stopSummaryPolling } = useSidebar();
+  const { setCurrentMeeting, refetchMeetings } = useSidebar();
   const { isAutoSummary } = useConfig(); // Get auto-summary toggle state
   const router = useRouter();
   const [meetingDetails, setMeetingDetails] = useState<MeetingDetailsResponse | null>(null);
   const [meetingSummary, setMeetingSummary] = useState<Summary | null>(null);
+  const [summaryStatus, setSummaryStatus] = useState('idle');
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [shouldAutoGenerate, setShouldAutoGenerate] = useState<boolean>(false);
@@ -165,22 +166,13 @@ function MeetingDetailsContent() {
   useEffect(() => {
     setMeetingDetails(null);
     setMeetingSummary(null);
+    setSummaryStatus('idle');
     setError(null);
     setIsLoading(true);
     // Reset auto-generation state to allow new meeting to be checked
     setHasCheckedAutoGen(false);
     setShouldAutoGenerate(false);
   }, [meetingId]);
-
-  // Cleanup: Stop polling when navigating away from a meeting
-  useEffect(() => {
-    return () => {
-      if (meetingId) {
-        console.log('Cleaning up: Stopping summary polling for meeting:', meetingId);
-        stopSummaryPolling(meetingId);
-      }
-    };
-  }, [meetingId, stopSummaryPolling]);
 
   useEffect(() => {
     console.log('MeetingDetails useEffect triggered - meetingId:', meetingId);
@@ -200,11 +192,15 @@ function MeetingDetailsContent() {
     setError(null);
     setIsLoading(true);
 
+    let cancelled = false;
     const fetchMeetingSummary = async () => {
       try {
         const summary = await invoke('api_get_summary', {
           meetingId: meetingId,
         }) as any;
+
+        if (cancelled) return;
+        setSummaryStatus(summary?.status || 'idle');
 
         console.log('FETCH SUMMARY: Raw response:', summary);
 
@@ -296,6 +292,7 @@ function MeetingDetailsContent() {
         console.log('LEGACY FORMAT: Formatted summary:', formattedSummary);
         setMeetingSummary(formattedSummary);
       } catch (error) {
+        if (cancelled) return;
         console.error('FETCH SUMMARY: Error fetching meeting summary:', error);
         // Don't set error state for summary fetch failure, set to null to show generate button
         setMeetingSummary(null);
@@ -306,11 +303,12 @@ function MeetingDetailsContent() {
       try {
         await fetchMeetingSummary();
       } finally {
-        setIsLoading(false);
+        if (!cancelled) setIsLoading(false);
       }
     };
 
     loadData();
+    return () => { cancelled = true; };
   }, [meetingId]);
 
   // Auto-generation check: runs when meeting is loaded with no summary
@@ -380,6 +378,7 @@ function MeetingDetailsContent() {
     key={meetingDetails.id}
     meeting={meetingDetails}
     summaryData={meetingSummary}
+    initialSummaryStatus={summaryStatus}
     shouldAutoGenerate={shouldAutoGenerate}
     onAutoGenerateComplete={() => setShouldAutoGenerate(false)}
     onMeetingUpdated={async () => {

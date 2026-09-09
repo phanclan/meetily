@@ -81,7 +81,8 @@ export function SummaryGeneratorButtonGroup({
     }
   }, [onOpenModelSettings]);
 
-  if (!hasTranscripts) {
+  const isGenerating = summaryStatus === 'processing' || summaryStatus === 'summarizing' || summaryStatus === 'regenerating';
+  if (!hasTranscripts && !isGenerating) {
     return null;
   }
 
@@ -242,7 +243,6 @@ export function SummaryGeneratorButtonGroup({
     }
   };
 
-  const isGenerating = summaryStatus === 'processing' || summaryStatus === 'summarizing' || summaryStatus === 'regenerating';
 
   return (
     <ButtonGroup>

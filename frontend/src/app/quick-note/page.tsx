@@ -200,6 +200,7 @@ export default function QuickNotePage() {
   const [hydratedSessionId, setHydratedSessionId] = useState<string | null>(null);
   const [savedMeetingCreatedAt, setSavedMeetingCreatedAt] = useState<string>(new Date().toISOString());
   const [aiSummary, setAiSummary] = useState<Summary | null>(null);
+  const [savedSummaryState, setSavedSummaryState] = useState<{ meetingId: string; status: string } | null>(null);
   const activeNotesMeetingId = currentMeetingId ?? savedMeetingId;
   const {
     blocks,
@@ -492,6 +493,7 @@ export default function QuickNotePage() {
     transcripts: [],
     notesText: noteText,
     notesReady: notesSourceReady,
+    initialSummaryStatus: savedSummaryState?.meetingId === summaryMeeting.id ? savedSummaryState.status : undefined,
     modelConfig,
     isModelConfigLoading: false,
     selectedTemplate: templates.selectedTemplate,
@@ -512,6 +514,7 @@ export default function QuickNotePage() {
   useAutoSizeTitle(titleRef, noteTitle, isPostRecording);
 
   useEffect(() => {
+    setSavedSummaryState(null);
     if (!savedMeetingId) {
       setAiSummary(null);
       return;
@@ -527,6 +530,8 @@ export default function QuickNotePage() {
         ]);
 
         if (cancelled) return;
+
+        setSavedSummaryState({ meetingId: savedMeetingId, status: (summary as { status?: string } | null)?.status || 'idle' });
 
         if (meeting?.created_at) {
           setSavedMeetingCreatedAt(meeting.created_at);

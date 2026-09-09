@@ -501,10 +501,11 @@ for (const source of ['notes', 'mixed', 'transcript', 'empty', 'fetch-error', 'n
   test(`summary generation handles ${source} without inventing transcript content`, async () => {
     const requests = [];
     let reads = 0;
+    let finishGeneration;
     const load = loader({
       react: quietReact,
-      sonner: { toast: { dismiss: noop, error: noop, warning: noop, info: noop } },
-      '@/components/Sidebar/SidebarProvider': { useSidebar: () => ({ startSummaryPolling: noop }) },
+      sonner: { toast: { dismiss: noop, error: noop, warning: noop, info: noop, success: noop } },
+      '@/components/Sidebar/SidebarProvider': { useSidebar: () => ({ startSummaryPolling: (_id, _process, callback) => { finishGeneration = callback; } }) },
       '@tauri-apps/api/core': { invoke: async (cmd, args) => {
         if (cmd === 'api_get_meeting_transcripts') {
           reads++;
@@ -526,6 +527,7 @@ for (const source of ['notes', 'mixed', 'transcript', 'empty', 'fetch-error', 'n
       isModelConfigLoading: false, selectedTemplate: 'default', updateMeetingTitle: noop, setAiSummary: noop,
     });
     await hook.handleGenerateSummary('Enhance these notes');
+    await finishGeneration?.({ status: 'completed', data: { markdown: 'Synthetic summary' } });
     await hook.handleRegenerateSummary();
     if (source === 'notes' || source === 'transcript') {
       assert.equal(requests.length, 2);
@@ -545,14 +547,16 @@ for (const source of ['notes', 'mixed', 'transcript', 'empty', 'fetch-error', 'n
       assert.match(requests[0].customPrompt, /Enhance these notes$/);
     } else assert.equal(requests.length, 0);
     if (source === 'not-ready') assert.equal(reads, 0);
+    if (source === 'empty' || source === 'fetch-error') assert.equal(reads, 2, 'preparation failure permits retry');
   });
 }
 
 test('regeneration uses edited original notes instead of the prior generation context', async () => {
   const requests = [];
+  let finishGeneration;
   const runner = hookRunner('@/hooks/meeting-details/useSummaryGeneration', 'useSummaryGeneration', {
-    sonner: { toast: { dismiss: noop, error: noop, warning: noop, info: noop } },
-    '@/components/Sidebar/SidebarProvider': { useSidebar: () => ({ startSummaryPolling: noop }) },
+    sonner: { toast: { dismiss: noop, error: noop, warning: noop, info: noop, success: noop } },
+    '@/components/Sidebar/SidebarProvider': { useSidebar: () => ({ startSummaryPolling: (_id, _process, callback) => { finishGeneration = callback; } }) },
     '@tauri-apps/api/core': { invoke: async (cmd, args) => {
       if (cmd === 'api_get_meeting_transcripts') return { total_count: 1, transcripts: [{ id: 'speech', text: 'Review the report.', audio_start_time: 12, timestamp: '' }] };
       if (cmd === 'api_process_transcript') { requests.push(args); return { process_id: 'synthetic' }; }
@@ -565,6 +569,7 @@ test('regeneration uses edited original notes instead of the prior generation co
     notesText: 'Previous written detail.', modelConfig: { provider: 'groq', model: 'synthetic', apiKey: 'synthetic' },
     notesReady: true, isModelConfigLoading: false, selectedTemplate: 'default', updateMeetingTitle: noop, setAiSummary: noop };
   await runner.render(props).handleGenerateSummary();
+  await finishGeneration({ status: 'completed', data: { markdown: 'Synthetic summary' } });
   await runner.render({ ...props, notesText: 'Corrected written detail.' }).handleRegenerateSummary();
   assert.match(requests[0].customPrompt, /Previous written detail/);
   assert.match(requests[1].customPrompt, /Corrected written detail/);
@@ -1803,6 +1808,150 @@ test('failed conversation writes retain the latest answer for retry', async () =
 });
 
 
+test('summary polls survive rerenders, stay independent, and serialize slow reads', async () => {
+  const timers = new Map(), reads = [], updates = [];
+  let id = 0;
+  const runner = hookRunner('@/hooks/useSummaryPolling', 'useSummaryPolling', {
+    '@tauri-apps/api/core': { invoke: (_command, args) => new Promise(resolve => reads.push({ ...args, resolve })) },
+  }, { setInterval: callback => { timers.set(++id, callback); return id; }, clearInterval: id => timers.delete(id) });
+  const hook = runner.render();
+  hook.startSummaryPolling('A', 'A', result => updates.push(['A', result.status]));
+  const first = timers.get(1)();
+  hook.startSummaryPolling('B', 'B', result => updates.push(['B', result.status]));
+  const next = runner.render();
+  assert.equal(next.startSummaryPolling, hook.startSummaryPolling);
+  assert.equal(next.stopSummaryPolling, hook.stopSummaryPolling);
+  assert.equal(timers.size, 2, 'Adding B must not clear A on rerender');
+  await timers.get(1)();
+  assert.equal(reads.length, 1, 'A slow read must not overlap the next tick');
+  reads[0].resolve({ status: 'completed' }); await first;
+  assert.deepEqual(updates, [['A', 'completed']]);
+  assert.equal(timers.has(1), false); assert.equal(timers.has(2), true);
+  const oldRead = timers.get(2)();
+  hook.startSummaryPolling('B', 'B', result => updates.push(['new B', result.status]));
+  reads[1].resolve({ status: 'completed' }); await oldRead;
+  assert.equal(updates.length, 1, 'Replaced observers ignore late responses');
+  assert.equal(timers.has(3), true, 'Old completion must not stop the replacement');
+  const pending = timers.get(3)();
+  runner.unmount();
+  assert.equal(timers.size, 0);
+  reads[2].resolve({ status: 'completed' }); await pending;
+  assert.equal(updates.length, 1, 'Unmounted observers ignore late responses');
+});
+
+test('a disappeared summary job unlocks the UI instead of silently abandoning its poll', async () => {
+  let tick, stopped = false;
+  const updates = [];
+  const runner = hookRunner('@/hooks/useSummaryPolling', 'useSummaryPolling', {
+    '@tauri-apps/api/core': { invoke: async () => ({ status: 'idle' }) },
+  }, { setInterval: callback => { tick = callback; return 1; }, clearInterval: () => { stopped = true; } });
+  runner.render().startSummaryPolling('A', 'A', result => updates.push(result));
+  await tick(); assert.equal(stopped, false);
+  await tick(); assert.equal(stopped, true);
+  assert.equal(updates[1].status, 'error');
+  assert.match(updates[1].error, /no longer running/);
+  runner.unmount();
+});
+
+for (const initialSummaryStatus of ['pending', 'processing']) {
+  test(`reopened ${initialSummaryStatus} enhancement resumes Stop and completion without starting a model`, async () => {
+    const commands = [], callbacks = [], summaries = [], stopped = [];
+    const startSummaryPolling = (id, _process, callback) => callbacks.push({ id, callback });
+    const stopSummaryPolling = id => stopped.push(id);
+    const runner = hookRunner('@/hooks/meeting-details/useSummaryGeneration', 'useSummaryGeneration', {
+      sonner: { toast: { dismiss: noop, error: noop, warning: noop, info: noop, success: noop } },
+      '@/components/Sidebar/SidebarProvider': { useSidebar: () => ({ startSummaryPolling, stopSummaryPolling }) },
+      '@tauri-apps/api/core': { invoke: async command => { commands.push(command); return { data: { markdown: 'Previous summary' } }; } },
+      '@/lib/analytics': { default: new Proxy({}, { get: () => async () => {} }), __esModule: true },
+      '@/lib/utils': { isOllamaNotInstalledError: () => false },
+    });
+    const props = { meeting: { id: 'A', title: 'Custom title' }, transcripts: [], notesText: 'Original notes.',
+      initialSummaryStatus, modelConfig: { provider: 'groq', model: 'synthetic' },
+      isModelConfigLoading: false, selectedTemplate: 'default', updateMeetingTitle: noop, setAiSummary: summary => summaries.push(summary) };
+    runner.render(props);
+    let hook = runner.render(props);
+    assert.equal(hook.summaryStatus, 'processing');
+    assert.equal(callbacks.length, 1, 'Rerender keeps the observer');
+    await hook.handleGenerateSummary(); await hook.handleRegenerateSummary();
+    assert.deepEqual(commands, [], 'Resuming or repeated enhancement must not launch a new model');
+    await hook.handleStopGeneration();
+    assert.deepEqual(commands, ['api_cancel_summary']);
+    assert.equal(runner.render(props).summaryStatus, 'processing', 'Stop waits for confirmation');
+    await callbacks[0].callback({ status: 'cancelled' });
+    assert.equal(summaries.at(-1).markdown, 'Previous summary');
+    assert.equal(runner.render(props).summaryStatus, 'completed');
+    runner.render({ ...props, meeting: { id: 'B', title: 'Other title' } });
+    assert.equal(callbacks.at(-1).id, 'B');
+    assert.ok(stopped.includes('A'));
+    const count = summaries.length;
+    await callbacks[0].callback({ status: 'completed', data: { markdown: 'Stale A' } });
+    assert.equal(summaries.length, count);
+    await callbacks.at(-1).callback({ status: 'completed', data: { markdown: 'Finished B' } });
+    assert.equal(summaries.at(-1).markdown, 'Finished B');
+    runner.unmount();
+    assert.ok(stopped.includes('B'));
+  });
+}
+
+test('enhancement suppresses duplicate entry points through preparation and active polling', async () => {
+  const commands = [], callbacks = [];
+  let finishRead;
+  let delayRead = true;
+  const runner = hookRunner('@/hooks/meeting-details/useSummaryGeneration', 'useSummaryGeneration', {
+    sonner: { toast: { dismiss: noop, error: noop, warning: noop, info: noop, success: noop } },
+    '@/components/Sidebar/SidebarProvider': { useSidebar: () => ({ startSummaryPolling: (_id, _process, callback) => callbacks.push(callback) }) },
+    '@tauri-apps/api/core': { invoke: async command => {
+      commands.push(command);
+      if (command === 'api_get_meeting_transcripts') {
+        if (delayRead) await new Promise(resolve => { finishRead = resolve; });
+        return { total_count: 0, transcripts: [] };
+      }
+      if (command === 'api_get_summary') return { data: { markdown: 'Previous summary' } };
+      return { process_id: 'synthetic' };
+    } },
+    '@/lib/analytics': { default: new Proxy({}, { get: () => async () => {} }), __esModule: true },
+    '@/lib/utils': { isOllamaNotInstalledError: () => false },
+    '@/lib/summary-language-preferences': { readMeetingSummaryLanguage: async () => ({ language: 'en' }) },
+  });
+  const props = { meeting: { id: 'synthetic', title: 'Keep title', created_at: new Date().toISOString() },
+    transcripts: [], notesText: 'Original notes.', modelConfig: { provider: 'groq', model: 'synthetic' },
+    isModelConfigLoading: false, selectedTemplate: 'default', updateMeetingTitle: noop, setAiSummary: noop };
+  let hook = runner.render(props);
+  const first = hook.handleGenerateSummary();
+  const duplicate = hook.handleRegenerateSummary();
+  assert.equal(commands.filter(command => command === 'api_get_meeting_transcripts').length, 1);
+  delayRead = false; finishRead(); await Promise.all([first, duplicate]);
+  hook = runner.render(props);
+  await hook.handleGenerateSummary(); await hook.handleRegenerateSummary();
+  assert.equal(commands.filter(command => command === 'api_process_transcript').length, 1);
+  await callbacks[0]({ status: 'processing' });
+  await hook.handleRegenerateSummary();
+  assert.equal(callbacks.length, 1);
+  for (const status of ['completed', 'cancelled', 'failed', 'error']) {
+    const before = callbacks.length;
+    const previous = callbacks.at(-1);
+    await previous({ status, data: { markdown: 'Completed summary' }, error: 'Synthetic failure' });
+    await hook.handleRegenerateSummary();
+    const count = callbacks.length;
+    assert.equal(count, before + 1, `Allow another attempt after ${status}`);
+    // An old response must not unlock a newer active generation.
+    await previous({ status: 'completed', data: { markdown: 'Old response' } });
+    await hook.handleGenerateSummary();
+    assert.equal(callbacks.length, count);
+  }
+  await callbacks.at(-1)({ status: 'completed', data: { markdown: 'Finished' } });
+  delayRead = true;
+  const departing = hook.handleGenerateSummary();
+  const otherProps = { ...props, meeting: { ...props.meeting, id: 'other' }, initialSummaryStatus: 'pending' };
+  runner.render(otherProps);
+  const starts = commands.filter(command => command === 'api_process_transcript').length;
+  delayRead = false; finishRead(); await departing;
+  await runner.render(otherProps).handleGenerateSummary();
+  assert.equal(commands.filter(command => command === 'api_process_transcript').length, starts,
+    'A late source read cannot start the old meeting or unlock the current meeting');
+  runner.unmount();
+});
+
 for (const outcome of ['cancelled', 'completed', 'request-failed', 'delayed-start', 'start-failed']) {
   test(`enhancement Stop preserves polling until confirmed: ${outcome}`, async () => {
     const states = [];
@@ -1826,7 +1975,7 @@ for (const outcome of ['cancelled', 'completed', 'request-failed', 'delayed-star
         commands.push(command);
         if (command === 'api_process_transcript' && ['delayed-start', 'start-failed'].includes(outcome)) {
           await acceptance;
-          if (outcome === 'start-failed') throw new Error('Startup failed');
+          if (outcome === 'start-failed') throw 'An enhancement is already running for this meeting.';
         }
         if (command === 'api_get_meeting_transcripts') return { total_count: 0, transcripts: [] };
         if (command === 'api_cancel_summary' && outcome === 'request-failed') throw new Error('Connection lost');
@@ -1856,7 +2005,10 @@ for (const outcome of ['cancelled', 'completed', 'request-failed', 'delayed-star
       if (outcome === 'start-failed') {
         assert.ok(states.includes('error'));
         assert.equal(notices.at(-1).kind, 'error');
+        assert.match(notices.at(-1).options.description, /already running for this meeting/);
         assert.ok(!notices.some(notice => notice.title === 'Enhancement stopped'));
+        await hook.handleRegenerateSummary();
+        assert.equal(commands.filter(command => command === 'api_process_transcript').length, 2, 'startup failure permits retry');
       } else {
         assert.equal(typeof onUpdate, 'function');
         assert.equal(stoppedPolling, false);
@@ -1871,6 +2023,8 @@ for (const outcome of ['cancelled', 'completed', 'request-failed', 'delayed-star
     await hook.handleStopGeneration();
     assert.equal(stoppedPolling, false, 'keep observing the authoritative result');
     assert.equal(states.length, 0, 'a cancellation request alone must not report idle');
+    await hook.handleRegenerateSummary();
+    assert.equal(commands.filter(command => command === 'api_process_transcript').length, 1, 'Stop does not unlock an unconfirmed job');
     if (outcome === 'request-failed') {
       assert.equal(notices.length, 1);
       assert.equal(notices[0].kind, 'error');

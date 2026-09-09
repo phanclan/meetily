@@ -29,6 +29,21 @@ static METADATA_CACHE: Lazy<ModelMetadataCache> = Lazy::new(|| {
 static CANCELLATION_REGISTRY: Lazy<Arc<Mutex<HashMap<String, CancellationToken>>>> =
     Lazy::new(|| Arc::new(Mutex::new(HashMap::new())));
 
+/// Owns one meeting's generation from admission through its final database write.
+/// Dropping on startup failure, early return, or task abort also releases admission.
+pub(crate) struct SummaryJob {
+    meeting_id: String,
+    cancellation_token: CancellationToken,
+}
+
+impl Drop for SummaryJob {
+    fn drop(&mut self) {
+        if let Ok(mut registry) = CANCELLATION_REGISTRY.lock() {
+            registry.remove(&self.meeting_id);
+        }
+    }
+}
+
 /// Strips the first `#` heading line; returns "" if no `#` is found.
 fn strip_leading_title(markdown: &str) -> String {
     if let Some(hash_pos) = markdown.find('#') {
@@ -193,14 +208,16 @@ fn extract_cached_english_markdown(
 pub struct SummaryService;
 
 impl SummaryService {
-    /// Registers a new cancellation token for a meeting
-    fn register_cancellation_token(meeting_id: &str) -> CancellationToken {
-        let token = CancellationToken::new();
-        if let Ok(mut registry) = CANCELLATION_REGISTRY.lock() {
-            registry.insert(meeting_id.to_string(), token.clone());
-            info!("Registered cancellation token for meeting: {}", meeting_id);
+    /// Reserve before resetting stored state, not inside the background task.
+    pub(crate) fn try_start_summary(meeting_id: &str) -> Result<SummaryJob, String> {
+        let mut registry = CANCELLATION_REGISTRY.lock()
+            .map_err(|_| "Could not check active enhancements. Please restart the app.".to_string())?;
+        if registry.contains_key(meeting_id) {
+            return Err("An enhancement is already running for this meeting. Wait for it to finish before trying again.".to_string());
         }
-        token
+        let token = CancellationToken::new();
+        registry.insert(meeting_id.to_string(), token.clone());
+        Ok(SummaryJob { meeting_id: meeting_id.to_string(), cancellation_token: token })
     }
 
     /// Cancels the summary generation for a meeting
@@ -214,15 +231,6 @@ impl SummaryService {
         }
         warn!("No active summary generation found for meeting: {}", meeting_id);
         false
-    }
-
-    /// Cleans up the cancellation token after processing completes
-    fn cleanup_cancellation_token(meeting_id: &str) {
-        if let Ok(mut registry) = CANCELLATION_REGISTRY.lock() {
-            if registry.remove(meeting_id).is_some() {
-                info!("Cleaned up cancellation token for meeting: {}", meeting_id);
-            }
-        }
     }
 
     async fn read_detected_summary_language(
@@ -291,10 +299,10 @@ impl SummaryService {
     /// * `model_name` - Specific model (e.g., "gpt-4", "llama3.2:latest")
     /// * `custom_prompt` - Optional user-provided context
     /// * `template_id` - Template identifier (e.g., "daily_standup", "standard_meeting")
-    pub async fn process_transcript_background<R: tauri::Runtime>(
+    pub(crate) async fn process_transcript_background<R: tauri::Runtime>(
         _app: AppHandle<R>,
         pool: SqlitePool,
-        meeting_id: String,
+        job: SummaryJob,
         text: String,
         model_provider: String,
         model_name: String,
@@ -302,14 +310,13 @@ impl SummaryService {
         template_id: String,
         summary_language: Option<String>,
     ) {
+        let meeting_id = job.meeting_id.clone();
+        let cancellation_token = &job.cancellation_token;
         let start_time = Instant::now();
         info!(
             "Starting background processing for meeting_id: {}",
             meeting_id
         );
-
-        // Register cancellation token for this meeting
-        let cancellation_token = Self::register_cancellation_token(&meeting_id);
 
         // Parse provider
         let provider = match LLMProvider::from_str(&model_provider) {
@@ -543,7 +550,7 @@ impl SummaryService {
             custom_openai_temperature,
             custom_openai_top_p,
             app_data_dir.as_ref(),
-            Some(&cancellation_token),
+            Some(cancellation_token),
             summary_language.as_deref(),
             detected_summary_language.as_deref(),
             cached_english.as_deref(),
@@ -551,9 +558,6 @@ impl SummaryService {
         .await;
 
         let duration = start_time.elapsed().as_secs_f64();
-
-        // Clean up cancellation token regardless of outcome
-        Self::cleanup_cancellation_token(&meeting_id);
 
         match result {
             Ok((final_markdown, english_markdown, num_chunks)) => {
@@ -641,6 +645,65 @@ impl SummaryService {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn summary_admission_allows_one_concurrent_job_per_meeting() {
+        use std::sync::{Barrier, atomic::{AtomicUsize, Ordering}};
+        let meeting = format!("admission-{}", uuid::Uuid::new_v4());
+        let barrier = Barrier::new(12);
+        let accepted = AtomicUsize::new(0);
+        std::thread::scope(|scope| {
+            for _ in 0..12 {
+                scope.spawn(|| {
+                    barrier.wait();
+                    let job = SummaryService::try_start_summary(&meeting).ok();
+                    if job.is_some() { accepted.fetch_add(1, Ordering::SeqCst); }
+                    // Hold the winner until every competing attempt has finished.
+                    barrier.wait();
+                    drop(job);
+                });
+            }
+        });
+        assert_eq!(accepted.load(Ordering::SeqCst), 1);
+        assert!(SummaryService::try_start_summary(&meeting).is_ok());
+    }
+
+    #[test]
+    fn summary_admission_keeps_original_token_and_other_meetings_independent() {
+        let meeting = format!("admission-{}", uuid::Uuid::new_v4());
+        let first = SummaryService::try_start_summary(&meeting).unwrap();
+        assert!(SummaryService::try_start_summary(&meeting).is_err());
+        let other = SummaryService::try_start_summary(&format!("{meeting}-other")).unwrap();
+        assert!(SummaryService::cancel_summary(&meeting));
+        assert!(first.cancellation_token.is_cancelled());
+        assert!(!other.cancellation_token.is_cancelled());
+        assert!(SummaryService::try_start_summary(&meeting).is_err(), "Cancellation is not worker completion");
+        drop(first);
+        let retry = SummaryService::try_start_summary(&meeting).unwrap();
+        assert!(!retry.cancellation_token.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn summary_admission_releases_on_startup_error_and_task_abort() {
+        let meeting = format!("admission-{}", uuid::Uuid::new_v4());
+        let failed: Result<(), String> = async {
+            let _job = SummaryService::try_start_summary(&meeting)?;
+            Err("Synthetic storage failure".to_string())
+        }.await;
+        assert!(failed.is_err());
+        let job = SummaryService::try_start_summary(&meeting).unwrap();
+        let (ready, started) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            let _job = job;
+            ready.send(()).unwrap();
+            std::future::pending::<()>().await;
+        });
+        started.await.unwrap();
+        assert!(SummaryService::try_start_summary(&meeting).is_err());
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        assert!(SummaryService::try_start_summary(&meeting).is_ok());
+    }
 
     #[test]
     fn test_strip_leading_title_with_body() {

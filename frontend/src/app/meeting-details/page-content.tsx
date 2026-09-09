@@ -81,6 +81,7 @@ function formatSavedAt(timestamp?: string) {
 export default function PageContent({
   meeting,
   summaryData,
+  initialSummaryStatus,
   shouldAutoGenerate = false,
   onAutoGenerateComplete,
   onMeetingUpdated,
@@ -93,6 +94,7 @@ export default function PageContent({
 }: {
   meeting: any;
   summaryData: Summary | null;
+  initialSummaryStatus?: string;
   shouldAutoGenerate?: boolean;
   onAutoGenerateComplete?: () => void;
   onMeetingUpdated?: () => Promise<void>;
@@ -168,6 +170,7 @@ export default function PageContent({
     transcripts: meetingData.transcripts,
     notesText,
     notesReady: notes.isReady,
+    initialSummaryStatus,
     modelConfig,
     isModelConfigLoading: false,
     selectedTemplate: templates.selectedTemplate,

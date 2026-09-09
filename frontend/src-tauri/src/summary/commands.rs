@@ -340,6 +340,8 @@ pub async fn api_process_transcript<R: Runtime>(
     use uuid::Uuid;
 
     let m_id = meeting_id.unwrap_or_else(|| format!("meeting-{}", Uuid::new_v4()));
+    // Atomic admission must precede all writes and move with the background task.
+    let job = SummaryService::try_start_summary(&m_id)?;
     log_info!(
         "api_process_transcript (native) called for meeting_id: {}, model: {}",
         &m_id,
@@ -382,12 +384,11 @@ pub async fn api_process_transcript<R: Runtime>(
     log_info!("✓ Transcript chunks saved for meeting_id: {}", &m_id);
 
     // Spawn background task for actual processing
-    let meeting_id_clone = m_id.clone();
     tauri::async_runtime::spawn(async move {
         SummaryService::process_transcript_background(
             app,
             pool,
-            meeting_id_clone.clone(),
+            job,
             text,
             model,
             model_name,
@@ -413,7 +414,7 @@ pub async fn api_process_transcript<R: Runtime>(
 #[tauri::command]
 pub async fn api_cancel_summary<R: Runtime>(
     _app: AppHandle<R>,
-    state: tauri::State<'_, AppState>,
+    _state: tauri::State<'_, AppState>,
     meeting_id: String,
 ) -> Result<serde_json::Value, String> {
     log_info!("api_cancel_summary called for meeting_id: {}", meeting_id);
@@ -422,16 +423,11 @@ pub async fn api_cancel_summary<R: Runtime>(
     let cancelled = SummaryService::cancel_summary(&meeting_id);
 
     if cancelled {
-        // Update database status to cancelled
-        let pool = state.db_manager.pool();
-        if let Err(e) = SummaryProcessesRepository::update_process_cancelled(pool, &meeting_id).await {
-            log_error!("Failed to update DB status to cancelled for {}: {}", meeting_id, e);
-            return Err(format!("Failed to update cancellation status: {}", e));
-        }
-
-        log_info!("Successfully cancelled summary generation for meeting_id: {}", meeting_id);
+        // The worker restores the backup and publishes cancellation after it stops.
+        // Publishing a terminal status here lets the UI restart a still-running job.
+        log_info!("Requested summary cancellation for meeting_id: {}", meeting_id);
         Ok(serde_json::json!({
-            "message": "Summary generation cancelled successfully",
+            "message": "Summary cancellation requested",
             "meeting_id": meeting_id,
         }))
     } else {

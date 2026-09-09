@@ -161,6 +161,25 @@ fn reassignment_paraphrases_still_require_the_new_action_owner_and_deadline() {
     assert!(failures.iter().any(|failure| failure == "Missing fact in Action Items: Tuesday"));
 }
 
+#[test]
+fn long_review_checks_preserve_typed_requirements_and_unresolved_values() {
+    let cases: Vec<Case> = serde_json::from_str(include_str!("../../../tests/fixtures/summary-quality.json")).unwrap();
+    let case = cases.iter().find(|case| case.id == "varied-release-review").unwrap();
+    let report = "## Summary\nThe internal pilot review preserved intact source records.\n\n## Key Decisions\n- Audio retention is 90 days.\n- The captioning approval was withdrawn.\n- Keep the pilot internal.\n\n## Action Items\n- [ ] Correct the parser (Rosa, Wednesday)\n- [ ] Rerun the staging load test (Mateo, Friday)\n- [ ] Send the storage estimate (Kim, Thursday)\n\n## Discussion Highlights\n- Keep original written notes editable after enhancement.\n- Unresolved conflict: written notes name Alex, Tuesday; the transcript names Lee, Thursday. Neither source was established as the correction.";
+    assert!(evaluate_case(case, report).is_empty());
+    for (omitted, expected) in [
+        ("Keep original written notes editable after enhancement.", "Missing fact: editable"),
+        ("written notes name Alex, Tuesday; ", "Missing fact: Alex"),
+        ("captioning approval was withdrawn", "Missing fact in Key Decisions:"),
+    ] {
+        assert!(evaluate_case(case, &report.replace(omitted, "")).iter().any(|error| error.starts_with(expected)));
+    }
+    let invented = report.replace("## Action Items", "## Action Items\n- [ ] Deliver the briefing (Alex, Tuesday)");
+    assert!(evaluate_case(case, &invented).iter().any(|error| error == "Disallowed action content: Alex"));
+    let swapped = report.replace("parser (Rosa, Wednesday)", "parser (Mateo, Friday)");
+    assert!(evaluate_case(case, &swapped).iter().any(|error| error.starts_with("Missing task/owner/deadline together:")));
+}
+
 #[tokio::test]
 #[ignore = "Calls the local Ollama model; run explicitly when evaluating follow-up answers"]
 async fn live_meeting_follow_up_quality() {
@@ -243,11 +262,24 @@ async fn live_summary_quality() {
     let cases: Vec<Case> = serde_json::from_str(include_str!(
         "../../../tests/fixtures/summary-quality.json"
     )).unwrap();
+    let selected = std::env::var("MEETNOLA_EVAL_CASE").ok();
+    let cases: Vec<_> = cases.into_iter().filter(|case| selected.as_ref().map_or(true, |id| id == &case.id)).collect();
+    assert!(!cases.is_empty(), "No evaluation case matched the requested ID");
     let template: Template = serde_json::from_str(include_str!(
         "../../templates/standard_meeting.json"
     )).unwrap();
     let client = reqwest::Client::new();
     let model = std::env::var("MEETNOLA_EVAL_MODEL").unwrap_or_else(|_| "gemma4:e4b-mlx".into());
+    let token_threshold = match std::env::var("MEETNOLA_EVAL_CONTEXT").as_deref() {
+        Ok("runtime") => {
+            let metadata = crate::ollama::metadata::ModelMetadataCache::new(std::time::Duration::from_secs(300));
+            metadata.get_or_fetch(&model, Some("http://localhost:11434")).await
+                .map(|model| model.context_size.saturating_sub(300)).unwrap_or(4000)
+        }
+        Ok(value) => value.parse::<usize>().expect("Context must be runtime or a positive token count"),
+        Err(_) => 4000,
+    };
+    assert!(token_threshold > 0);
     let output = std::env::var("MEETNOLA_EVAL_REPORT")
         .unwrap_or_else(|_| "/private/tmp/meetnola-summary-quality.json".into());
     let mut results = Vec::new();
@@ -256,16 +288,16 @@ async fn live_summary_quality() {
         let notes = if case.notes.is_empty() {
             String::new()
         } else {
-            format!("Use the typed meeting notes below as additional context alongside the transcript. Preserve the user-written intent, merge overlapping points, and do not invent facts.\n\nTyped meeting notes:\n{}", case.notes)
+            format!("Use the typed meeting notes below as additional context alongside the transcript.\nPreserve the user-written intent, merge overlapping points, and do not invent facts that are not supported by the transcript or notes.\n\nTyped meeting notes:\n{}", case.notes)
         };
         let result = generate_meeting_summary(
             &client, &LLMProvider::Ollama, &model, "", &case.text, &notes,
-            "standard_meeting", &template, 4000, Some("http://localhost:11434"),
+            "standard_meeting", &template, token_threshold, Some("http://localhost:11434"),
             None, None, None, None, None, None, Some("en"), Some("en"), None,
         ).await;
-        let (answer, mut failures) = match result {
-            Ok((answer, _, _)) => (answer, vec![]),
-            Err(error) => (String::new(), vec![error]),
+        let (answer, chunks, mut failures) = match result {
+            Ok((answer, _, chunks)) => (answer, chunks, vec![]),
+            Err(error) => (String::new(), 0, vec![error]),
         };
         failures.extend(evaluate_case(&case, &answer));
         let words = answer.split_whitespace().count();
@@ -273,6 +305,9 @@ async fn live_summary_quality() {
         results.push(serde_json::json!({
             "case": case.id,
             "model": model,
+            "token_threshold": token_threshold,
+            "input_characters": case.text.chars().count(),
+            "chunks": chunks,
             "seconds": started.elapsed().as_secs_f64(),
             "words": words,
             "failures": failures,
