@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { FileAudio, FileText, Mic, MoreHorizontal, NotebookPen, RefreshCw, Trash2 } from 'lucide-react';
+import { FileAudio, FileText, MessageCircle, Mic, MoreHorizontal, NotebookPen, RefreshCw, Search, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import type { CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
@@ -69,7 +69,10 @@ export function HomeDashboard({
   const router = useRouter();
   const searchParams = useSearchParams();
   const query = searchParams.get('q')?.trim() || '';
-  const showAll = searchParams.get('view') === 'all' || Boolean(query);
+  const [search, setSearch] = useState(query);
+  useEffect(() => { setSearch(query); }, [query]);
+  const filter = search.trim();
+  const showAll = searchParams.get('view') === 'all' || Boolean(filter);
   const [quickNoteTitle, setQuickNoteTitle] = useState('New note');
   const [quickNoteDraft, setQuickNoteDraft] = useState('');
   const [quickNoteUpdatedAt, setQuickNoteUpdatedAt] = useState<number | null>(null);
@@ -115,7 +118,7 @@ export function HomeDashboard({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const matchingMeetings = meetings.filter(meeting => meeting.title.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
+  const matchingMeetings = meetings.filter(meeting => meeting.title.toLocaleLowerCase().includes(filter.toLocaleLowerCase()));
   const recentMeetings = showAll ? matchingMeetings : meetings.slice(0, 8);
   const meetingGroups = groupMeetingsByDay(recentMeetings);
   const recoveryCount = recoverableMeetings.length;
@@ -135,16 +138,16 @@ export function HomeDashboard({
         {/* Header */}
         <div className="flex flex-wrap items-center justify-between gap-3 pb-5">
           <div>
-            <h1 className="text-lg font-semibold text-stone-900">Home</h1>
+            <h1 className="font-serif text-3xl tracking-tight text-stone-900">Your notes</h1>
             <p className="mt-0.5 text-xs text-stone-500">{todayLabel}</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" className="rounded-md" onClick={openQuickNote}>
+            <Button variant="outline" className="rounded-full shadow-none" onClick={openQuickNote}>
               <NotebookPen className="h-3.5 w-3.5" />
               New note
             </Button>
             <Button
-              className="h-9 rounded-md bg-stone-900 px-4 text-sm font-medium text-white hover:bg-stone-800"
+              className="h-9 rounded-full bg-stone-900 px-4 text-sm font-medium text-white hover:bg-stone-800"
               onClick={onStartRecording}
               disabled={isRecordingDisabled}
             >
@@ -154,33 +157,35 @@ export function HomeDashboard({
           </div>
         </div>
 
+        <button type="button" onClick={() => router.push('/ask')} className="mb-3 flex w-full items-center gap-3 rounded-full border border-stone-200 px-4 py-3 text-left text-sm text-stone-500 shadow-sm hover:bg-stone-50 focus-visible:outline-stone-400">
+          <MessageCircle className="h-4 w-4" /><span>Ask your notes</span><span className="ml-auto hidden text-xs sm:inline">Across meetings</span>
+        </button>
+
         {/* Meeting timeline and supporting details */}
         <div className="mt-3 flex flex-col gap-8">
 
           {/* Recent meetings — primary list */}
           <div className="w-full">
-            <div className="mb-4 flex items-center justify-between">
-              <p className="text-xs font-semibold uppercase tracking-widest text-stone-500">
-                {showAll ? 'All meetings' : 'Recent meetings'}
-              </p>
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div className="flex gap-1" aria-label="Meeting list view">
+                <button type="button" aria-pressed={!showAll} className="rounded-full px-3 py-1.5 text-sm text-stone-500 hover:bg-stone-100 aria-pressed:bg-stone-100 aria-pressed:text-stone-900" onClick={() => { setSearch(''); router.push('/'); }}>Recent</button>
+                <button type="button" aria-pressed={showAll} className="rounded-full px-3 py-1.5 text-sm text-stone-500 hover:bg-stone-100 aria-pressed:bg-stone-100 aria-pressed:text-stone-900" onClick={() => router.push(`/?${new URLSearchParams({ view: 'all', ...(filter ? { q: filter } : {}) })}`)}>All notes</button>
+              </div>
               {meetings.length > 0 && (
-                <span className="text-xs text-stone-500">{query ? `${matchingMeetings.length} of ${meetings.length}` : meetings.length} sessions</span>
+                <span role="status" className="text-xs text-stone-500">{filter ? `${matchingMeetings.length} of ${meetings.length}` : meetings.length} notes</span>
               )}
             </div>
 
-            <div className="mb-4 flex flex-wrap items-center gap-3">
-              <button type="button" className="text-sm font-medium text-stone-700 underline" onClick={() => router.push(showAll ? '/' : '/?view=all')}>
-                {showAll ? 'Show recent' : 'View all meetings'}
-              </button>
-              <form className="flex min-w-0 flex-1 gap-2" onSubmit={event => {
+            <div className="mb-6">
+              <form role="search" className="flex min-w-0 items-center gap-2 rounded-xl bg-stone-100/70 px-3 focus-within:ring-1 focus-within:ring-stone-400" onSubmit={event => {
                   event.preventDefault();
-                  const value = String(new FormData(event.currentTarget).get('q') || '').trim();
                   const params = new URLSearchParams({ view: 'all' });
-                  if (value) params.set('q', value);
+                  if (filter) params.set('q', filter);
                   router.replace(`/?${params.toString()}`);
                 }}>
-                  <input key={query} name="q" type="search" aria-label="Search meeting titles" defaultValue={query} placeholder="Search meeting titles" className="min-w-0 flex-1 rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm" />
-                  <Button type="submit" variant="outline">Search</Button>
+                  <Search aria-hidden="true" className="h-4 w-4 text-stone-400" />
+                  <input name="q" type="search" aria-label="Search meeting titles" value={search} onChange={event => setSearch(event.target.value)} placeholder="Find a note by title…" className="min-w-0 flex-1 bg-transparent py-3 text-sm outline-none" />
+                  {search && <button type="button" aria-label="Clear title search" className="rounded-full p-1.5 text-stone-500 hover:bg-stone-200" onClick={() => { setSearch(''); router.replace(showAll ? '/?view=all' : '/'); }}><X className="h-4 w-4" /></button>}
               </form>
             </div>
 
@@ -196,13 +201,13 @@ export function HomeDashboard({
                     <button
                       type="button"
                       onClick={() => onOpenMeeting(meeting.id)}
-                      className="flex flex-1 items-center gap-3 py-2.5 text-left min-w-0"
+                      className="flex flex-1 items-center gap-3 py-3 text-left min-w-0"
                     >
                       <FileText className="h-8 w-8 shrink-0 rounded-md bg-stone-100 p-2 text-stone-500" />
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium text-stone-800">{meeting.title}</p>
-                        <p className="text-xs text-stone-500">{meeting.created_at && Number.isFinite(new Date(meeting.created_at).getTime()) ? new Date(meeting.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : 'Saved locally'}</p>
+                        <p title={meeting.title} className="truncate text-sm font-medium text-stone-800">{meeting.title}</p>
                       </div>
+                      <span className="shrink-0 text-xs tabular-nums text-stone-500">{meeting.created_at && Number.isFinite(new Date(meeting.created_at).getTime()) ? new Date(meeting.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : 'Saved locally'}</span>
                     </button>
 
                     {/* ... menu */}
@@ -238,8 +243,8 @@ export function HomeDashboard({
               </div>
             ) : (
               <div className="rounded-xl border border-dashed border-stone-200 bg-white/60 px-5 py-10 text-center">
-                <p className="text-sm text-stone-500">{query ? 'No matching meetings' : 'No recordings yet'}</p>
-                {query ? <button type="button" onClick={() => router.replace('/?view=all')} className="mt-2 text-sm underline">Clear search</button> : <p className="mt-1 text-xs text-stone-500">Start a meeting to see it here.</p>}
+                <p className="text-sm text-stone-500">{filter ? 'No matching notes' : 'No notes yet'}</p>
+                {filter ? <button type="button" onClick={() => { setSearch(''); router.replace('/?view=all'); }} className="mt-2 text-sm underline">Clear search</button> : <p className="mt-1 text-xs text-stone-500">Create a note or start a recording to see it here.</p>}
               </div>
             )}
           </div>

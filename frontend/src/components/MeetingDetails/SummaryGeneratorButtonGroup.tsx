@@ -267,7 +267,7 @@ export function SummaryGeneratorButtonGroup({
             <Button
               variant="outline"
               size="sm"
-              className="border-stone-900 bg-stone-900 text-white hover:bg-stone-800 hover:text-white"
+              className={hasSummary ? 'border-stone-200 bg-white text-stone-600 shadow-none hover:bg-stone-100' : 'border-stone-900 bg-stone-900 text-white hover:bg-stone-800 hover:text-white'}
               onClick={() => {
                 Analytics.trackButtonClick('generate_summary', 'meeting_details');
                 checkOllamaModelsAndGenerate();

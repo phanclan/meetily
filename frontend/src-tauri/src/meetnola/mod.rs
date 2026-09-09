@@ -6,8 +6,11 @@
 #[cfg(feature = "meetnola-automation")]
 pub mod automation;
 pub mod defaults;
+pub mod chat_history;
 pub mod frontend_logging;
 pub mod live_query;
+pub mod library_search;
+pub mod library_chats;
 pub mod meeting_detection;
 pub mod notes;
 
@@ -25,6 +28,15 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             live_query::live_query,
             live_query::prepare_live_query,
             live_query::cancel_live_query,
+            chat_history::get_meeting_chat,
+            chat_history::save_meeting_chat,
+            library_search::search_library_sources,
+            library_chats::get_library_chat,
+            library_chats::save_library_chat,
+            library_chats::get_library_chat_settings,
+            library_chats::save_library_chat_settings,
+            library_chats::list_library_chats,
+            library_chats::set_library_chat_archived,
             meeting_detection::start_call_detection,
             meeting_detection::stop_call_detection,
             meeting_detection::set_call_detection_enabled,

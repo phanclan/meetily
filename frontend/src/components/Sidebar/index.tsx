@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { File, Settings, PanelLeftClose, PanelLeftOpen, Home, Trash2, Mic, Pencil, SearchIcon, X, Upload, FolderOpen, ChevronDown, MoreHorizontal } from 'lucide-react';
+import { File, Settings, PanelLeftClose, PanelLeftOpen, Home, Trash2, Mic, Pencil, SearchIcon, X, Upload, FolderOpen, ChevronDown, MoreHorizontal, MessageCircle } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useSidebar } from './SidebarProvider';
 import type { CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
@@ -657,6 +657,15 @@ const Sidebar: React.FC = () => {
                 <p>{isRecording ? 'Open recording' : 'Start Recording'}</p>
               </TooltipContent>
             )}
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button type="button" onClick={() => router.push('/ask')} aria-label="Ask your notes" aria-current={pathname === '/ask' ? 'page' : undefined}
+                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm ${pathname === '/ask' ? 'bg-gray-100 font-medium text-gray-900' : 'text-gray-700 hover:bg-gray-100'}`}>
+                <MessageCircle className="h-4 w-4 shrink-0" />{!isCollapsed && <span>Ask your notes</span>}
+              </button>
+            </TooltipTrigger>
+            {isCollapsed && <TooltipContent side="right"><p>Ask your notes</p></TooltipContent>}
           </Tooltip>
         </div>
 

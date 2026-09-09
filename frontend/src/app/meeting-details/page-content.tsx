@@ -1,7 +1,6 @@
 "use client";
 
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
-import { motion } from 'framer-motion';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { invoke } from '@tauri-apps/api/core';
@@ -10,6 +9,9 @@ import { useAutoSizeTitle } from '@/hooks/useAutoSizeTitle';
 import { NoteSaveStatus } from '@/components/NoteSaveStatus';
 import {
   ArrowLeft,
+  ChevronDown,
+  FileText,
+  Sparkles,
   Copy,
   FolderOpen,
   MoreHorizontal,
@@ -19,10 +21,11 @@ import {
 import { toast } from 'sonner';
 import { Summary } from '@/types';
 import { Button } from '@/components/ui/button';
-import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem } from '@/components/ui/dropdown-menu';
 import { MeetingAssistantDock } from '@/components/MeetingDetails/MeetingAssistantDock';
 import { SearchableTranscript } from '@/components/MeetingDetails/SearchableTranscript';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { BlockNoteSummaryView } from '@/components/AISummary/BlockNoteSummaryView';
 import { EmptyStateSummary } from '@/components/EmptyStateSummary';
 import { SummaryGeneratorButtonGroup } from '@/components/MeetingDetails/SummaryGeneratorButtonGroup';
@@ -35,7 +38,7 @@ import { useSummaryGeneration } from '@/hooks/meeting-details/useSummaryGenerati
 import { useTemplates } from '@/hooks/meeting-details/useTemplates';
 import { useCopyOperations } from '@/hooks/meeting-details/useCopyOperations';
 import { useMeetingOperations } from '@/hooks/meeting-details/useMeetingOperations';
-import { useLiveMeetingChat } from '@/hooks/useLiveMeetingChat';
+import { useSavedMeetingChat } from '@/hooks/useSavedMeetingChat';
 import { useConfig } from '@/contexts/ConfigContext';
 import type { ModelConfig } from '@/components/ModelSettingsModal';
 import { EnhanceNotesCta } from '@/components/EnhanceNotesCta';
@@ -107,10 +110,11 @@ export default function PageContent({
   const [activeView, setActiveView] = useState<'notes' | 'summary'>('notes');
   const [isTranscriptOpen, setIsTranscriptOpen] = useState(false);
   const [isAiComposerOpen, setIsAiComposerOpen] = useState(false);
+  const [isClearChatOpen, setIsClearChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState('');
   const { modelConfig, setModelConfig } = useConfig();
   const templates = useTemplates();
-  const { messages, isLoading: isChatLoading, send, clearMessages, stop } = useLiveMeetingChat(meeting.id);
+  const { messages, isLoading: isChatLoading, send, clearMessages, stop, ready: chatReady, historyError, retryHistory } = useSavedMeetingChat(meeting.id);
 
   const meetingData = useMeetingData({ meeting, summaryData, onMeetingUpdated });
   const copyOperations = useCopyOperations({
@@ -260,13 +264,10 @@ export default function PageContent({
   };
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.22, ease: 'easeOut' }}
+    <div
       className="flex h-screen min-h-0 flex-col overflow-hidden bg-background text-stone-900"
     >
-      <div className="min-h-0 flex-1 overflow-y-auto" aria-label="Meeting document">
+      <div className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]" aria-label="Meeting document">
       <div className="document-shell !min-h-0 !max-w-3xl">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <button
@@ -285,62 +286,46 @@ export default function PageContent({
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuItem onSelect={() => activeView === 'notes' ? handleCopyNotes() : copyOperations.handleCopySummary()}><Copy className="mr-2 h-4 w-4" />{activeView === 'notes' ? 'Copy meeting notes' : 'Copy enhanced notes'}</DropdownMenuItem>
+                {activeView === 'summary' && <DropdownMenuItem disabled={meetingData.isSaving || meetingData.isSummarySaving || !meetingData.isSummaryDirty} onSelect={() => void meetingData.saveAllChanges()}><Save className="mr-2 h-4 w-4" />Save enhanced notes</DropdownMenuItem>}
                 <DropdownMenuItem onSelect={meetingOperations.handleOpenMeetingFolder}><FolderOpen className="mr-2 h-4 w-4" />Open recording folder</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-            {activeView === 'summary' && <Button variant="outline" disabled={meetingData.isSaving || meetingData.isSummarySaving || !meetingData.isSummaryDirty} className="rounded-md border-stone-200/75 text-stone-600 shadow-none" onClick={meetingData.saveAllChanges}>
-              {meetingData.isSaving || meetingData.isSummarySaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              Save enhanced notes
-            </Button>}
+            <NoteSaveStatus saving={notes.isSaving || meetingData.isSaving || meetingData.isSummarySaving || meetingData.titleSave.status === 'saving'} dirty={meetingData.isSummaryDirty} failed={notes.saveError || meetingData.summarySaveError || meetingData.titleSave.status === 'error'} onRetry={() => { if (meetingData.summarySaveError) void meetingData.saveAllChanges(); else void flushNoteChanges().catch(() => {}); }} />
           </div>
         </div>
 
         <div className="mt-3 flex min-h-0 flex-col gap-4 pb-8">
           <section className="flex min-h-0 flex-1 flex-col">
-            <div className="document-header">
+            <div className="document-header !border-0 !pb-0">
               <div className="space-y-3">
                 <textarea
                   ref={titleRef}
                   value={meetingData.meetingTitle}
                   onChange={(event) => meetingData.handleTitleChange(event.target.value)}
                   placeholder="Untitled meeting"
+                  aria-label="Meeting title"
                   rows={1}
-                  className="document-title"
+                  className="document-title !font-serif !font-normal"
                 />
 
-                <div className="flex flex-wrap items-center gap-2 text-sm text-stone-500">
-                  <InlineMeta>{new Date(meeting.created_at).toLocaleDateString([], { month: 'short', day: 'numeric' })}</InlineMeta>
-                  <MetaDot />
-                  <InlineMeta>{formatSavedAt(meeting.updated_at || meeting.created_at)}</InlineMeta>
-                  <MetaDot />
-                  <InlineMeta>{transcriptCount} transcript segment{transcriptCount === 1 ? '' : 's'}</InlineMeta>
-                  <MetaDot />
-                  <NoteSaveStatus saving={notes.isSaving || meetingData.isSaving || meetingData.isSummarySaving || meetingData.titleSave.status === 'saving'} dirty={meetingData.isSummaryDirty} failed={notes.saveError || meetingData.summarySaveError || meetingData.titleSave.status === 'error'} onRetry={() => { if (meetingData.summarySaveError) void meetingData.saveAllChanges(); else void flushNoteChanges().catch(() => {}); }} />
-                </div>
-
-                <div className="flex flex-wrap items-center gap-3">
-                  <div className="flex flex-wrap items-center gap-4">
-                    <button
-                      type="button"
-                      onClick={() => setActiveView('notes')}
-                      aria-pressed={activeView === 'notes'}
-                      className="document-tab"
-                    >
-                      Meeting Notes
-                    </button>
-                    {(meetingData.aiSummary || isSummaryGenerating) && (
-                      <button
-                        type="button"
-                        onClick={() => setActiveView('summary')}
-                        aria-pressed={activeView === 'summary'}
-                      className="document-tab"
-                      >
-                        {meetingData.aiSummary ? 'Enhanced Notes' : 'Enhancing…'}
-                      </button>
-                    )}
-                  </div>
-
-                  <Button ref={transcriptButtonRef} variant="ghost" onClick={() => setIsTranscriptOpen(true)}>Transcript</Button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" size="sm" aria-label="Note view" className="rounded-full shadow-none">
+                        {activeView === 'notes' ? <FileText className="h-3.5 w-3.5" /> : <Sparkles className="h-3.5 w-3.5" />}
+                        {activeView === 'notes' ? 'My notes' : isSummaryGenerating ? 'Enhancing…' : 'Enhanced'}
+                        <ChevronDown className="h-3.5 w-3.5 text-stone-400" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start">
+                      <DropdownMenuRadioGroup value={activeView} onValueChange={value => setActiveView(value as 'notes' | 'summary')}>
+                        <DropdownMenuRadioItem value="notes">My notes</DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="summary" disabled={!meetingData.aiSummary && !isSummaryGenerating}>Enhanced notes</DropdownMenuRadioItem>
+                      </DropdownMenuRadioGroup>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                  <Button ref={transcriptButtonRef} variant="ghost" size="sm" title={`${transcriptCount} transcript segment${transcriptCount === 1 ? '' : 's'}`} className="rounded-full text-stone-500" onClick={() => setIsTranscriptOpen(true)}>Transcript</Button>
+                  <span title={formatSavedAt(meeting.updated_at || meeting.created_at)} className="text-xs text-stone-500">{new Date(meeting.created_at).toLocaleDateString([], { month: 'short', day: 'numeric' })}</span>
 
                   <div className="ml-auto flex flex-wrap items-center gap-2">
                     {showEnhanceNotesCta && <EnhanceNotesCta onClick={handleEnhanceNotes} />}
@@ -368,7 +353,7 @@ export default function PageContent({
               </div>
             </div>
 
-            <div className="w-full py-5">
+            <div className="w-full pt-3 pb-5">
               <div hidden={activeView !== 'summary'}>
                 {meetingData.aiSummary ? (
                   <div className="document-editor [&_.bn-editor]:!px-0">
@@ -479,14 +464,28 @@ export default function PageContent({
         </div>
       </div>
       </div>
+      <Dialog open={isClearChatOpen} onOpenChange={setIsClearChatOpen}>
+        <DialogContent onCloseAutoFocus={event => { event.preventDefault(); document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Ask about this meeting"]')?.focus(); }}>
+          <DialogHeader>
+            <DialogTitle>Clear this conversation?</DialogTitle>
+            <DialogDescription>This removes saved questions and answers for this meeting. Your notes and transcript stay unchanged.</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsClearChatOpen(false)}>Keep conversation</Button>
+            <Button variant="destructive" onClick={() => { clearMessages(); setIsClearChatOpen(false); }}>Clear conversation</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <MeetingAssistantDock
         expanded={isComposerExpanded} onExpandedChange={setIsAiComposerOpen}
         messages={messages} loading={isChatLoading} input={chatInput} onInputChange={setChatInput}
-        onSend={handleSendChat} onClear={clearMessages} onStop={stop}
-        canSend={Boolean(notesText.trim() || meetingData.transcripts.length)}
+        onSend={handleSendChat} onClear={() => setIsClearChatOpen(true)} onStop={stop}
+        canSend={chatReady && Boolean(notesText.trim() || meetingData.transcripts.length)}
+        historyStatus={historyError || (!chatReady ? 'Loading conversation…' : undefined)}
+        onRetryHistory={historyError ? retryHistory : undefined}
         recipes={RECIPES.map(recipe => ({ label: recipe.label, onSelect: () => handleRecipe(recipe) }))}
       />
-    </motion.div>
+    </div>
   );
 }
 

@@ -5,11 +5,13 @@ export interface MeetingSource {
   id: string;
   label: string;
   text: string;
+  meetingId?: string;
 }
 
 export interface MeetingAnswerContext {
   context: string;
   sources: MeetingSource[];
+  coverage?: string;
 }
 
 export function buildMeetingAnswerContext(transcripts: Transcript[], notes: string, scope: 'full' | 'last5min' = 'full'): MeetingAnswerContext {

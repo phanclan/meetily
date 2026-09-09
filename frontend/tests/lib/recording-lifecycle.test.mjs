@@ -502,7 +502,7 @@ for (const source of ['notes', 'empty', 'fetch-error']) {
     const requests = [];
     const load = loader({
       react: quietReact,
-      sonner: { toast: { error: noop, warning: noop, info: noop } },
+      sonner: { toast: { dismiss: noop, error: noop, warning: noop, info: noop } },
       '@/components/Sidebar/SidebarProvider': { useSidebar: () => ({ startSummaryPolling: noop }) },
       '@tauri-apps/api/core': { invoke: async (cmd, args) => {
         if (cmd === 'api_get_meeting_transcripts') {
@@ -645,7 +645,7 @@ for (const title of ['Custom title', '+ New Call']) {
     const titles = [];
     const load = loader({
       react: quietReact,
-      sonner: { toast: { error: noop, warning: noop, info: noop, success: noop } },
+      sonner: { toast: { dismiss: noop, error: noop, warning: noop, info: noop, success: noop } },
       '@/components/Sidebar/SidebarProvider': { useSidebar: () => ({ startSummaryPolling: (_id, _process, done) => { completion = done; } }) },
       '@tauri-apps/api/core': { invoke: async cmd => cmd === 'api_get_meeting_transcripts' ? { total_count: 0, transcripts: [] } : { process_id: 'synthetic' } },
       '@/lib/analytics': { default: new Proxy({}, { get: () => async () => {} }), __esModule: true },
@@ -804,7 +804,7 @@ for (const fails of [false, true]) {
     const calls = [];
     const load = loader({
       react: quietReact,
-      sonner: { toast: { error: noop, warning: noop, info: noop, success: noop } },
+      sonner: { toast: { dismiss: noop, error: noop, warning: noop, info: noop, success: noop } },
       '@/components/Sidebar/SidebarProvider': { useSidebar: () => ({ startSummaryPolling: noop }) },
       '@tauri-apps/api/core': { invoke: async cmd => {
         calls.push(cmd);
@@ -1043,7 +1043,7 @@ test('only citations with captured sources become buttons', () => {
     sources: [{ id: 'S1', label: 'Written notes', text: 'Preserve the custom title.' }],
   }));
   assert.match(html, /aria-label="Show source S1: Written notes"/);
-  assert.equal((html.match(/<button/g) || []).length, 1);
+  assert.equal((html.match(/aria-label="Show source /g) || []).length, 1);
   assert.match(html, /title="Source not available">S99/);
   assert.ok(!html.includes('href="#source-'));
 });
@@ -1191,13 +1191,147 @@ function hookRunner(modulePath, exportName, stubs = {}, globals = {}) {
         effects.push(() => { old?.cleanup?.(); slots[i] = { deps, cleanup: fn() }; });
       }
     },
+    useLayoutEffect(fn, deps) { react.useEffect(fn, deps); },
   };
   const hook = loader({ react, ...stubs }, globals)(modulePath)[exportName];
   return {
-    render(args) { cursor = 0; const value = hook(args); effects.splice(0).forEach(effect => effect()); return value; },
+    render(...args) { cursor = 0; const value = hook(...args); effects.splice(0).forEach(effect => effect()); return value; },
     unmount() { slots.forEach(slot => slot?.cleanup?.()); },
   };
 }
+
+test('library questions retrieve topical words and retain a topic for follow-ups', () => {
+  const { librarySearchTerms } = loader({ '@/meetnola/ipc': {} })('@/lib/libraryAnswerContext');
+  assert.deepEqual([...librarySearchTerms('What did Mira decide about the comet launch?', [])], ['mira', 'decide', 'comet', 'launch']);
+  const messages = [{ role: 'user', content: 'What did Mira decide about the comet launch?' }];
+  const terms = librarySearchTerms('Who owns that?', messages);
+  assert.ok(terms.includes('comet') && terms.includes('owns'));
+  assert.deepEqual([...librarySearchTerms('What changed for the aurora budget?', messages)], ['changed', 'aurora', 'budget']);
+  assert.deepEqual([...librarySearchTerms('nomatch', messages)], ['nomatch']);
+  assert.ok(librarySearchTerms('What about Café 東京?', []).includes('東京'));
+  assert.equal(librarySearchTerms('word '.repeat(100), []).length, 1);
+  assert.equal(librarySearchTerms(Array.from({ length: 50 }, (_, i) => `topic${i}`).join(' '), []).length, 24);
+});
+
+test('library retrieval captures meeting links, original excerpts and explicit coverage', async () => {
+  const calls = [];
+  const hits = [
+    { meetingId: 'A', title: 'Comet plan', createdAt: '2026-09-01', kind: 'notes', audioStartTime: null, text: 'Mira proposed a launch; approval pending.' },
+    { meetingId: 'B', title: 'Comet review', createdAt: '2026-09-02', kind: 'transcript', audioStartTime: 75, text: 'We approved a smaller launch.' },
+  ];
+  const { loadLibraryAnswerContext, buildLibraryAnswerContext } = loader({ '@/meetnola/ipc': { meetnolaInvoke: async (...args) => { calls.push(args); return hits; } } })('@/lib/libraryAnswerContext');
+  const context = await loadLibraryAnswerContext('What happened to the comet launch?', [], '30');
+  assert.equal(calls[0][0], 'search_library_sources');
+  assert.equal(calls[0][1].sinceDays, 30);
+  assert.equal(context.sources[0].meetingId, 'A');
+  assert.equal(context.sources[0].text, hits[0].text);
+  assert.match(context.sources[1].label, /Comet review.*Transcript · 1:15/);
+  assert.match(context.sources[1].label, /Sep 2, 2026/);
+  assert.match(context.coverage, /2 matching excerpts from 2 meetings · Last 30 days/);
+  assert.match(context.context, /not complete meetings or an exhaustive search/);
+  assert.match(context.context, /\[S2\]/);
+  assert.throws(() => buildLibraryAnswerContext([], ['missing'], 'all'), /No matching excerpts/);
+  const count = calls.length;
+  await assert.rejects(loadLibraryAnswerContext('What is this?', [], 'all'), /Include a topic/);
+  assert.equal(calls.length, count);
+});
+
+test('library search failures and stopped retrieval never call the model', async () => {
+  let modelCalls = 0;
+  const f = chatFixture(async () => { modelCalls++; return 'Should not run'; });
+  await f.chat.send('Find comet', async () => { throw new Error('Search unavailable'); });
+  assert.equal(modelCalls, 0);
+  assert.match(f.states[0].at(-1).content, /Search unavailable/);
+  let resolve;
+  const pending = f.chat.send('Find comet', () => new Promise(done => { resolve = done; }));
+  f.chat.stop();
+  resolve({ context: '[S1] Synthetic later search result', sources: [] });
+  await pending;
+  assert.equal(modelCalls, 0);
+});
+
+test('library conversations use separate durable storage and retain citation coverage', async () => {
+  const calls = [];
+  const messages = [{ role: 'user', content: 'Who owns comet?' }, { role: 'assistant', content: 'Mira [S1](#source-S1)', sources: [{ id: 'S1', meetingId: 'A', label: 'Comet plan', text: 'Mira owns comet.' }], coverage: '1 meeting' }];
+  const f = savedChatFixture(async (command, args) => {
+    calls.push({ command, args });
+    if (command === 'get_library_chat') return JSON.stringify(messages);
+  }, 'usePersistentChat');
+  f.runner.render('first', 'library'); await new Promise(setImmediate);
+  let state = f.runner.render('first', 'library'); await new Promise(setImmediate);
+  assert.equal(state.ready, true);
+  assert.equal(state.messages[1].sources[0].meetingId, 'A');
+  assert.equal(state.messages[1].coverage, '1 meeting');
+  const saved = calls.find(call => call.command === 'save_library_chat');
+  assert.equal(saved.args.chatId, 'first');
+  assert.equal(JSON.parse(saved.args.messagesJson)[1].coverage, '1 meeting');
+  assert.ok(calls.every(call => !call.command.includes('meeting_chat')));
+  f.live.isLoading = true;
+  f.runner.render('first', 'library'); f.runner.unmount(); await f.flush();
+  assert.match(JSON.parse(calls.at(-1).args.messagesJson).at(-1).notice, /incomplete/);
+});
+
+function librarySettingsFixture(invoke) {
+  const writes = loader()('@/lib/pendingWrites');
+  const chat = { ready: true, messages: [], isLoading: false, flushHistory: async () => {} };
+  const timers = new Map(); let timerId = 0;
+  const runner = hookRunner('@/hooks/useLibraryChat', 'useLibraryChat', {
+    './useSavedMeetingChat': { usePersistentChat: () => chat },
+    '@/meetnola/ipc': { meetnolaInvoke: invoke }, '@/lib/pendingWrites': writes,
+  }, { setTimeout: callback => { const id = ++timerId; timers.set(id, callback); return id; }, clearTimeout: id => timers.delete(id) });
+  return { runner, chat, flush: writes.flushPendingWrites, fire: () => { const callbacks = [...timers.values()]; timers.clear(); callbacks.forEach(callback => callback()); } };
+}
+
+test('library drafts restore with their date scope and flush immediately on Quit', async () => {
+  const calls = [];
+  const f = librarySettingsFixture(async (command, args) => {
+    if (command === 'get_library_chat_settings') return { draft: 'Saved draft', period: '30', archived: false };
+    calls.push(args);
+  });
+  let state = f.runner.render('A');
+  assert.equal(state.ready, false);
+  state.setInput('Must not overwrite loading draft');
+  await new Promise(setImmediate);
+  state = f.runner.render('A');
+  assert.equal(state.settings.draft, 'Saved draft');
+  assert.equal(state.settings.period, '30');
+  state.setInput('Last edit immediately before Quit');
+  await f.flush();
+  assert.equal(calls.at(-1).draft, 'Last edit immediately before Quit');
+  assert.equal(calls.at(-1).period, '30');
+});
+
+test('library settings reject stale reads and preserve failed writes for retry', async () => {
+  const reads = new Map(); let fail = true; const saved = [];
+  const f = librarySettingsFixture((command, args) => {
+    if (command === 'get_library_chat_settings') return new Promise(resolve => reads.set(args.chatId, resolve));
+    if (fail) return Promise.reject(new Error('Disk full'));
+    saved.push(args); return Promise.resolve();
+  });
+  f.runner.render('A'); await new Promise(setImmediate);
+  f.runner.render('B'); await new Promise(setImmediate);
+  reads.get('B')({ draft: 'B draft', period: '7', archived: false }); await new Promise(setImmediate);
+  reads.get('A')({ draft: 'Late A', period: 'all', archived: false }); await new Promise(setImmediate);
+  let state = f.runner.render('B');
+  assert.equal(state.settings.draft, 'B draft');
+  state.setInput('B edited'); f.runner.render('B'); f.fire(); await new Promise(setImmediate);
+  state = f.runner.render('B'); assert.match(state.settingsError, /Disk full/);
+  fail = false; state.retrySettings(); await new Promise(setImmediate);
+  assert.equal(saved.at(-1).chatId, 'B'); assert.equal(saved.at(-1).draft, 'B edited');
+  assert.equal(f.runner.render('B').settingsError, null);
+});
+
+test('archived conversations cannot overwrite their saved draft', async () => {
+  let writes = 0;
+  const f = librarySettingsFixture(async command => {
+    if (command === 'get_library_chat_settings') return { draft: 'Archived draft', period: '90', archived: true };
+    writes++;
+  });
+  f.runner.render('A'); await new Promise(setImmediate);
+  const state = f.runner.render('A');
+  state.setInput('Ignored edit'); f.runner.unmount(); await f.flush();
+  assert.equal(state.settings.draft, 'Archived draft'); assert.equal(writes, 0);
+});
 
 test('meeting loads discard late results, errors and pages after navigation or refetch', async () => {
   const requests = [];
@@ -1336,3 +1470,306 @@ test('plain model citations link only to known sources and leave code and existi
   assert.equal(linkMeetingCitations('`[S1]` and ```\n[S1]\n```', sources), '`[S1]` and ```\n[S1]\n```');
   assert.equal(linkMeetingCitations('Fact [S1].'), 'Fact [S1].');
 });
+
+test('grouped model citations retain each known excerpt through saved history', () => {
+  const { linkMeetingCitations } = loader()('@/hooks/useLiveMeetingChat');
+  const { encodeMeetingChat, decodeMeetingChat } = loader()('@/lib/meetingChatHistory');
+  const sources = ['S1', 'S2', 'S3'].map(id => ({ id, text: `Evidence ${id}`, label: 'Notes' }));
+  const content = linkMeetingCitations('Preserve the title [S1, S2]. Unknown [S9; S1].', sources);
+  assert.equal(content, 'Preserve the title [S1](#source-S1) [S2](#source-S2). Unknown [S9] [S1](#source-S1).');
+  const restored = decodeMeetingChat(encodeMeetingChat([{ role: 'assistant', content, sources }]));
+  assert.deepEqual(Array.from(restored[0].sources, source => source.id), ['S1', 'S2']);
+  assert.equal(linkMeetingCitations('`[S1, S2]` and ```\n[S1; S2]\n``` and [S1, S2](https://example.com)', sources),
+    '`[S1, S2]` and ```\n[S1; S2]\n``` and [S1, S2](https://example.com)');
+});
+
+function elements(tree, predicate) {
+  if (!tree || typeof tree !== 'object') return [];
+  if (Array.isArray(tree)) return tree.flatMap(child => elements(child, predicate));
+  return [...(predicate(tree) ? [tree] : []), ...elements(tree.props?.children, predicate)];
+}
+
+function dockFixture(globals = {}) {
+  const runner = hookRunner(path.join(root, 'src/components/MeetingDetails/MeetingAssistantDock.tsx'), 'MeetingAssistantDock', {
+    '@/components/AssistantMessage': { AssistantMessage: () => null },
+    '@/components/ui/dropdown-menu': Object.fromEntries(['DropdownMenu', 'DropdownMenuContent', 'DropdownMenuItem', 'DropdownMenuTrigger'].map(name => [name, name])),
+  }, globals);
+  let sends = 0;
+  const props = { expanded: true, onExpandedChange: noop, messages: [], loading: false, input: 'Synthetic question', onInputChange: noop,
+    onSend: () => sends++, onClear: noop, onStop: noop, canSend: true, recipes: [] };
+  return { runner, props, sent: () => sends };
+}
+
+test('composer refits restored drafts when the window width changes', () => {
+  let resized, disconnected = 0;
+  const { runner, props } = dockFixture({ ResizeObserver: class {
+    constructor(callback) { resized = callback; }
+    observe() {}
+    disconnect() { disconnected++; }
+  } });
+  const input = { style: {}, scrollHeight: 36 };
+  elements(runner.render(props), element => element.type === 'textarea')[0].ref.current = input;
+  props.input += ' restored'; runner.render(props);
+  assert.equal(input.style.height, '36px');
+  input.scrollHeight = 76; resized([{ contentRect: { width: 210 } }]);
+  assert.equal(input.style.height, '76px');
+  input.scrollHeight = 300; resized([{ contentRect: { width: 180 } }]);
+  assert.equal(input.style.height, '144px');
+  runner.unmount(); assert.equal(disconnected, 1);
+});
+
+test('library history keeps consulted IDs without retaining uncited excerpts', () => {
+  const { encodeMeetingChat, decodeMeetingChat } = loader()('@/lib/meetingChatHistory');
+  const encoded = encodeMeetingChat([{ role: 'assistant', content: 'Fact [S1](#source-S1)', sources: [
+    { id: 'S1', meetingId: 'A', label: 'A', text: 'Cited original' },
+    { id: 'S2', meetingId: 'B', label: 'B', text: 'Uncited original' },
+  ] }]);
+  const decoded = decodeMeetingChat(encoded);
+  assert.deepEqual([...decoded[0].sourceMeetingIds], ['A', 'B']);
+  assert.equal(decoded[0].sources.length, 1);
+  assert.ok(!encoded.includes('Uncited original'));
+  assert.deepEqual(JSON.parse(encodeMeetingChat(decoded))[0].sourceMeetingIds, ['A', 'B']);
+  assert.throws(() => decodeMeetingChat('[{"role":"assistant","content":"text","sourceMeetingIds":[1]}]'), /not been overwritten/);
+});
+
+test('meeting composer sends Enter but preserves newlines, IME composition and duplicate-send guards', () => {
+  const { runner, props, sent } = dockFixture();
+  const key = (overrides = {}) => ({ key: 'Enter', shiftKey: false, nativeEvent: {}, preventDefault: noop, ...overrides });
+  const input = () => elements(runner.render(props), element => element.type === 'textarea')[0];
+  input().props.onKeyDown(key({ shiftKey: true }));
+  input().props.onKeyDown(key({ nativeEvent: { isComposing: true } }));
+  input().props.onKeyDown(key({ nativeEvent: { keyCode: 229 } }));
+  assert.equal(sent(), 0);
+  input().props.onKeyDown(key());
+  assert.equal(sent(), 1);
+  props.loading = true;
+  input().props.onKeyDown(key());
+  props.loading = false; props.canSend = false;
+  input().props.onKeyDown(key());
+  props.canSend = true; props.input = '   ';
+  input().props.onKeyDown(key());
+  assert.equal(sent(), 1);
+});
+
+test('streamed answers follow the bottom, preserve older reading position, and allow jumping back', () => {
+  const { runner, props } = dockFixture();
+  const region = tree => elements(tree, element => element.props?.['aria-label'] === 'Conversation')[0];
+  const scroll = { scrollTop: 0, scrollHeight: 900, clientHeight: 200, focus: noop };
+  region(runner.render(props)).ref.current = scroll;
+  props.messages = [{ role: 'assistant', content: 'First text' }];
+  runner.render(props);
+  assert.equal(scroll.scrollTop, 900);
+  scroll.scrollTop = 250;
+  region(runner.render(props)).props.onScroll({ currentTarget: scroll });
+  scroll.scrollHeight = 1200;
+  props.messages = [{ role: 'assistant', content: 'More streamed text' }];
+  const tree = runner.render(props);
+  assert.equal(scroll.scrollTop, 250);
+  const latest = elements(tree, element => element.type === 'button' && JSON.stringify(element.props.children).includes('Jump to latest'))[0];
+  latest.props.onClick();
+  assert.equal(scroll.scrollTop, 1200);
+  props.expanded = false; runner.render(props);
+  scroll.scrollTop = 0; props.expanded = true; runner.render(props);
+  assert.equal(scroll.scrollTop, 1200);
+});
+
+test('copying an incomplete answer preserves its warning and readable citation labels', async () => {
+  let copied;
+  const runner = hookRunner(path.join(root, 'src/components/AssistantMessage.tsx'), 'AssistantMessage', {
+    'react-markdown': Markdown, 'remark-gfm': remarkGfm,
+  }, { navigator: { clipboard: { writeText: async text => { copied = text; } } } });
+  const props = { content: 'Keep the title [S1](#source-S1).', notice: 'Stopped. This answer is incomplete.' };
+  const copy = tree => elements(tree, element => element.props?.['aria-label'] === 'Copy answer')[0];
+  copy(runner.render(props)).props.onClick();
+  await new Promise(setImmediate);
+  assert.equal(copied, 'Keep the title S1.\n\nStopped. This answer is incomplete.');
+  assert.ok(JSON.stringify(runner.render(props)).includes('Copied'));
+  assert.equal(copy(runner.render({ ...props, copyable: false })), undefined);
+});
+
+test('saved conversations keep only cited source snapshots and label interrupted responses', () => {
+  const { encodeMeetingChat, decodeMeetingChat } = loader()('@/lib/meetingChatHistory');
+  const messages = [{ role: 'user', content: 'Question' }, { role: 'assistant', content: 'Fact [S2](#source-S2).',
+    sources: [{ id: 'S1', label: 'Uncited', text: 'Unused private source' }, { id: 'S2', label: 'Transcript', text: 'Original evidence' }] }];
+  const stored = encodeMeetingChat(messages, true);
+  assert.ok(!stored.includes('Unused private source'));
+  const restored = decodeMeetingChat(stored);
+  assert.equal(restored[1].sources[0].text, 'Original evidence');
+  assert.match(restored[1].notice, /incomplete/);
+  assert.equal(messages[1].notice, undefined);
+  assert.throws(() => decodeMeetingChat('[{"role":"system","content":"bad"}]'));
+  assert.throws(() => decodeMeetingChat('[{"role":"assistant","content":"ok","sources":[null]}]'));
+});
+
+test('restored conversations rebuild follow-up context from complete exchanges only', async () => {
+  let received;
+  const { chat } = chatFixture(async args => { received = args; return 'Follow-up'; });
+  chat.restoreMessages([
+    { role: 'user', content: 'Earlier question' }, { role: 'assistant', content: 'Original answer [S1](#source-S1).' },
+    { role: 'user', content: 'Interrupted question' }, { role: 'assistant', content: 'Partial answer', notice: 'Incomplete' },
+  ]);
+  await chat.send('Follow up', 'Fresh sources');
+  assert.equal(received.history.length, 1);
+  assert.equal(received.history[0].question, 'Earlier question');
+  assert.ok(!received.history[0].answer.includes('#source-'));
+});
+
+function savedChatFixture(invoke, exportName = 'useSavedMeetingChat') {
+  const writes = loader()('@/lib/pendingWrites');
+  const live = { messages: [], isLoading: false, send: async () => {}, clearMessages: () => {}, restoreMessages: saved => { live.messages = saved; } };
+  const runner = hookRunner('@/hooks/useSavedMeetingChat', exportName, {
+    './useLiveMeetingChat': { useLiveMeetingChat: () => live },
+    '@/meetnola/ipc': { meetnolaInvoke: invoke }, '@/lib/pendingWrites': writes,
+  });
+  return { runner, live, flush: writes.flushPendingWrites };
+}
+
+test('history load errors block questions and writes until a successful retry', async () => {
+  let fail = true, saves = 0;
+  const f = savedChatFixture(async command => {
+    if (command === 'get_meeting_chat') { if (fail) throw new Error('Disk unavailable'); return '[]'; }
+    saves++;
+  });
+  f.runner.render('A'); await new Promise(setImmediate);
+  let state = f.runner.render('A');
+  assert.equal(state.ready, false); assert.match(state.historyError, /Disk unavailable/); assert.equal(saves, 0);
+  fail = false; state.retryHistory(); f.runner.render('A'); await new Promise(setImmediate);
+  state = f.runner.render('A'); assert.equal(state.ready, true);
+});
+
+test('history ignores a late load from a previously selected meeting', async () => {
+  const reads = new Map();
+  const f = savedChatFixture((command, args) => command === 'get_meeting_chat'
+    ? new Promise(resolve => reads.set(args.meetingId, resolve)) : Promise.resolve());
+  f.runner.render('A'); await new Promise(setImmediate);
+  f.runner.render('B'); await new Promise(setImmediate);
+  reads.get('B')('[{"role":"user","content":"Meeting B"}]'); await new Promise(setImmediate);
+  f.runner.render('B');
+  reads.get('A')('[{"role":"user","content":"Meeting A"}]'); await new Promise(setImmediate);
+  assert.equal(f.runner.render('B').messages[0].content, 'Meeting B');
+});
+
+test('navigation and Quit persist partial answers without checkpointing each token', async () => {
+  const saved = [];
+  const f = savedChatFixture(async (command, args) => {
+    if (command === 'get_meeting_chat') return null;
+    saved.push(JSON.parse(args.messagesJson));
+  });
+  f.runner.render('A'); await new Promise(setImmediate); f.runner.render('A'); await new Promise(setImmediate);
+  f.live.isLoading = true; f.live.messages = [{ role: 'user', content: 'Question' }];
+  f.runner.render('A'); await new Promise(setImmediate);
+  assert.match(saved.at(-1).at(-1).notice, /incomplete/);
+  const checkpoints = saved.length;
+  f.live.messages = [...f.live.messages, { role: 'assistant', content: 'Partial text' }];
+  f.runner.render('A'); await new Promise(setImmediate);
+  assert.equal(saved.length, checkpoints);
+  await f.flush();
+  assert.equal(saved.at(-1).at(-1).content, 'Partial text');
+  f.live.messages = [{ role: 'user', content: 'Question' }, { role: 'assistant', content: 'More partial text' }];
+  f.runner.render('A'); f.runner.unmount(); await f.flush();
+  assert.equal(saved.at(-1).at(-1).content, 'More partial text');
+  assert.match(saved.at(-1).at(-1).notice, /incomplete/);
+});
+
+test('failed conversation writes retain the latest answer for retry', async () => {
+  let fail = false, stored;
+  const f = savedChatFixture(async (command, args) => {
+    if (command === 'get_meeting_chat') return null;
+    if (fail) throw new Error('Disk full');
+    stored = JSON.parse(args.messagesJson);
+  });
+  f.runner.render('A'); await new Promise(setImmediate); f.runner.render('A'); await new Promise(setImmediate);
+  fail = true;
+  f.live.messages = [{ role: 'user', content: 'Question' }, { role: 'assistant', content: 'Completed answer' }];
+  f.runner.render('A'); await new Promise(setImmediate);
+  const state = f.runner.render('A');
+  assert.match(state.historyError, /Conversation not saved/);
+  assert.equal(state.messages[1].content, 'Completed answer');
+  fail = false; state.retryHistory(); await new Promise(setImmediate);
+  assert.equal(stored[1].content, 'Completed answer');
+  assert.equal(f.runner.render('A').historyError, null);
+});
+
+
+for (const outcome of ['cancelled', 'completed', 'request-failed', 'delayed-start', 'start-failed']) {
+  test(`enhancement Stop preserves polling until confirmed: ${outcome}`, async () => {
+    const states = [];
+    const notices = [];
+    const summaries = [];
+    const dismissed = [];
+    const commands = [];
+    let acceptStart;
+    const acceptance = new Promise(resolve => { acceptStart = resolve; });
+    let onUpdate;
+    let stoppedPolling = false;
+    const load = loader({
+      react: { ...quietReact, useState: initial => [initial, value => states.push(value)] },
+      sonner: { toast: { dismiss: id => dismissed.push(id), ...Object.fromEntries(['info', 'success', 'error', 'warning'].map(kind =>
+        [kind, (title, options) => notices.push({ kind, title, options })])) } },
+      '@/components/Sidebar/SidebarProvider': { useSidebar: () => ({
+        startSummaryPolling: (_meeting, _process, callback) => { onUpdate = callback; },
+        stopSummaryPolling: () => { stoppedPolling = true; },
+      }) },
+      '@tauri-apps/api/core': { invoke: async command => {
+        commands.push(command);
+        if (command === 'api_process_transcript' && ['delayed-start', 'start-failed'].includes(outcome)) {
+          await acceptance;
+          if (outcome === 'start-failed') throw new Error('Startup failed');
+        }
+        if (command === 'api_get_meeting_transcripts') return { total_count: 0, transcripts: [] };
+        if (command === 'api_cancel_summary' && outcome === 'request-failed') throw new Error('Connection lost');
+        if (command === 'api_get_summary') return { data: { markdown: 'Previous saved notes' } };
+        return { process_id: 'synthetic-process' };
+      } },
+      '@/lib/analytics': { default: new Proxy({}, { get: () => async () => {} }), __esModule: true },
+      '@/lib/utils': { isOllamaNotInstalledError: () => false },
+      '@/lib/summary-language-preferences': { readMeetingSummaryLanguage: async () => ({ language: 'en' }) },
+    });
+    const hook = load('@/hooks/meeting-details/useSummaryGeneration').useSummaryGeneration({
+      meeting: { id: 'synthetic', title: 'Custom title', created_at: new Date().toISOString() },
+      transcripts: [], notesText: 'Preserve the title.', modelConfig: { provider: 'ollama', model: 'synthetic' },
+      isModelConfigLoading: false, selectedTemplate: 'standard_meeting',
+      updateMeetingTitle: noop, setAiSummary: value => summaries.push(value),
+    });
+    const generation = hook.handleRegenerateSummary();
+    if (['delayed-start', 'start-failed'].includes(outcome)) {
+      await new Promise(setImmediate);
+      assert.ok(commands.includes('api_process_transcript'));
+      const stop = hook.handleStopGeneration();
+      await new Promise(setImmediate);
+      assert.ok(!commands.includes('api_cancel_summary'), 'do not cancel before the backend accepts the job');
+      acceptStart();
+      await Promise.all([generation, stop]);
+      assert.equal(commands.includes('api_cancel_summary'), outcome === 'delayed-start');
+      if (outcome === 'start-failed') {
+        assert.ok(states.includes('error'));
+        assert.equal(notices.at(-1).kind, 'error');
+        assert.ok(!notices.some(notice => notice.title === 'Enhancement stopped'));
+      } else {
+        assert.equal(typeof onUpdate, 'function');
+        assert.equal(stoppedPolling, false);
+      }
+      return;
+    }
+    await generation;
+    assert.equal(typeof onUpdate, 'function');
+    assert.deepEqual(dismissed, ['summary-synthetic'], 'clear earlier feedback when a new generation starts');
+    assert.equal(notices.length, 0, 'inline progress does not create a competing toast');
+    states.length = 0;
+    await hook.handleStopGeneration();
+    assert.equal(stoppedPolling, false, 'keep observing the authoritative result');
+    assert.equal(states.length, 0, 'a cancellation request alone must not report idle');
+    if (outcome === 'request-failed') {
+      assert.equal(notices.length, 1);
+      assert.equal(notices[0].kind, 'error');
+      assert.match(notices[0].title, /Could not stop/);
+    } else assert.equal(notices.length, 0, 'wait for confirmation before reporting stopped');
+    await onUpdate(outcome === 'cancelled'
+      ? { status: 'cancelled' }
+      : { status: 'completed', data: { markdown: 'Completed notes' } });
+    assert.equal(summaries.at(-1).markdown, outcome === 'cancelled' ? 'Previous saved notes' : 'Completed notes');
+    assert.equal(notices.at(-1).kind, outcome === 'cancelled' ? 'info' : 'success');
+    assert.equal(notices.at(-1).options.id, 'summary-synthetic');
+    assert.ok(states.includes('completed'));
+  });
+}

@@ -945,7 +945,7 @@ export default function QuickNotePage() {
                                   : 'border border-stone-200/80 bg-stone-50 text-stone-700'
                               }`}
                             >
-                              {message.role === 'assistant' ? <AssistantMessage content={message.content} notice={message.notice} /> : message.content}
+                              {message.role === 'assistant' ? <AssistantMessage content={message.content} notice={message.notice} copyable={!isChatLoading || index < messages.length - 1} /> : message.content}
                             </div>
                           ))}
                           {isChatLoading && (
@@ -1219,7 +1219,7 @@ export default function QuickNotePage() {
                             : 'border border-stone-200/80 bg-white/90 text-stone-700'
                         }`}
                       >
-                        {message.role === 'assistant' ? <AssistantMessage content={message.content} notice={message.notice} /> : message.content}
+                        {message.role === 'assistant' ? <AssistantMessage content={message.content} notice={message.notice} copyable={!isChatLoading || index < messages.length - 1} /> : message.content}
                       </div>
                     ))
                   ) : (

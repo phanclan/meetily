@@ -81,8 +81,9 @@ export function useSummaryGeneration({
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const currentMeeting = useRef(meeting);
   currentMeeting.current = meeting;
+  const generationStart = useRef<{ ready: Promise<void>; started: boolean } | null>(null);
 
-  const { startSummaryPolling, stopSummaryPolling } = useSidebar();
+  const { startSummaryPolling } = useSidebar();
 
   // Helper to get status message
   const getSummaryStatusMessage = useCallback((status: SummaryStatus) => {
@@ -114,8 +115,15 @@ export function useSummaryGeneration({
     customPrompt?: string;
     isRegeneration?: boolean;
   }) => {
+    let finishStarting!: () => void;
+    const request = {
+      ready: new Promise<void>(resolve => { finishStarting = resolve; }),
+      started: false,
+    };
+    generationStart.current = request;
     setSummaryStatus(isRegeneration ? 'regenerating' : 'processing');
     setSummaryError(null);
+    toast.dismiss(`summary-${meeting.id}`);
 
     try {
       await beforeGenerate?.();
@@ -141,12 +149,6 @@ export function useSummaryGeneration({
         await Analytics.trackCustomPromptUsed(customPrompt.trim().length);
       }
 
-      // Show toast notification for generation start
-      toast.info(`${isRegeneration ? 'Regenerating' : 'Generating'} summary...`, {
-        description: `Using ${modelConfig.provider}/${modelConfig.model}`,
-        duration: 3000,
-      });
-
       // Resolve explicit metadata override first; Auto detects the transcript language.
       const summaryLanguage = await resolveSummaryLanguage(
         meeting.id,
@@ -167,6 +169,7 @@ export function useSummaryGeneration({
       }) as any;
 
       const process_id = result.process_id;
+      request.started = true;
       console.log('Process ID:', process_id);
 
       // Start global polling via context
@@ -196,6 +199,10 @@ export function useSummaryGeneration({
           }
 
           setSummaryError(null);
+          toast.info('Enhancement stopped', {
+            id: `summary-${meeting.id}`,
+            duration: 3000,
+          });
           return;
         }
 
@@ -219,6 +226,7 @@ export function useSummaryGeneration({
 
                 // Show error toast with restoration message
                 toast.error(`Failed to regenerate summary`, {
+                  id: `summary-${meeting.id}`,
                   description: `${errorMessage}. Your previous summary has been restored.`,
                 });
 
@@ -247,6 +255,7 @@ export function useSummaryGeneration({
 
           // Show error toast
           toast.error(`Failed to ${isRegeneration ? 'regenerate' : 'generate'} summary`, {
+            id: `summary-${meeting.id}`,
             description: errorMessage.includes('Connection refused')
               ? 'Could not connect to LLM service. Please ensure Ollama or your configured LLM provider is running.'
               : errorMessage,
@@ -285,8 +294,8 @@ export function useSummaryGeneration({
             setSummaryStatus('completed');
 
             // Show success toast
-            toast.success('Summary generated successfully!', {
-              description: 'Your meeting summary is ready',
+            toast.success('Enhanced notes are ready', {
+              id: `summary-${meeting.id}`,
               duration: 4000,
             });
 
@@ -359,8 +368,8 @@ export function useSummaryGeneration({
           setSummaryStatus('completed');
 
           // Show success toast
-          toast.success('Summary generated successfully!', {
-            description: 'Your meeting summary is ready',
+          toast.success('Enhanced notes are ready', {
+            id: `summary-${meeting.id}`,
             duration: 4000,
           });
 
@@ -383,6 +392,7 @@ export function useSummaryGeneration({
       // Note: We don't clear the summary here because the backend has already restored from backup
 
       toast.error(`Failed to ${isRegeneration ? 'regenerate' : 'generate'} summary`, {
+        id: `summary-${meeting.id}`,
         description: errorMessage,
       });
 
@@ -393,6 +403,8 @@ export function useSummaryGeneration({
         undefined,
         errorMessage
       );
+    } finally {
+      finishStarting();
     }
   }, [
     meeting.id,
@@ -650,34 +662,24 @@ export function useSummaryGeneration({
     });
   }, [meeting.id, notesText, fetchAllTranscripts, buildSummaryTranscriptPayload, processSummary]);
 
-  // Public API: Stop ongoing summary generation
+  // Keep polling until the backend confirms cancellation or completion.
+  // A failed cancellation request must not make an active job look stopped.
   const handleStopGeneration = useCallback(async () => {
-    console.log('Stopping summary generation for meeting:', meeting.id);
-
+    const request = generationStart.current;
+    if (request) {
+      await request.ready;
+      if (!request.started) return;
+    }
     try {
-      // Call backend to cancel the summary generation
-      await invokeTauri('api_cancel_summary', {
-        meetingId: meeting.id
-      });
-      console.log('✓ Backend cancellation request sent for meeting:', meeting.id);
+      await invokeTauri('api_cancel_summary', { meetingId: meeting.id });
     } catch (error) {
       console.error('Failed to cancel summary generation:', error);
-      // Continue with frontend cleanup even if backend call fails
+      toast.error('Could not stop enhancement', {
+        id: `summary-${meeting.id}`,
+        description: 'Still checking its progress. Try Stop again.',
+      });
     }
-
-    // Stop polling
-    stopSummaryPolling(meeting.id);
-
-    // Reset status to idle
-    setSummaryStatus('idle');
-    setSummaryError(null);
-
-    // Show toast notification
-    toast.info('Summary generation stopped', {
-      description: 'You can generate a new summary anytime',
-      duration: 3000,
-    });
-  }, [meeting.id, stopSummaryPolling]);
+  }, [meeting.id]);
 
   return {
     summaryStatus,

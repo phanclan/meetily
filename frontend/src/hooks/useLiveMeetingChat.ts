@@ -8,15 +8,19 @@ export interface ChatMessage {
   sources?: MeetingSource[];
   requestId?: string;
   notice?: string;
+  coverage?: string;
+  sourceMeetingIds?: string[];
 }
 
 // Local models sometimes emit plain markers despite the link-format instruction.
 // Only known source IDs become links; code examples and existing links stay intact.
 export function linkMeetingCitations(text: string, sources: MeetingSource[] = []): string {
   const known = new Set(sources.map(source => source.id));
-  return text.replace(/```[\s\S]*?```|`[^`]*`|\[S\d+\](?!\()/g, marker => {
-    const id = marker.slice(1, -1);
-    return known.has(id) ? `${marker}(#source-${id})` : marker;
+  return text.replace(/```[\s\S]*?```|`[^`]*`|\[S\d+(?:\s*[,;]\s*S\d+)*\](?!\()/g, marker => {
+    if (!marker.startsWith('[')) return marker;
+    const ids = marker.slice(1, -1).split(/\s*[,;]\s*/);
+    if (!ids.some(id => known.has(id))) return marker;
+    return ids.map(id => known.has(id) ? `[${id}](#source-${id})` : `[${id}]`).join(' ');
   });
 }
 
@@ -63,7 +67,7 @@ export function useLiveMeetingChat(meetingId?: string) {
     let pending: { flush: () => void; dispose: () => void } | null = null;
     let settled = false;
     try {
-      const context = typeof source === 'string' ? { context: source, sources: undefined } : await source();
+      const context = typeof source === 'string' ? { context: source, sources: undefined, coverage: undefined } : await source();
       if (epoch.current !== requestEpoch) return;
       if (!context.context.trim()) throw new Error('Add notes or record a transcript before asking about this meeting.');
       id = await prepareLiveQuery();
@@ -76,7 +80,7 @@ export function useLiveMeetingChat(meetingId?: string) {
         if (epoch.current !== requestEpoch) return;
         setMessages(prev => {
           if (epoch.current !== requestEpoch) return prev;
-          const message: ChatMessage = { role: 'assistant', content: linkMeetingCitations(content, context.sources), sources: context.sources, requestId: id! };
+          const message: ChatMessage = { role: 'assistant', content: linkMeetingCitations(content, context.sources), sources: context.sources, coverage: context.coverage, requestId: id! };
           return prev.some(item => item.requestId === id)
             ? prev.map(item => item.requestId === id ? message : item) : [...prev, message];
         });
@@ -143,5 +147,22 @@ export function useLiveMeetingChat(meetingId?: string) {
     setError(null);
   }, [cancelCurrent]);
 
-  return { messages, isLoading, error, send, clearMessages, stop };
+  const restoreMessages = useCallback((saved: ChatMessage[]) => {
+    if (active.current) return;
+    const exchanges: MeetingExchange[] = [];
+    let question: string | null = null;
+    for (const message of saved) {
+      if (message.role === 'user') question = message.content;
+      else {
+        if (question && !message.notice && !message.content.startsWith('Error:')) {
+          exchanges.push({ question, answer: message.content.replace(/\[S\d+\]\(#source-S\d+\)/g, '') });
+        }
+        question = null;
+      }
+    }
+    history.current = exchanges.slice(-6);
+    setMessages(saved);
+  }, []);
+
+  return { messages, isLoading, error, send, clearMessages, stop, restoreMessages };
 }
