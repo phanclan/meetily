@@ -23,7 +23,16 @@ export interface MeetingExchange {
   answer: string
 }
 
+export function prepareLiveQuery(): Promise<string> {
+  return meetnolaInvoke<string>('prepare_live_query')
+}
+
+export function cancelLiveQuery(requestId: string): Promise<void> {
+  return meetnolaInvoke('cancel_live_query', { requestId })
+}
+
 export function liveQuery(args: {
+  requestId: string
   userMessage: string
   transcriptContext: string
   history?: MeetingExchange[]

@@ -96,13 +96,19 @@ impl TranscriptsRepository {
             return Ok(Vec::new());
         }
 
-        let search_query = format!("%{}%", query.to_lowercase());
+        // Search input is literal text, not a LIKE pattern.
+        let escaped = query.trim().to_lowercase().replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+        let search_query = format!("%{}%", escaped);
 
         let rows = sqlx::query_as::<_, (String, String, String, String)>(
             "SELECT m.id, m.title, t.transcript, t.timestamp
              FROM meetings m
-             JOIN transcripts t ON m.id = t.meeting_id
-             WHERE LOWER(t.transcript) LIKE ?",
+             JOIN transcripts t ON t.id = (
+                 SELECT id FROM transcripts
+                 WHERE meeting_id = m.id AND LOWER(transcript) LIKE ? ESCAPE '\\'
+                 ORDER BY audio_start_time ASC, id ASC LIMIT 1
+             )
+             ORDER BY m.created_at DESC, m.id ASC LIMIT 100",
         )
         .bind(&search_query)
         .fetch_all(pool)
@@ -111,7 +117,7 @@ impl TranscriptsRepository {
         let results = rows
             .into_iter()
             .map(|(id, title, transcript, timestamp)| {
-                let match_context = Self::get_match_context(&transcript, query);
+                let match_context = Self::get_match_context(&transcript, query.trim());
                 TranscriptSearchResult {
                     id,
                     title,
@@ -129,23 +135,30 @@ impl TranscriptsRepository {
         let transcript_lower = transcript.to_lowercase();
         let query_lower = query.to_lowercase();
 
-        match transcript_lower.find(&query_lower) {
-            Some(match_index) => {
-                let start_index = match_index.saturating_sub(100);
-                let end_index = (match_index + query.len() + 100).min(transcript.len());
-
-                let mut context = String::new();
-                if start_index > 0 {
-                    context.push_str("...");
+        let chars: Vec<char> = transcript.chars().collect();
+        let (start, end) = if let Some(byte_start) = transcript_lower.find(&query_lower) {
+            // Map lowercased byte offsets back to original characters. Lowercasing
+            // can expand characters (for example İ), so original byte offsets differ.
+            let byte_end = byte_start + query_lower.len();
+            let mut lowered_offset = 0;
+            let mut first = None;
+            let mut last = 0;
+            for (index, ch) in chars.iter().enumerate() {
+                let next = lowered_offset + ch.to_lowercase().map(char::len_utf8).sum::<usize>();
+                if lowered_offset < byte_end && next > byte_start {
+                    first.get_or_insert(index);
+                    last = index + 1;
                 }
-                context.push_str(&transcript[start_index..end_index]);
-                if end_index < transcript.len() {
-                    context.push_str("...");
-                }
-                context
+                lowered_offset = next;
+                if lowered_offset >= byte_end { break; }
             }
-            None => transcript.chars().take(200).collect(), // Fallback to the start of the transcript
-        }
+            (first.unwrap_or(0).saturating_sub(100), (last + 100).min(chars.len()))
+        } else {
+            (0, chars.len().min(200))
+        };
+        format!("{}{}{}", if start > 0 { "..." } else { "" },
+            chars[start..end].iter().collect::<String>(),
+            if end < chars.len() { "..." } else { "" })
     }
 }
 
@@ -165,6 +178,40 @@ mod quality_tests {
             id: "synthetic".into(), text: "Synthetic transcript".into(), timestamp: "00:01".into(),
             audio_start_time: Some(1.0), audio_end_time: Some(2.0), duration: Some(1.0),
         }
+    }
+
+
+    #[test]
+    fn search_snippets_preserve_unicode_boundaries_and_lowercase_expansions() {
+        for text in [format!("ab{}", "é".repeat(180)), format!("{}target{}", "🙂項目".repeat(120), "界".repeat(150)),
+            format!("{}TARGET end", "İ".repeat(120))] {
+            let query = if text.starts_with("ab") { "a" } else { "target" };
+            let snippet = TranscriptsRepository::get_match_context(&text, query);
+            assert!(snippet.to_lowercase().contains(query), "{snippet}");
+            assert!(snippet.chars().count() <= 212);
+        }
+        assert_eq!(TranscriptsRepository::get_match_context("İstanbul", "i"), "İstanbul");
+        assert_eq!(TranscriptsRepository::get_match_context("Small note", "missing"), "Small note");
+    }
+
+    #[tokio::test]
+    async fn search_is_literal_deduplicated_and_bounded() {
+        let pool = database().await;
+        for i in 0..105 {
+            let mut first = segment(); first.text = "Match 100%_done".into();
+            let mut second = segment(); second.id = "second".into(); second.text = "Match again".into();
+            TranscriptsRepository::save_transcript(&pool, "Synthetic", &[first, second], None, Some(&format!("search-{i}"))).await.unwrap();
+        }
+        let matches = TranscriptsRepository::search_transcripts(&pool, "match").await.unwrap();
+        assert_eq!(matches.len(), 100);
+        assert_eq!(matches.iter().map(|row| &row.id).collect::<std::collections::HashSet<_>>().len(), 100);
+        assert_eq!(TranscriptsRepository::search_transcripts(&pool, "%_done").await.unwrap().len(), 100);
+        assert!(TranscriptsRepository::search_transcripts(&pool, "_missing%").await.unwrap().is_empty());
+        assert!(TranscriptsRepository::search_transcripts(&pool, " ").await.unwrap().is_empty());
+        let plan: Vec<(i64, i64, i64, String)> = sqlx::query_as(
+            "EXPLAIN QUERY PLAN SELECT id FROM transcripts WHERE meeting_id = ? AND LOWER(transcript) LIKE ? ORDER BY audio_start_time, id LIMIT 1"
+        ).bind("synthetic").bind("%match%").fetch_all(&pool).await.unwrap();
+        assert!(plan.iter().any(|row| row.3.contains("idx_transcripts_meeting_order")));
     }
 
     #[tokio::test]

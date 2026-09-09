@@ -13,17 +13,18 @@ pub mod notes;
 
 use tauri::{
     plugin::{Builder, TauriPlugin},
-    AppHandle, Runtime,
+    AppHandle, Manager, Runtime,
 };
-#[cfg(feature = "meetnola-automation")]
-use tauri::Manager;
 
 /// Register Meetnola IPC commands under the `meetnola` plugin namespace.
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
     Builder::new("meetnola")
+        .setup(|app, _| { app.manage(live_query::QueryRequests::default()); Ok(()) })
         .invoke_handler(tauri::generate_handler![
             frontend_logging::append_frontend_log,
             live_query::live_query,
+            live_query::prepare_live_query,
+            live_query::cancel_live_query,
             meeting_detection::start_call_detection,
             meeting_detection::stop_call_detection,
             meeting_detection::set_call_detection_enabled,

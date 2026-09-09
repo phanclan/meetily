@@ -110,7 +110,7 @@ export default function PageContent({
   const [chatInput, setChatInput] = useState('');
   const { modelConfig, setModelConfig } = useConfig();
   const templates = useTemplates();
-  const { messages, isLoading: isChatLoading, send, clearMessages } = useLiveMeetingChat(meeting.id);
+  const { messages, isLoading: isChatLoading, send, clearMessages, stop } = useLiveMeetingChat(meeting.id);
 
   const meetingData = useMeetingData({ meeting, summaryData, onMeetingUpdated });
   const copyOperations = useCopyOperations({
@@ -482,7 +482,7 @@ export default function PageContent({
       <MeetingAssistantDock
         expanded={isComposerExpanded} onExpandedChange={setIsAiComposerOpen}
         messages={messages} loading={isChatLoading} input={chatInput} onInputChange={setChatInput}
-        onSend={handleSendChat} onClear={clearMessages}
+        onSend={handleSendChat} onClear={clearMessages} onStop={stop}
         canSend={Boolean(notesText.trim() || meetingData.transcripts.length)}
         recipes={RECIPES.map(recipe => ({ label: recipe.label, onSelect: () => handleRecipe(recipe) }))}
       />

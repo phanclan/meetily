@@ -130,10 +130,10 @@ async fn live_meeting_follow_up_quality() {
     let context = "[S1] Written notes\nPreserve the custom meeting title when saving. No implementation task, owner, or deadline was assigned.\n\n[S2] Transcript · 0:30\nKeep local Parakeet for transcription.";
     let question = "What must be preserved when saving?";
     let first = query_with_context(&client, &LLMProvider::Ollama, &model, "", context,
-        question, &[], Some("http://localhost:11434"), None, None).await.unwrap();
+        question, &[], Some("http://localhost:11434"), None, None, None).await.unwrap();
     let history = [MeetingExchange { question: question.into(), answer: first.replace("[S1](#source-S1)", "") }];
     let follow_up = query_with_context(&client, &LLMProvider::Ollama, &model, "", context,
-        "Turn that into one short reminder.", &history, Some("http://localhost:11434"), None, None).await.unwrap();
+        "Turn that into one short reminder.", &history, Some("http://localhost:11434"), None, None, None).await.unwrap();
     // A prior generated answer must not become evidence for an invented assignment.
     let incorrect_history = [MeetingExchange {
         question: "What was assigned?".into(),
@@ -141,7 +141,7 @@ async fn live_meeting_follow_up_quality() {
     }];
     let correction = query_with_context(&client, &LLMProvider::Ollama, &model, "", context,
         "Was that actually assigned in the meeting?", &incorrect_history,
-        Some("http://localhost:11434"), None, None).await.unwrap();
+        Some("http://localhost:11434"), None, None, None).await.unwrap();
     println!("{}", serde_json::json!({"model": model, "first": first, "follow_up": follow_up, "correction": correction}));
     assert!(first.to_lowercase().contains("custom meeting title"));
     assert!(follow_up.to_lowercase().contains("title"));

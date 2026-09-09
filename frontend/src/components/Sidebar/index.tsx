@@ -258,14 +258,12 @@ const Sidebar: React.FC = () => {
   };
 
   // Handle search input changes
-  const handleSearchChange = useCallback(async (value: string) => {
+  const handleSearchChange = useCallback((value: string) => {
     setSearchQuery(value);
+    searchTranscripts(value);
 
     // If search query is empty, just return to normal view
     if (!value.trim()) return;
-
-    // Search through transcripts
-    await searchTranscripts(value);
 
     // Make sure the meetings folder is expanded when searching
     if (!expandedFolders.has('meetings')) {
@@ -704,6 +702,9 @@ const Sidebar: React.FC = () => {
                 <ChevronDown className={`w-3 h-3 text-gray-400 transition-transform duration-200 flex-shrink-0 ${meetingsExpanded ? '' : '-rotate-90'}`} />
               </button>
 
+                {searchQuery && !isSearching && searchResults.length >= 100 && (
+                  <p className="px-3 pb-2 text-xs text-stone-500" role="status">Showing 100 matching meetings. Refine your search for more.</p>
+                )}
                 <div id="sidebar-meetings" hidden={!meetingsExpanded} className="flex-1 overflow-y-auto custom-scrollbar min-h-0 px-2">
                   {visibleMeetings.map(child => renderItem(child, 0))}
                   {!showAllMeetings && meetingItems.length > MEETINGS_PREVIEW_COUNT && (

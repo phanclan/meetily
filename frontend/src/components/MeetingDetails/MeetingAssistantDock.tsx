@@ -14,6 +14,7 @@ interface Props {
   onInputChange: (value: string) => void;
   onSend: () => void;
   onClear: () => void;
+  onStop: () => void;
   canSend: boolean;
   recipes: { label: string; onSelect: () => void }[];
 }
@@ -30,7 +31,7 @@ export function MeetingAssistantDock(props: Props) {
             <div className="mb-3 flex flex-wrap items-center gap-2">
               {props.recipes.map(recipe => <button key={recipe.label} type="button" disabled={props.loading}
                 onClick={recipe.onSelect} className="rounded-md bg-stone-100 px-2.5 py-1.5 text-xs text-stone-700 hover:bg-stone-200 disabled:opacity-50">{recipe.label}</button>)}
-              {props.messages.length > 0 && <button type="button" onClick={props.onClear} disabled={props.loading}
+              {props.messages.length > 0 && <button type="button" onClick={props.onClear}
                 className="px-2 py-1 text-xs text-stone-500 disabled:opacity-50">Clear</button>}
               <button type="button" aria-label="Collapse assistant" onClick={collapse}
                 className="ml-auto rounded-md p-1.5 text-stone-500 hover:bg-stone-100"><X className="h-4 w-4" /></button>
@@ -50,8 +51,10 @@ export function MeetingAssistantDock(props: Props) {
             placeholder="Ask anything about this meeting" className="min-w-0 flex-1 bg-transparent px-2 py-2.5 text-sm outline-none focus-visible:ring-1 focus-visible:ring-stone-400 rounded-md" />
           {!props.expanded && !props.input && <button type="button" onClick={() => props.onExpandedChange(true)}
             className="rounded-md px-3 py-2 text-xs text-stone-600 hover:bg-stone-100">Recipes{props.messages.length > 0 ? ' & answers' : ''}</button>}
-          <button type="submit" aria-label="Send question" disabled={props.loading || !props.input.trim() || !props.canSend}
-            className="rounded-lg bg-stone-900 p-2.5 text-white disabled:opacity-30"><Send className="h-4 w-4" /></button>
+          {props.loading ? <button type="button" onClick={props.onStop} aria-label="Stop answer"
+            className="rounded-lg bg-stone-900 px-3 py-2.5 text-sm text-white">Stop</button> :
+          <button type="submit" aria-label="Send question" disabled={!props.input.trim() || !props.canSend}
+            className="rounded-lg bg-stone-900 p-2.5 text-white disabled:opacity-30"><Send className="h-4 w-4" /></button>}
         </form>
       </div>
     </aside>

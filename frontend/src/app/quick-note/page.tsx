@@ -211,7 +211,7 @@ export default function QuickNotePage() {
     isReady,
     saveError,
   } = useMeetingNotes(activeNotesMeetingId);
-  const { messages, isLoading: isChatLoading, send, clearMessages } = useLiveMeetingChat();
+  const { messages, isLoading: isChatLoading, send, clearMessages, stop } = useLiveMeetingChat();
 
   const seededSessionIdsRef = useRef<Set<string>>(new Set());
   const autoStartRequestedRef = useRef(false);
@@ -1004,7 +1004,7 @@ export default function QuickNotePage() {
                           aria-label="Send question"
                           className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-stone-900 text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
                         >
-                          <Send className="h-4 w-4" />
+                          {isChatLoading ? <Square className="h-4 w-4" /> : <Send className="h-4 w-4" />}
                         </button>
                       </div>
                     </div>
@@ -1255,12 +1255,12 @@ export default function QuickNotePage() {
                   />
                   <button
                     type="button"
-                    onClick={handleSendChat}
-                    disabled={isChatLoading || !chatInput.trim() || (!noteText.trim() && transcripts.length === 0)}
-                    aria-label="Send question"
+                    onClick={isChatLoading ? stop : handleSendChat}
+                    disabled={!isChatLoading && (!chatInput.trim() || (!noteText.trim() && transcripts.length === 0))}
+                    aria-label={isChatLoading ? "Stop answer" : "Send question"}
                     className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-stone-900 text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    <Send className="h-4 w-4" />
+                    {isChatLoading ? <Square className="h-4 w-4" /> : <Send className="h-4 w-4" />}
                   </button>
                 </div>
               </section>

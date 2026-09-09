@@ -118,7 +118,7 @@ test('notes-only and mixed follow-up context reaches the native assistant with s
   const calls = [];
   const load = loader({
     react: quietReact,
-    '@/meetnola/ipc': { liveQuery: async args => { calls.push(args); return 'Synthetic answer'; } },
+    '@/meetnola/ipc': { prepareLiveQuery: async () => 'synthetic', cancelLiveQuery: async () => {}, liveQuery: async args => { calls.push(args); return 'Synthetic answer'; } },
   });
   const { buildMeetingContext } = load('@/lib/meetingContext');
   const chat = load('@/hooks/useLiveMeetingChat').useLiveMeetingChat();
@@ -1048,7 +1048,8 @@ test('only citations with captured sources become buttons', () => {
   assert.ok(!html.includes('href="#source-'));
 });
 
-function chatFixture(liveQuery) {
+function chatFixture(liveQuery, ipc = {}) {
+  const cancelled = [];
   const states = [], effects = [];
   let cursor = 0;
   const load = loader({
@@ -1057,11 +1058,11 @@ function chatFixture(liveQuery) {
       states[index] = initial;
       return [initial, value => { states[index] = typeof value === 'function' ? value(states[index]) : value; }];
     } },
-    '@/meetnola/ipc': { liveQuery },
+    '@/meetnola/ipc': { liveQuery, prepareLiveQuery: async () => 'request-synthetic', cancelLiveQuery: async id => { cancelled.push(id); }, ...ipc },
   });
   const chat = load('@/hooks/useLiveMeetingChat').useLiveMeetingChat('synthetic');
   const cleanup = effects[0]();
-  return { chat, states, cleanup, switchMeeting: effects[0] };
+  return { chat, states, cleanup, cancelled, switchMeeting: effects[0] };
 }
 
 test('assistant suppresses duplicate sends and retains the cited source snapshot', async () => {
@@ -1071,7 +1072,7 @@ test('assistant suppresses duplicate sends and retains the cited source snapshot
   const source = { context: '[S1] Written notes\nPreserve title.', sources: [{ id: 'S1', label: 'Written notes', text: 'Preserve title.' }] };
   const pending = chat.send('What should stay?', async () => source);
   await chat.send('Duplicate', async () => source);
-  await Promise.resolve();
+  await new Promise(setImmediate);
   assert.equal(calls.length, 1);
   finish('Preserve title [S1](#source-S1).');
   await pending;
@@ -1092,6 +1093,7 @@ test('cleared, unmounted and changed-meeting requests cannot append stale answer
     let finish;
     const fixture = chatFixture(() => new Promise(resolve => { finish = resolve; }));
     const pending = fixture.chat.send('Old question', 'Old source');
+    await new Promise(setImmediate);
     if (boundary === 'clear') fixture.chat.clearMessages();
     if (boundary === 'unmount') fixture.cleanup();
     if (boundary === 'switch') fixture.switchMeeting();
@@ -1135,4 +1137,133 @@ test('clearing or changing meetings clears follow-up history', async () => {
     await fixture.chat.send('New question', 'New source');
     assert.equal(calls[1].history.length, 0, boundary);
   }
+});
+
+
+test('stop cancels a running question and suppresses its eventual answer', async () => {
+  let finish;
+  const fixture = chatFixture(() => new Promise(resolve => { finish = resolve; }));
+  const pending = fixture.chat.send('Question', 'Source');
+  await new Promise(setImmediate);
+  fixture.chat.stop();
+  assert.deepEqual(fixture.cancelled, ['request-synthetic']);
+  assert.equal(fixture.states[1], false);
+  finish('Stale answer');
+  await pending;
+  assert.equal(fixture.states[0].length, 1);
+});
+
+test('cancellation during registration releases the request without dispatching it', async () => {
+  let registered;
+  const fixture = chatFixture(() => assert.fail('Cancelled request must not run'), {
+    prepareLiveQuery: () => new Promise(resolve => { registered = resolve; }),
+  });
+  const pending = fixture.chat.send('Question', 'Source');
+  fixture.chat.clearMessages();
+  registered('late-registration');
+  await pending;
+  assert.deepEqual(fixture.cancelled, ['late-registration']);
+  assert.equal(fixture.states[0].length, 0);
+});
+
+// Minimal hook lifecycle harness for deferred-response regressions, not a UI profiler.
+function hookRunner(modulePath, exportName, stubs = {}, globals = {}) {
+  const slots = [], effects = [];
+  let cursor = 0;
+  const changed = (a, b) => !a || b.some((value, i) => value !== a[i]);
+  const react = {
+    useState(initial) {
+      const i = cursor++;
+      if (!(i in slots)) slots[i] = typeof initial === 'function' ? initial() : initial;
+      return [slots[i], value => { slots[i] = typeof value === 'function' ? value(slots[i]) : value; }];
+    },
+    useRef(initial) { const i = cursor++; return slots[i] ??= { current: initial }; },
+    useMemo(fn, deps) {
+      const i = cursor++;
+      if (!slots[i] || changed(slots[i].deps, deps)) slots[i] = { deps, value: fn() };
+      return slots[i].value;
+    },
+    useCallback(fn, deps) { return react.useMemo(() => fn, deps); },
+    useEffect(fn, deps) {
+      const i = cursor++;
+      if (!slots[i] || changed(slots[i].deps, deps)) {
+        const old = slots[i];
+        effects.push(() => { old?.cleanup?.(); slots[i] = { deps, cleanup: fn() }; });
+      }
+    },
+  };
+  const hook = loader({ react, ...stubs }, globals)(modulePath)[exportName];
+  return {
+    render(args) { cursor = 0; const value = hook(args); effects.splice(0).forEach(effect => effect()); return value; },
+    unmount() { slots.forEach(slot => slot?.cleanup?.()); },
+  };
+}
+
+test('meeting loads discard late results, errors and pages after navigation or refetch', async () => {
+  const requests = [];
+  const runner = hookRunner('@/hooks/usePaginatedTranscripts', 'usePaginatedTranscripts', {
+    '@tauri-apps/api/core': { invoke: (command, args) => new Promise((resolve, reject) => requests.push({ command, args, resolve, reject })) },
+  });
+  const settle = async (batch, id) => {
+    batch.forEach(r => r.resolve(r.command.endsWith('metadata') ? { id, title: id } : {
+      transcripts: [{ id: id + '-segment', text: 'Synthetic' }], total_count: 101, has_more: true,
+    }));
+    await new Promise(setImmediate);
+  };
+  runner.render({ meetingId: 'A' });
+  const old = requests.splice(0);
+  runner.render({ meetingId: 'B' });
+  await settle(requests.splice(0), 'B');
+  await settle(old, 'A');
+  let current = runner.render({ meetingId: 'B' });
+  assert.equal(current.metadata.id, 'B');
+  assert.equal(current.transcripts[0].id, 'B-segment');
+  const more = current.loadMore();
+  const oldPage = requests.splice(0);
+  const reload = current.refetch();
+  await settle(requests.splice(0), 'B-refreshed');
+  await reload;
+  oldPage.forEach(r => r.reject(new Error('Stale page failed')));
+  await more;
+  current = runner.render({ meetingId: 'B' });
+  assert.equal(current.metadata.id, 'B-refreshed');
+  assert.equal(current.error, null);
+  assert.equal(current.isLoading, false);
+  const abandoned = current.refetch();
+  runner.unmount();
+  await settle(requests.splice(0), 'unmounted');
+  await abandoned;
+});
+
+test('search debounces input, ignores stale results and errors, and clears pending work', async () => {
+  const timers = new Map(), requests = [];
+  let timerId = 0;
+  const runner = hookRunner('@/hooks/useTranscriptSearch', 'useTranscriptSearch', {
+    '@tauri-apps/api/core': { invoke: (_, args) => new Promise((resolve, reject) => requests.push({ args, resolve, reject })) },
+  }, {
+    setTimeout: fn => { const id = ++timerId; timers.set(id, fn); return id; },
+    clearTimeout: id => timers.delete(id),
+  });
+  const fire = () => { const callbacks = [...timers.values()]; timers.clear(); callbacks.forEach(fn => fn()); };
+  const api = runner.render();
+  api.searchTranscripts('o'); api.searchTranscripts('ol'); api.searchTranscripts('old');
+  assert.equal(timers.size, 1);
+  assert.equal(requests.length, 0);
+  fire();
+  api.searchTranscripts('new'); fire();
+  assert.equal(requests.length, 2);
+  requests[1].resolve([{ id: 'new' }]);
+  await new Promise(setImmediate);
+  requests[0].resolve([{ id: 'old' }]);
+  await new Promise(setImmediate);
+  assert.equal(runner.render().searchResults[0].id, 'new');
+  api.searchTranscripts('pending'); fire();
+  api.searchTranscripts('');
+  requests[2].reject(new Error('Obsolete error'));
+  await new Promise(setImmediate);
+  assert.equal(runner.render().searchResults.length, 0);
+  assert.equal(runner.render().isSearching, false);
+  api.searchTranscripts('unmount');
+  runner.unmount();
+  assert.equal(timers.size, 0);
 });

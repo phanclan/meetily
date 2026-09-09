@@ -27,6 +27,8 @@ fn main() {
             .commands(&[
                 "append_frontend_log",
                 "live_query",
+                "prepare_live_query",
+                "cancel_live_query",
                 "start_call_detection",
                 "stop_call_detection",
                 "set_call_detection_enabled",

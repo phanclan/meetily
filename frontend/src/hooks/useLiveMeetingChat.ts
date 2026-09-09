@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { liveQuery, type MeetingExchange } from '@/meetnola/ipc';
+import { liveQuery, prepareLiveQuery, cancelLiveQuery, type MeetingExchange } from '@/meetnola/ipc';
 import type { MeetingAnswerContext, MeetingSource } from '@/lib/meetingAnswerContext';
 
 export interface ChatMessage {
@@ -15,16 +15,23 @@ export function useLiveMeetingChat(meetingId?: string) {
   const active = useRef(false);
   const epoch = useRef(0);
   const history = useRef<MeetingExchange[]>([]);
-
-  useEffect(() => {
+  const requestId = useRef<string | null>(null);
+  const cancelCurrent = useCallback(() => {
     epoch.current += 1;
     active.current = false;
+    const id = requestId.current;
+    requestId.current = null;
+    if (id) void cancelLiveQuery(id).catch(error => console.error('Could not cancel meeting question:', error));
+  }, []);
+
+  useEffect(() => {
+    cancelCurrent();
     history.current = [];
     setMessages([]);
     setIsLoading(false);
     setError(null);
-    return () => { epoch.current += 1; };
-  }, [meetingId]);
+    return cancelCurrent;
+  }, [meetingId, cancelCurrent]);
 
   const send = useCallback(async (userMessage: string, source: string | (() => Promise<MeetingAnswerContext>)) => {
     if (!userMessage.trim() || active.current) return;
@@ -36,11 +43,16 @@ export function useLiveMeetingChat(meetingId?: string) {
     setIsLoading(true);
     setError(null);
 
+    let id: string | null = null;
     try {
       const context = typeof source === 'string' ? { context: source, sources: undefined } : await source();
       if (epoch.current !== requestEpoch) return;
       if (!context.context.trim()) throw new Error('Add notes or record a transcript before asking about this meeting.');
+      id = await prepareLiveQuery();
+      if (epoch.current !== requestEpoch) return;
+      requestId.current = id;
       const response = await liveQuery({
+        requestId: id,
         userMessage,
         transcriptContext: context.context,
         history: history.current,
@@ -57,18 +69,28 @@ export function useLiveMeetingChat(meetingId?: string) {
       setError(msg);
       setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${msg}` }]);
     } finally {
+      if (id) {
+        if (requestId.current === id) requestId.current = null;
+        // Also release a registration cancelled before liveQuery was dispatched.
+        void cancelLiveQuery(id).catch(error => console.error('Could not release meeting question:', error));
+      }
       if (epoch.current === requestEpoch) { active.current = false; setIsLoading(false); }
     }
   }, []);
 
+  const stop = useCallback(() => {
+    cancelCurrent();
+    setIsLoading(false);
+    setError(null);
+  }, [cancelCurrent]);
+
   const clearMessages = useCallback(() => {
-    epoch.current += 1;
-    active.current = false;
+    cancelCurrent();
     history.current = [];
     setIsLoading(false);
     setMessages([]);
     setError(null);
-  }, []);
+  }, [cancelCurrent]);
 
-  return { messages, isLoading, error, send, clearMessages };
+  return { messages, isLoading, error, send, clearMessages, stop };
 }
