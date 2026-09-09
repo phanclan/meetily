@@ -1009,3 +1009,95 @@ test('disposing the frontend quit handler invalidates an unfinished request', as
   assert.ok(events.includes('cancel:1'));
   assert.ok(!events.some(event => event.startsWith('exit:')));
 });
+
+test('saved assistant retrieves all transcript segments and distinguishes written sources', async () => {
+  const transcripts = Array.from({ length: 120 }, (_, i) => ({ id: String(i), text: `Segment ${i}`, audio_start_time: i * 10 }));
+  transcripts.push({ id: 'unknown', text: 'Unknown time', audio_start_time: NaN });
+  const load = loader({ '@/services/storageService': { storageService: { getMeeting: async id => {
+    assert.equal(id, 'synthetic');
+    return { transcripts };
+  } } } });
+  const { loadMeetingAnswerContext } = load('@/lib/meetingAnswerContext');
+  const full = await loadMeetingAnswerContext('synthetic', 'Written instruction');
+  assert.equal(full.sources.length, 122);
+  assert.equal(full.sources[0].label, 'Written notes');
+  assert.equal(full.sources[1].label, 'Transcript · 0:00');
+  assert.match(full.context, /\[S121\] Transcript · 19:50\nSegment 119/);
+  assert.equal(full.sources[121].label, 'Transcript');
+  const recent = await loadMeetingAnswerContext('synthetic', '', 'last5min');
+  assert.equal(recent.sources.length, 32);
+  assert.equal(recent.sources[0].text, 'Segment 89');
+  assert.equal(recent.sources[0].id, 'S1');
+});
+
+test('missing complete transcript fails instead of answering from partial context', async () => {
+  const load = loader({ '@/services/storageService': { storageService: { getMeeting: async () => ({}) } } });
+  await assert.rejects(load('@/lib/meetingAnswerContext').loadMeetingAnswerContext('synthetic', 'Notes'), /complete meeting transcript/);
+});
+
+test('only citations with captured sources become buttons', () => {
+  const load = loader({ 'react-markdown': Markdown, 'remark-gfm': remarkGfm });
+  const { AssistantMessage } = load(path.join(root, 'src/components/AssistantMessage.tsx'));
+  const html = renderToStaticMarkup(createElement(AssistantMessage, {
+    content: 'Preserve the title [S1](#source-S1). Unknown [S99](#source-S99).',
+    sources: [{ id: 'S1', label: 'Written notes', text: 'Preserve the custom title.' }],
+  }));
+  assert.match(html, /aria-label="Show source S1: Written notes"/);
+  assert.equal((html.match(/<button/g) || []).length, 1);
+  assert.match(html, /title="Source not available">S99/);
+  assert.ok(!html.includes('href="#source-'));
+});
+
+function chatFixture(liveQuery) {
+  const states = [], effects = [];
+  let cursor = 0;
+  const load = loader({
+    react: { ...quietReact, useEffect: effect => effects.push(effect), useState: initial => {
+      const index = cursor++;
+      states[index] = initial;
+      return [initial, value => { states[index] = typeof value === 'function' ? value(states[index]) : value; }];
+    } },
+    '@/meetnola/ipc': { liveQuery },
+  });
+  const chat = load('@/hooks/useLiveMeetingChat').useLiveMeetingChat('synthetic');
+  const cleanup = effects[0]();
+  return { chat, states, cleanup, switchMeeting: effects[0] };
+}
+
+test('assistant suppresses duplicate sends and retains the cited source snapshot', async () => {
+  let finish;
+  const calls = [];
+  const { chat, states } = chatFixture(args => { calls.push(args); return new Promise(resolve => { finish = resolve; }); });
+  const source = { context: '[S1] Written notes\nPreserve title.', sources: [{ id: 'S1', label: 'Written notes', text: 'Preserve title.' }] };
+  const pending = chat.send('What should stay?', async () => source);
+  await chat.send('Duplicate', async () => source);
+  await Promise.resolve();
+  assert.equal(calls.length, 1);
+  finish('Preserve title [S1](#source-S1).');
+  await pending;
+  assert.equal(states[0].length, 2);
+  assert.equal(states[0][1].sources[0].text, 'Preserve title.');
+  assert.equal(states[1], false);
+});
+
+test('context loading failure never calls the model', async () => {
+  const { chat, states } = chatFixture(() => assert.fail('Model must not be called'));
+  await chat.send('Question', async () => { throw new Error('Full transcript unavailable'); });
+  assert.match(states[2], /Full transcript unavailable/);
+  assert.equal(states[1], false);
+});
+
+test('cleared, unmounted and changed-meeting requests cannot append stale answers', async () => {
+  for (const boundary of ['clear', 'unmount', 'switch']) {
+    let finish;
+    const fixture = chatFixture(() => new Promise(resolve => { finish = resolve; }));
+    const pending = fixture.chat.send('Old question', 'Old source');
+    if (boundary === 'clear') fixture.chat.clearMessages();
+    if (boundary === 'unmount') fixture.cleanup();
+    if (boundary === 'switch') fixture.switchMeeting();
+    const snapshot = JSON.stringify(fixture.states);
+    finish('Old answer');
+    await pending;
+    assert.equal(JSON.stringify(fixture.states), snapshot, boundary);
+  }
+});

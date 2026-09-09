@@ -3,11 +3,12 @@
 import { Loader2, Send, Sparkles, X } from 'lucide-react';
 import { useRef } from 'react';
 import { AssistantMessage } from '@/components/AssistantMessage';
+import type { ChatMessage } from '@/hooks/useLiveMeetingChat';
 
 interface Props {
   expanded: boolean;
   onExpandedChange: (expanded: boolean) => void;
-  messages: { role: string; content: string }[];
+  messages: ChatMessage[];
   loading: boolean;
   input: string;
   onInputChange: (value: string) => void;
@@ -37,7 +38,7 @@ export function MeetingAssistantDock(props: Props) {
             <div aria-live="polite" className="max-h-[32vh] space-y-3 overflow-y-auto pb-3 text-sm leading-6">
               {props.messages.map((message, index) => <div key={index}
                 className={message.role === 'user' ? 'ml-8 rounded-lg bg-stone-100 px-3 py-2' : 'px-1 text-stone-700'}>
-                {message.role === 'assistant' ? <AssistantMessage content={message.content} /> : message.content}
+                {message.role === 'assistant' ? <AssistantMessage content={message.content} sources={message.sources} /> : message.content}
               </div>)}
               {props.loading && <p className="flex items-center gap-2 text-stone-500"><Loader2 className="h-4 w-4 animate-spin" />Writing an answer…</p>}
             </div>

@@ -28,7 +28,7 @@ import { EmptyStateSummary } from '@/components/EmptyStateSummary';
 import { SummaryGeneratorButtonGroup } from '@/components/MeetingDetails/SummaryGeneratorButtonGroup';
 import { blocksToPlainText } from '@/lib/meetingNotes';
 import { buildEnhanceNotesPrompt } from '@/lib/enhanceNotes';
-import { buildMeetingContext } from '@/lib/meetingContext';
+import { loadMeetingAnswerContext } from '@/lib/meetingAnswerContext';
 import Analytics from '@/lib/analytics';
 import { useMeetingData } from '@/hooks/meeting-details/useMeetingData';
 import { useSummaryGeneration } from '@/hooks/meeting-details/useSummaryGeneration';
@@ -73,22 +73,6 @@ function formatSavedAt(timestamp?: string) {
   return `Updated ${parsed.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
 }
 
-function getScopedTranscript(
-  transcripts: { text: string; audio_start_time?: number | null }[],
-  scope: Recipe['scope'],
-) {
-  if (scope === 'full' || transcripts.length === 0) {
-    return transcripts.map((item) => item.text).join('\n');
-  }
-
-  const latest = transcripts[transcripts.length - 1]?.audio_start_time ?? 0;
-  const cutoff = latest - 300;
-  return transcripts
-    .filter((item) => item.audio_start_time == null || item.audio_start_time >= cutoff)
-    .map((item) => item.text)
-    .join('\n');
-}
-
 export default function PageContent({
   meeting,
   summaryData,
@@ -126,7 +110,7 @@ export default function PageContent({
   const [chatInput, setChatInput] = useState('');
   const { modelConfig, setModelConfig } = useConfig();
   const templates = useTemplates();
-  const { messages, isLoading: isChatLoading, send, clearMessages } = useLiveMeetingChat();
+  const { messages, isLoading: isChatLoading, send, clearMessages } = useLiveMeetingChat(meeting.id);
 
   const meetingData = useMeetingData({ meeting, summaryData, onMeetingUpdated });
   const copyOperations = useCopyOperations({
@@ -250,24 +234,14 @@ export default function PageContent({
 
   const handleRecipe = (recipe: Recipe) => {
     setIsAiComposerOpen(true);
-    const transcriptContext = buildMeetingContext(getScopedTranscript(meetingData.transcripts, recipe.scope), notesText);
-    if (!transcriptContext.trim()) {
-      toast.error('Add notes or record a transcript before asking about this meeting.');
-      return;
-    }
-    void send(recipe.prompt, transcriptContext);
+    void send(recipe.prompt, () => loadMeetingAnswerContext(meeting.id, notesText, recipe.scope));
   };
 
   const handleSendChat = () => {
     const userPrompt = chatInput.trim();
-    const transcriptContext = buildMeetingContext(meetingData.transcripts.map((item: any) => item.text).join('\n'), notesText);
     if (!userPrompt) return;
-    if (!transcriptContext) {
-      toast.error('Add notes or record a transcript before asking about this meeting.');
-      return;
-    }
     setIsAiComposerOpen(true);
-    void send(userPrompt, transcriptContext);
+    void send(userPrompt, () => loadMeetingAnswerContext(meeting.id, notesText));
     setChatInput('');
   };
 
