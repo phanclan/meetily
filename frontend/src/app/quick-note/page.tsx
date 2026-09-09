@@ -173,6 +173,9 @@ export default function QuickNotePage() {
   const recordingState = useRecordingState();
   const titleRef = useRef<HTMLTextAreaElement | null>(null);
   const summaryRef = useRef<BlockNoteSummaryViewRef>(null);
+  const [isSummaryDirty, setIsSummaryDirty] = useState(false);
+  const [isSummarySaving, setIsSummarySaving] = useState(false);
+  const [summarySaveError, setSummarySaveError] = useState(false);
   const openModelSettingsRef = useRef<(() => void) | null>(null);
   const {
     currentMeetingId,
@@ -474,7 +477,9 @@ export default function QuickNotePage() {
         meetingId: savedMeetingId,
         summary: formattedSummary,
       });
+      setSummarySaveError(false);
     } catch (error) {
+      setSummarySaveError(true);
       console.error('Failed to save quick note summary:', error);
       toast.error('Failed to save summary');
       throw error;
@@ -493,6 +498,7 @@ export default function QuickNotePage() {
     },
     setAiSummary,
     onOpenModelSettings: handleOpenModelSettings,
+    beforeGenerate: async () => { await summaryRef.current?.saveSummary(); },
   });
 
   const isSummaryGenerating =
@@ -825,7 +831,7 @@ export default function QuickNotePage() {
                     <MetaDot />
                     <InlineMeta>{formatSavedAt(updatedAt)}</InlineMeta>
                     <MetaDot />
-                    <NoteSaveStatus saving={isSaving || titleSave.status === 'saving'} failed={saveError || titleSave.status === 'error'} onRetry={() => { void Promise.all([flushPendingSave(true), titleSave.flush()]).catch(() => {}); }} />
+                    <NoteSaveStatus saving={isSaving || isSummarySaving || titleSave.status === 'saving'} dirty={isSummaryDirty} failed={saveError || summarySaveError || titleSave.status === 'error'} onRetry={() => { void Promise.all([flushPendingSave(true), titleSave.flush(), summaryRef.current?.saveSummary()]).catch(() => {}); }} />
                     <MetaDot />
                     <InlineMeta>
                       {savedTranscriptCount} transcript segment{savedTranscriptCount === 1 ? '' : 's'} saved
@@ -883,6 +889,9 @@ export default function QuickNotePage() {
                         ref={summaryRef}
                         summaryData={aiSummary}
                         onSave={handleSaveSummary}
+                        autoSave
+                        onDirtyChange={setIsSummaryDirty}
+                        onSavingChange={setIsSummarySaving}
                         onSummaryChange={(summary) => setAiSummary(summary)}
                         status={summaryGeneration.summaryStatus}
                         error={summaryGeneration.summaryError}

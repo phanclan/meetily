@@ -23,6 +23,7 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
   const [aiSummary, setAiSummary] = useState<Summary | null>(summaryData);
   const [isSaving, setIsSaving] = useState(false);
   const [isSummaryDirty, setIsSummaryDirty] = useState(false);
+  const [isSummarySaving, setIsSummarySaving] = useState(false);
   const [summarySaveError, setSummarySaveError] = useState(false);
   const [, setError] = useState<string>('');
 
@@ -166,6 +167,7 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
     aiSummary,
     isSaving,
     isSummaryDirty,
+    isSummarySaving,
     summarySaveError,
     titleSave,
     blockNoteSummaryRef,
@@ -175,6 +177,7 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
     setIsEditingTitle,
     setAiSummary,
     setIsSummaryDirty,
+    setIsSummarySaving,
 
     // Handlers
     handleTitleChange,

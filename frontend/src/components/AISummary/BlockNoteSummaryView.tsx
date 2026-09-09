@@ -26,6 +26,8 @@ interface BlockNoteSummaryViewProps {
     created_at: string;
   };
   onDirtyChange?: (isDirty: boolean) => void;
+  autoSave?: boolean;
+  onSavingChange?: (isSaving: boolean) => void;
 }
 
 export interface BlockNoteSummaryViewRef {
@@ -73,7 +75,9 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
   error = null,
   onRegenerateSummary,
   meeting,
-  onDirtyChange
+  onDirtyChange,
+  autoSave = false,
+  onSavingChange,
 }, ref) => {
   const { format, data } = detectSummaryFormat(summaryData);
   const [isDirty, setIsDirty] = useState(false);
@@ -81,6 +85,10 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
   const [isSaving, setIsSaving] = useState(false);
   const isContentLoaded = useRef(false);
   const editRevision = useRef(0);
+  const writes = useRef<Promise<void>>(Promise.resolve());
+  const queuedRevision = useRef(-1);
+  const latestBlocks = useRef<Block[]>([]);
+  const isGenerating = ['processing', 'summarizing', 'regenerating'].includes(status);
 
   // Create BlockNote editor for markdown parsing
   const editor = useCreateBlockNote({
@@ -122,14 +130,43 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
     }
   }, [format, data?.summary_json]);
 
+  const persistBlocks = useCallback((blocks: Block[], revision: number) => {
+    if (!onSave) return Promise.resolve();
+    queuedRevision.current = revision;
+    setIsSaving(true);
+    // Capture this edit and its save callback before navigation can unmount the editor.
+    // Serialize conversion and persistence so an older edit cannot overwrite a newer one.
+    const write = writes.current.catch(() => {}).then(async () => {
+      // A queued newer snapshot contains these edits too; avoid redundant full-document writes.
+      if (queuedRevision.current !== revision) return;
+      const result = await blocksToMarkdownSafely(editor, blocks, {
+        source: 'BlockNoteSummaryView.save',
+      });
+      await onSave({
+        summary_json: blocks as unknown as BlockNoteBlock[],
+        ...(result.markdown !== undefined ? { markdown: result.markdown } : {}),
+      });
+      if (editRevision.current === revision) setIsDirty(false);
+    }).catch(error => {
+      if (queuedRevision.current === revision) queuedRevision.current = -1;
+      throw error;
+    }).finally(() => {
+      if (queuedRevision.current === revision || queuedRevision.current === -1) setIsSaving(false);
+    });
+    writes.current = write;
+    return write;
+  }, [editor, onSave]);
+
   const handleEditorChange = useCallback((blocks: Block[]) => {
     // Only set dirty flag if content has finished loading
     if (isContentLoaded.current) {
       setCurrentBlocks(blocks);
+      latestBlocks.current = blocks;
       editRevision.current += 1;
       setIsDirty(true);
+      if (autoSave) void persistBlocks(blocks, editRevision.current).catch(() => {});
     }
-  }, []);
+  }, [autoSave, persistBlocks]);
 
   // Notify parent of dirty state changes
   useEffect(() => {
@@ -138,38 +175,13 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
     }
   }, [isDirty, onDirtyChange]);
 
+  useEffect(() => { onSavingChange?.(isSaving); }, [isSaving, onSavingChange]);
+
   const handleSave = useCallback(async () => {
     if (!onSave || !isDirty) return;
-
-    setIsSaving(true);
-    const savingRevision = editRevision.current;
-    try {
-      console.log('💾 Saving BlockNote content...');
-
-      // Generate markdown from current blocks; preserve BlockNote JSON even if markdown conversion fails.
-      const markdownResult = await blocksToMarkdownSafely(editor, currentBlocks, {
-        source: 'BlockNoteSummaryView.handleSave',
-      });
-
-      const saveData: { markdown?: string; summary_json?: BlockNoteBlock[] } = {
-        summary_json: currentBlocks as unknown as BlockNoteBlock[]
-      };
-
-      if (markdownResult.markdown !== undefined) {
-        saveData.markdown = markdownResult.markdown;
-      }
-
-      await onSave(saveData);
-
-      if (editRevision.current === savingRevision) setIsDirty(false);
-      console.log('✅ Save successful');
-    } catch (err) {
-      console.error('❌ Save failed:', err);
-      throw err;
-    } finally {
-      setIsSaving(false);
-    }
-  }, [onSave, isDirty, currentBlocks, editor]);
+    if (queuedRevision.current === editRevision.current) return writes.current;
+    await persistBlocks(latestBlocks.current, editRevision.current);
+  }, [onSave, isDirty, persistBlocks]);
 
   // Expose methods to parent via ref
   useImperativeHandle(ref, () => ({
@@ -251,7 +263,7 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
               console.log('📝 Editor blocks changed:', blocks.length);
               handleEditorChange(blocks);
             }}
-            editable={true}
+            editable={!isGenerating}
           />
         </div>
       </div>
@@ -266,7 +278,7 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
         <div className="w-full">
           <BlockNoteView
             editor={editor}
-            editable={true}
+            editable={!isGenerating}
             onChange={() => {
               if (isContentLoaded.current) {
                 handleEditorChange(editor.document);

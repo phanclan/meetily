@@ -177,6 +177,7 @@ export default function PageContent({
     updateMeetingTitle: meetingData.updateMeetingTitle,
     setAiSummary: meetingData.setAiSummary,
     onOpenModelSettings: handleOpenModelSettings,
+    beforeGenerate: async () => { await meetingData.blockNoteSummaryRef.current?.saveSummary(); },
   });
 
   useEffect(() => {
@@ -313,8 +314,8 @@ export default function PageContent({
                 <DropdownMenuItem onSelect={meetingOperations.handleOpenMeetingFolder}><FolderOpen className="mr-2 h-4 w-4" />Open recording folder</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-            {activeView === 'summary' && <Button variant="outline" disabled={meetingData.isSaving || !meetingData.isSummaryDirty} className="rounded-md border-stone-200/75 text-stone-600 shadow-none" onClick={meetingData.saveAllChanges}>
-              {meetingData.isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            {activeView === 'summary' && <Button variant="outline" disabled={meetingData.isSaving || meetingData.isSummarySaving || !meetingData.isSummaryDirty} className="rounded-md border-stone-200/75 text-stone-600 shadow-none" onClick={meetingData.saveAllChanges}>
+              {meetingData.isSaving || meetingData.isSummarySaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
               Save enhanced notes
             </Button>}
           </div>
@@ -340,7 +341,7 @@ export default function PageContent({
                   <MetaDot />
                   <InlineMeta>{transcriptCount} transcript segment{transcriptCount === 1 ? '' : 's'}</InlineMeta>
                   <MetaDot />
-                  <NoteSaveStatus saving={notes.isSaving || meetingData.isSaving || meetingData.titleSave.status === 'saving'} dirty={meetingData.isSummaryDirty} failed={notes.saveError || meetingData.summarySaveError || meetingData.titleSave.status === 'error'} onRetry={() => { if (meetingData.summarySaveError) void meetingData.saveAllChanges(); else void flushNoteChanges().catch(() => {}); }} />
+                  <NoteSaveStatus saving={notes.isSaving || meetingData.isSaving || meetingData.isSummarySaving || meetingData.titleSave.status === 'saving'} dirty={meetingData.isSummaryDirty} failed={notes.saveError || meetingData.summarySaveError || meetingData.titleSave.status === 'error'} onRetry={() => { if (meetingData.summarySaveError) void meetingData.saveAllChanges(); else void flushNoteChanges().catch(() => {}); }} />
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3">
@@ -404,6 +405,8 @@ export default function PageContent({
                         onSave={meetingData.handleSaveSummary}
                         onSummaryChange={meetingData.handleSummaryChange}
                         onDirtyChange={meetingData.setIsSummaryDirty}
+                        autoSave
+                        onSavingChange={meetingData.setIsSummarySaving}
                         status={summaryGeneration.summaryStatus}
                         error={summaryGeneration.summaryError}
                         onRegenerateSummary={() => void summaryGeneration.handleRegenerateSummary()}

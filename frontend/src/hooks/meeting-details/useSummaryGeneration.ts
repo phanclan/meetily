@@ -61,6 +61,7 @@ interface UseSummaryGenerationProps {
   updateMeetingTitle: (title: string) => void;
   setAiSummary: (summary: Summary | null) => void;
   onOpenModelSettings?: () => void;
+  beforeGenerate?: () => Promise<void>;
 }
 
 export function useSummaryGeneration({
@@ -74,6 +75,7 @@ export function useSummaryGeneration({
   updateMeetingTitle,
   setAiSummary,
   onOpenModelSettings,
+  beforeGenerate,
 }: UseSummaryGenerationProps) {
   const [summaryStatus, setSummaryStatus] = useState<SummaryStatus>('idle');
   const [summaryError, setSummaryError] = useState<string | null>(null);
@@ -116,6 +118,7 @@ export function useSummaryGeneration({
     setSummaryError(null);
 
     try {
+      await beforeGenerate?.();
       if (!transcriptText.trim()) {
         throw new Error('No transcript text available. Please add some text first.');
       }
@@ -400,6 +403,7 @@ export function useSummaryGeneration({
     setAiSummary,
     updateMeetingTitle,
     onMeetingUpdated,
+    beforeGenerate,
   ]);
 
   // Helper function to fetch ALL transcripts for summary generation

@@ -663,7 +663,7 @@ for (const title of ['Custom title', '+ New Call']) {
   });
 }
 
-async function enhancedEditorFixture(onSave, summaryData = { summary_json: blocks }) {
+async function enhancedEditorFixture(onSave, summaryData = { summary_json: blocks }, autoSave = false) {
   const slots = []; let cursor = 0, effects = [];
   const ref = { current: null };
   const editor = {
@@ -676,7 +676,15 @@ async function enhancedEditorFixture(onSave, summaryData = { summary_json: block
     useState: initial => { const i = cursor++; if (!(i in slots)) slots[i] = initial; return [slots[i], value => { slots[i] = value; }]; },
     useRef: initial => { const i = cursor++; return slots[i] ||= { current: initial }; },
     useCallback: fn => fn,
-    useEffect: (fn, deps) => { const i = cursor++; if (!slots[i] || deps.some((dep, j) => dep !== slots[i][j])) { slots[i] = deps; effects.push(fn); } },
+    useEffect: (fn, deps) => {
+      const i = cursor++;
+      if (!slots[i] || deps.some((dep, j) => dep !== slots[i].deps[j])) {
+        const previous = slots[i];
+        const effect = { deps };
+        slots[i] = effect;
+        effects.push(() => { previous?.cleanup?.(); effect.cleanup = fn(); });
+      }
+    },
     useImperativeHandle: (target, create) => { target.current = create(); },
     forwardRef: render => render,
   };
@@ -689,12 +697,13 @@ async function enhancedEditorFixture(onSave, summaryData = { summary_json: block
     '@blocknote/shadcn/style.css': {},
   });
   const { BlockNoteSummaryView } = load(path.join(root, 'src/components/AISummary/BlockNoteSummaryView.tsx'));
-  const props = { summaryData, onSave };
+  const props = { summaryData, onSave, autoSave };
   let tree;
   function render() { cursor = 0; effects = []; tree = BlockNoteSummaryView(props, ref); effects.forEach(fn => fn()); }
   render(); await new Promise(setImmediate);
   return {
     render, ref,
+    unmount() { slots.forEach(slot => slot?.cleanup?.()); },
     async replaceSummary(next) { props.summaryData = next; render(); await new Promise(setImmediate); render(); },
     edit(value) { tree.props.children.props.children.props.onChange(value); render(); },
   };
@@ -744,3 +753,77 @@ test('edits made during an enhanced-note save remain unsaved afterwards', async 
   finish(); await saving; f.render();
   assert.equal(f.ref.current.isDirty, true);
 });
+
+test('enhanced autosave orders writes and coalesces queued snapshots to the newest edit', async () => {
+  let finish;
+  const pending = new Promise(resolve => { finish = resolve; });
+  const saved = [];
+  const f = await enhancedEditorFixture(data => {
+    saved.push(data.summary_json[0].id);
+    return saved.length === 1 ? pending : Promise.resolve();
+  }, { summary_json: blocks }, true);
+  f.edit([{ ...blocks[0], id: 'first' }]);
+  await new Promise(setImmediate);
+  f.edit([{ ...blocks[0], id: 'second' }]);
+  f.edit([{ ...blocks[0], id: 'latest' }]);
+  assert.deepEqual(saved, ['first']);
+  assert.equal(f.ref.current.isDirty, true);
+  finish();
+  await new Promise(setImmediate); f.render();
+  assert.deepEqual(saved, ['first', 'latest']);
+  assert.equal(f.ref.current.isDirty, false);
+});
+
+test('an enhanced edit continues saving after navigation unmounts the editor', async () => {
+  const saved = [];
+  const f = await enhancedEditorFixture(data => { saved.push(data.summary_json); }, { summary_json: blocks }, true);
+  f.edit(blocks);
+  f.unmount();
+  await new Promise(setImmediate);
+  assert.deepEqual(saved, [blocks]);
+});
+
+test('failed enhanced autosave stays dirty and the manual save retries it', async () => {
+  let attempts = 0;
+  const f = await enhancedEditorFixture(async () => {
+    if (++attempts === 1) throw new Error('Synthetic persistence failure');
+  }, { summary_json: blocks }, true);
+  f.edit(blocks);
+  await new Promise(setImmediate); f.render();
+  assert.equal(f.ref.current.isDirty, true);
+  await f.ref.current.saveSummary(); f.render();
+  assert.equal(attempts, 2);
+  assert.equal(f.ref.current.isDirty, false);
+});
+
+for (const fails of [false, true]) {
+  test(`enhancement waits for pending edits and ${fails ? 'stops on save failure' : 'starts after persistence'}`, async () => {
+    let resolveSave, rejectSave;
+    const pending = new Promise((resolve, reject) => { resolveSave = resolve; rejectSave = reject; });
+    const calls = [];
+    const load = loader({
+      react: quietReact,
+      sonner: { toast: { error: noop, warning: noop, info: noop, success: noop } },
+      '@/components/Sidebar/SidebarProvider': { useSidebar: () => ({ startSummaryPolling: noop }) },
+      '@tauri-apps/api/core': { invoke: async cmd => {
+        calls.push(cmd);
+        return cmd === 'api_get_meeting_transcripts' ? { total_count: 0, transcripts: [] } : { process_id: 'synthetic' };
+      } },
+      '@/lib/analytics': { default: new Proxy({}, { get: () => async () => {} }), __esModule: true },
+      '@/lib/utils': { isOllamaNotInstalledError: () => false },
+      '@/lib/summary-language-preferences': { readMeetingSummaryLanguage: async () => ({ language: 'en' }) },
+    });
+    const hook = load('@/hooks/meeting-details/useSummaryGeneration').useSummaryGeneration({
+      meeting: { id: 'synthetic', title: 'Saved title' }, transcripts: [], notesText: 'Synthetic note.',
+      modelConfig: { provider: 'ollama', model: 'synthetic' }, isModelConfigLoading: false,
+      selectedTemplate: 'standard_meeting', updateMeetingTitle: noop, setAiSummary: noop,
+      beforeGenerate: () => pending,
+    });
+    const generation = hook.handleRegenerateSummary();
+    await new Promise(setImmediate);
+    assert.ok(!calls.includes('api_process_transcript'));
+    if (fails) rejectSave(new Error('Synthetic save failed')); else resolveSave();
+    await generation;
+    assert.equal(calls.includes('api_process_transcript'), !fails);
+  });
+}
