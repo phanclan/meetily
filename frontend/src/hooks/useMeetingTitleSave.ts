@@ -1,9 +1,10 @@
 import { useCallback, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { createWriteQueue } from '@/lib/pendingWrites';
 
 // Serialize writes so a slower earlier title cannot overwrite the latest edit.
 export function useMeetingTitleSave(meetingId: string | null) {
-  const writes = useRef<Promise<void>>(Promise.resolve());
+  const writes = createWriteQueue(meetingId ? `title:${meetingId}` : undefined);
   const pending = useRef<{ meetingId: string; title: string } | null>(null);
   const [status, setStatus] = useState<'saved' | 'saving' | 'error'>('saved');
 
@@ -12,32 +13,23 @@ export function useMeetingTitleSave(meetingId: string | null) {
     const edit = { meetingId, title: title.trim() || 'New note' };
     pending.current = edit;
     setStatus('saving');
-    const write = writes.current.catch(() => {}).then(async () => {
-      await invoke('api_save_meeting_title', edit);
-    });
-    writes.current = write;
-    return write.then(() => {
-      if (pending.current === edit) {
-        pending.current = null;
-        setStatus('saved');
+    return writes.enqueue(async () => {
+      try {
+        await invoke('api_save_meeting_title', edit);
+        if (pending.current === edit) {
+          pending.current = null;
+          setStatus('saved');
+        }
+      } catch (error) {
+        if (pending.current === edit) setStatus('error');
+        throw error;
       }
-    }, error => {
-      if (pending.current === edit) setStatus('error');
-      throw error;
     });
-  }, [meetingId]);
+  }, [meetingId, writes]);
 
   const flush = useCallback(async () => {
-    try {
-      await writes.current;
-    } catch {
-      if (pending.current?.meetingId === meetingId) {
-        await save(pending.current.title);
-      } else {
-        throw new Error('The meeting title could not be saved.');
-      }
-    }
-  }, [meetingId, save]);
+    await writes.flush();
+  }, [writes]);
 
   return { save, flush, status };
 }

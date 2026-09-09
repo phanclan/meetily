@@ -703,6 +703,7 @@ async function enhancedEditorFixture(onSave, summaryData = { summary_json: block
   render(); await new Promise(setImmediate);
   return {
     render, ref,
+    flushPendingWrites: load('@/lib/pendingWrites').flushPendingWrites,
     unmount() { slots.forEach(slot => slot?.cleanup?.()); },
     async replaceSummary(next) { props.summaryData = next; render(); await new Promise(setImmediate); render(); },
     edit(value) { tree.props.children.props.children.props.onChange(value); render(); },
@@ -827,3 +828,184 @@ for (const fails of [false, true]) {
     assert.equal(calls.includes('api_process_transcript'), !fails);
   });
 }
+
+test('quit flush materializes delayed notes and waits for outstanding writes', async () => {
+  const { createWriteQueue, registerBeforeQuit, flushPendingWrites } = loader()('@/lib/pendingWrites');
+  const events = [];
+  let finish;
+  const pending = new Promise(resolve => { finish = resolve; });
+  const queue = createWriteQueue();
+  const unsubscribe = registerBeforeQuit(() => queue.enqueue(async () => { await pending; events.push('saved'); }));
+  const quit = flushPendingWrites().then(() => events.push('flushed'));
+  await new Promise(setImmediate);
+  assert.deepEqual(events, []);
+  finish(); await quit; unsubscribe();
+  assert.deepEqual(events, ['saved', 'flushed']);
+});
+
+test('quitting flushes actual meeting-note edits before the two-second debounce fires', async () => {
+  const effects = [];
+  const timers = new Map(); let nextTimer = 0;
+  const saved = [];
+  let finishSave;
+  const pending = new Promise(resolve => { finishSave = resolve; });
+  const load = loader({
+    react: { ...quietReact, useEffect: fn => { effects.push(fn); } },
+    sonner: { toast: { error: noop } },
+    '@/meetnola/ipc': {
+      getMeetingNotes: async () => ({ notes_json: '[]' }),
+      saveMeetingNotes: async data => { saved.push(data); await pending; },
+    },
+  }, {
+    setTimeout: fn => { const id = ++nextTimer; timers.set(id, fn); return id; },
+    clearTimeout: id => timers.delete(id),
+  });
+  const hook = load('@/hooks/useMeetingNotes').useMeetingNotes('synthetic-quit');
+  const cleanups = effects.map(fn => fn());
+  await new Promise(setImmediate);
+  hook.saveNotes(blocks);
+  assert.equal(timers.size, 1);
+  assert.deepEqual(saved, []);
+  let finished = false;
+  const quitting = load('@/lib/pendingWrites').flushPendingWrites().then(() => { finished = true; });
+  await new Promise(setImmediate);
+  assert.equal(timers.size, 0);
+  assert.equal(finished, false);
+  assert.equal(saved[0].meetingId, 'synthetic-quit');
+  assert.deepEqual(JSON.parse(saved[0].notesJson), blocks);
+  finishSave(); await quitting;
+  assert.equal(finished, true);
+  cleanups.forEach(fn => fn?.());
+});
+
+test('quit retries a failed write retained after its editor has gone away', async () => {
+  const { createWriteQueue, flushPendingWrites } = loader()('@/lib/pendingWrites');
+  let attempts = 0;
+  await assert.rejects(createWriteQueue().enqueue(async () => {
+    if (++attempts === 1) throw new Error('Synthetic storage unavailable');
+  }));
+  await flushPendingWrites();
+  assert.equal(attempts, 2);
+  await flushPendingWrites();
+  assert.equal(attempts, 2, 'successful writes must leave the pending registry');
+});
+
+test('quit propagates persistent write failures and allows a later retry', async () => {
+  const { createWriteQueue, flushPendingWrites } = loader()('@/lib/pendingWrites');
+  let fail = true;
+  await assert.rejects(createWriteQueue().enqueue(async () => { if (fail) throw new Error('Synthetic disk failure'); }));
+  await assert.rejects(flushPendingWrites(), /disk failure/);
+  fail = false;
+  await flushPendingWrites();
+});
+
+test('quit drains writes queued while another write is still finishing', async () => {
+  const { createWriteQueue, flushPendingWrites } = loader()('@/lib/pendingWrites');
+  const events = [];
+  let finish;
+  const pending = new Promise(resolve => { finish = resolve; });
+  void createWriteQueue().enqueue(async () => {
+    await pending;
+    void createWriteQueue().enqueue(async () => { events.push('later write'); });
+    events.push('first write');
+  });
+  const flush = flushPendingWrites().then(() => events.push('flushed'));
+  await new Promise(setImmediate); finish(); await flush;
+  assert.deepEqual(events, ['first write', 'later write', 'flushed']);
+});
+
+test('a successful newer write supersedes an older failed write when quitting', async () => {
+  const { createWriteQueue, flushPendingWrites } = loader()('@/lib/pendingWrites');
+  const queue = createWriteQueue(); let failedAttempts = 0;
+  const first = queue.enqueue(async () => { failedAttempts++; throw new Error('old edit failed'); });
+  const latest = queue.enqueue(async () => {});
+  await Promise.allSettled([first, latest]);
+  await flushPendingWrites();
+  assert.equal(failedAttempts, 1);
+});
+
+test('reopening a meeting shares its save order and supersedes failed edits from the old editor', async () => {
+  const { createWriteQueue, flushPendingWrites } = loader()('@/lib/pendingWrites');
+  const firstEditor = createWriteQueue('summary:synthetic');
+  const nextEditor = createWriteQueue('summary:synthetic');
+  assert.equal(firstEditor, nextEditor);
+  let staleAttempts = 0;
+  await assert.rejects(firstEditor.enqueue(async () => { staleAttempts++; throw new Error('old failure'); }));
+  await nextEditor.enqueue(async () => {});
+  await flushPendingWrites();
+  assert.equal(staleAttempts, 1);
+});
+
+test('quit retries the actual enhanced-note snapshot after a failed autosave and unmount', async () => {
+  let attempts = 0;
+  const saved = [];
+  const f = await enhancedEditorFixture(async data => {
+    if (++attempts === 1) throw new Error('Synthetic disk busy');
+    saved.push(data.summary_json);
+  }, { summary_json: blocks }, true);
+  f.edit(blocks);
+  await new Promise(setImmediate);
+  f.unmount();
+  await f.flushPendingWrites();
+  assert.equal(attempts, 2);
+  assert.deepEqual(saved, [blocks]);
+});
+
+function quitFixture(flush, complete = async () => {}, timeoutMs) {
+  const events = [];
+  const { createQuitHandler } = loader({}, { setTimeout, clearTimeout })('@/lib/appQuit');
+  const handler = createQuitHandler({
+    flush,
+    complete: async id => { await complete(id); events.push(`exit:${id}`); },
+    cancel: async id => { events.push(`cancel:${id}`); },
+    setBusy: value => events.push(value ? 'busy' : 'idle'),
+    reportError: () => events.push('error'),
+    timeoutMs,
+  });
+  return { handler, events };
+}
+
+test('quit acknowledges only after saving and ignores duplicate quit requests', async () => {
+  let finish;
+  const pending = new Promise(resolve => { finish = resolve; });
+  const { handler, events } = quitFixture(() => pending);
+  const request = handler.request(7);
+  await handler.request(7);
+  assert.deepEqual(events, ['busy']);
+  finish(); await request;
+  assert.deepEqual(events, ['busy', 'exit:7', 'idle']);
+});
+
+test('quit stays open after a save failure and succeeds on the next request', async () => {
+  let fail = true;
+  const { handler, events } = quitFixture(async () => { if (fail) throw new Error('save failed'); });
+  await handler.request(1);
+  assert.deepEqual(events, ['busy', 'cancel:1', 'error', 'idle']);
+  fail = false; await handler.request(2);
+  assert.deepEqual(events.slice(-3), ['busy', 'exit:2', 'idle']);
+});
+
+test('native refusal to quit an active recording keeps the app open', async () => {
+  const { handler, events } = quitFixture(async () => {}, async () => { throw new Error('Stop recording first'); });
+  await handler.request(1);
+  assert.deepEqual(events, ['busy', 'cancel:1', 'error', 'idle']);
+});
+
+test('quit timeout stays open even when the late save eventually completes', async () => {
+  let finish;
+  const pending = new Promise(resolve => { finish = resolve; });
+  const { handler, events } = quitFixture(() => pending, undefined, 5);
+  await handler.request(1);
+  finish(); await new Promise(setImmediate);
+  assert.deepEqual(events, ['busy', 'cancel:1', 'error', 'idle']);
+});
+
+test('disposing the frontend quit handler invalidates an unfinished request', async () => {
+  let finish;
+  const pending = new Promise(resolve => { finish = resolve; });
+  const { handler, events } = quitFixture(() => pending);
+  const request = handler.request(1);
+  handler.dispose(); finish(); await request;
+  assert.ok(events.includes('cancel:1'));
+  assert.ok(!events.some(event => event.startsWith('exit:')));
+});

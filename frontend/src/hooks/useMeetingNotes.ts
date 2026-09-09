@@ -5,6 +5,7 @@ import { blocksToPlainText, parseStoredMeetingNotesJson, plainTextToBlocks } fro
 
 import { isLiveMeetingId, readLiveMeetingNotes, writeLiveMeetingNotes } from '@/lib/liveMeetingNotes';
 import { toast } from 'sonner';
+import { createWriteQueue, registerBeforeQuit } from '@/lib/pendingWrites';
 
 const DEBOUNCE_MS = 2000;
 
@@ -20,7 +21,6 @@ export function useMeetingNotes(meetingId: string | null) {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestBlocksRef = useRef<Block[]>([]);
   const hasPendingSaveRef = useRef(false);
-  const writesRef = useRef<Promise<void>>(Promise.resolve());
 
   const flushSave = useCallback(async (
     blocksToSave: Block[],
@@ -36,17 +36,17 @@ export function useMeetingNotes(meetingId: string | null) {
       setIsSaving(true);
     }
     try {
-      const write = writesRef.current.catch(() => {}).then(() => saveMeetingNotes({
-        meetingId: meetingIdToSave,
-        notesMarkdown: blocksToPlainText(blocksToSave),
-        notesJson: JSON.stringify(blocksToSave),
-      }));
-      writesRef.current = write;
-      await write;
-      if (latestBlocksRef.current === blocksToSave) {
-        hasPendingSaveRef.current = false;
-        setSaveError(false);
-      }
+      await createWriteQueue(`notes:${meetingIdToSave}`).enqueue(async () => {
+        await saveMeetingNotes({
+          meetingId: meetingIdToSave,
+          notesMarkdown: blocksToPlainText(blocksToSave),
+          notesJson: JSON.stringify(blocksToSave),
+        });
+        if (latestBlocksRef.current === blocksToSave) {
+          hasPendingSaveRef.current = false;
+          setSaveError(false);
+        }
+      });
     } catch (err) {
       console.error('Failed to save notes:', err);
       setSaveError(true);
@@ -161,6 +161,8 @@ export function useMeetingNotes(meetingId: string | null) {
 
     await flushSave(latestBlocksRef.current, meetingId, trackState);
   }, [flushSave, meetingId]);
+
+  useEffect(() => registerBeforeQuit(() => flushPendingSave(true)), [flushPendingSave]);
 
   useEffect(() => {
     return () => {

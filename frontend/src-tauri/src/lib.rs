@@ -39,6 +39,7 @@ pub(crate) use perf_trace;
 // Declare audio module
 pub mod analytics;
 pub mod api;
+mod app_quit;
 pub mod audio;
 pub mod config;
 pub mod console_utils;
@@ -180,6 +181,7 @@ fn restore_main_window_state<R: Runtime>(window: &WebviewWindow<R>) {
 
 #[tauri::command]
 fn frontend_bootstrap_complete<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    app.state::<app_quit::QuitCoordinator>().frontend_ready();
     let window = app
         .get_webview_window("main")
         .ok_or_else(|| "Main window not found".to_string())?;
@@ -560,6 +562,7 @@ pub fn run() {
             None::<notifications::manager::NotificationManager<tauri::Wry>>,
         )) as NotificationManagerState<tauri::Wry>)
         .manage(state::MeetingSessionState::default())
+        .manage(app_quit::QuitCoordinator::default())
         .manage(audio::init_system_audio_state())
         .manage(summary::summary_engine::ModelManagerState(Arc::new(tokio::sync::Mutex::new(None))))
         .setup(|_app| {
@@ -696,6 +699,9 @@ pub fn run() {
             // Meetnola lifecycle (call detection + optional automation HTTP API)
             #[cfg(feature = "meetnola")]
             meetnola::start_after_database(_app.handle());
+
+            #[cfg(target_os = "macos")]
+            app_quit::install_quit_menu(_app.handle())?;
 
             Ok(())
         })
@@ -925,6 +931,8 @@ pub fn run() {
             // Onboarding commands
             onboarding::get_onboarding_status,
             frontend_bootstrap_complete,
+            app_quit::complete_app_quit,
+            app_quit::cancel_app_quit,
             get_build_info,
             onboarding::save_onboarding_status_cmd,
             onboarding::reset_onboarding_status_cmd,
@@ -947,6 +955,15 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|_app_handle, event| {
             match event {
+                tauri::RunEvent::ExitRequested { api, .. } => {
+                    if let Some(request_id) = _app_handle.state::<app_quit::QuitCoordinator>().request() {
+                        api.prevent_exit();
+                        tray::focus_main_window(_app_handle);
+                        if let Err(error) = _app_handle.emit("app-quit-requested", request_id) {
+                            log::error!("Could not request frontend save before quit: {}", error);
+                        }
+                    }
+                }
                 #[cfg(target_os = "macos")]
                 tauri::RunEvent::Reopen { .. } => {
                     tray::focus_main_window(_app_handle);

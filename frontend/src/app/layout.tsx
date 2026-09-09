@@ -9,7 +9,7 @@ import MainContent from '@/components/MainContent'
 import AnalyticsProvider from '@/components/AnalyticsProvider'
 import { Toaster, toast } from 'sonner'
 import "sonner/dist/styles.css"
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { listen, UnlistenFn } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import {
@@ -36,6 +36,8 @@ import { loadCallDetectionPreference } from '@/lib/callDetectionSettings'
 import { safelyUnlisten } from '@/lib/tauriEvents'
 import { BuildIdentityBadge } from '@/components/BuildIdentityBadge'
 import { createQuickNotePath } from '@/lib/quickNoteRoute'
+import { flushPendingWrites } from '@/lib/pendingWrites'
+import { createQuitHandler } from '@/lib/appQuit'
 
 type RecordingStopResultPayload = {
   status: 'complete' | 'partial'
@@ -89,6 +91,7 @@ export default function RootLayout({
   const router = useRouter()
   const [startupPhase, setStartupPhase] = useState<'checking' | 'ready'>('checking')
   const [showOnboarding, setShowOnboarding] = useState(false)
+  const quitDialog = useRef<HTMLDialogElement>(null)
 
   // Import audio state
   const [showDropOverlay, setShowDropOverlay] = useState(false)
@@ -165,6 +168,17 @@ export default function RootLayout({
 
     let cancelled = false
     let readyTimer: ReturnType<typeof setTimeout> | undefined
+    let unlistenQuit: UnlistenFn | undefined
+    const quit = createQuitHandler({
+      flush: flushPendingWrites,
+      complete: requestId => invoke('complete_app_quit', { requestId }),
+      cancel: requestId => invoke('cancel_app_quit', { requestId }),
+      setBusy: busy => {
+        if (busy && !quitDialog.current?.open) quitDialog.current?.showModal()
+        else if (!busy) quitDialog.current?.close()
+      },
+      reportError: error => toast.error('App remains open', { description: String(error), duration: 10000 }),
+    })
 
     const notifyFrontendReady = async () => {
       await new Promise<void>((resolve) => {
@@ -176,6 +190,8 @@ export default function RootLayout({
       }
 
       try {
+        unlistenQuit = await listen<number>('app-quit-requested', event => { void quit.request(event.payload) })
+        if (cancelled) { unlistenQuit(); return }
         await invoke('frontend_bootstrap_complete')
       } catch (error) {
         console.error('[Layout] Failed to notify Rust that frontend is ready:', error)
@@ -186,6 +202,8 @@ export default function RootLayout({
 
     return () => {
       cancelled = true
+      quit.dispose()
+      unlistenQuit?.()
       if (readyTimer) {
         clearTimeout(readyTimer)
       }
@@ -541,6 +559,10 @@ export default function RootLayout({
         </AnalyticsProvider>
 
         <Toaster position="bottom-center" richColors closeButton />
+        <dialog ref={quitDialog} tabIndex={-1} onCancel={event => event.preventDefault()} aria-labelledby="quit-title" aria-describedby="quit-description" className="rounded-lg border border-stone-200 bg-white p-6 text-stone-900 shadow-lg backdrop:bg-stone-900/20">
+          <h2 id="quit-title" className="text-base font-semibold">Saving before quitting…</h2>
+          <p id="quit-description" className="mt-2 text-sm text-stone-600" role="status">Finishing your pending note changes.</p>
+        </dialog>
         <BuildIdentityBadge />
       </body>
     </html>

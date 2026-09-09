@@ -8,6 +8,7 @@ import { Block } from '@blocknote/core';
 import { useCreateBlockNote } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/shadcn';
 import { blocksToMarkdownSafely } from '@/lib/blocknote-markdown';
+import { createWriteQueue } from '@/lib/pendingWrites';
 import "@blocknote/shadcn/style.css";
 
 // Dynamically import BlockNote Editor to avoid SSR issues
@@ -86,6 +87,8 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
   const isContentLoaded = useRef(false);
   const editRevision = useRef(0);
   const writes = useRef<Promise<void>>(Promise.resolve());
+  const unkeyedWrites = useRef(createWriteQueue());
+  const trackedWrites = meeting?.id ? createWriteQueue(`summary:${meeting.id}`) : unkeyedWrites.current;
   const queuedRevision = useRef(-1);
   const latestBlocks = useRef<Block[]>([]);
   const isGenerating = ['processing', 'summarizing', 'regenerating'].includes(status);
@@ -136,9 +139,9 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
     setIsSaving(true);
     // Capture this edit and its save callback before navigation can unmount the editor.
     // Serialize conversion and persistence so an older edit cannot overwrite a newer one.
-    const write = writes.current.catch(() => {}).then(async () => {
+    const write = trackedWrites.enqueue(async () => {
       // A queued newer snapshot contains these edits too; avoid redundant full-document writes.
-      if (queuedRevision.current !== revision) return;
+      if (queuedRevision.current > revision) return;
       const result = await blocksToMarkdownSafely(editor, blocks, {
         source: 'BlockNoteSummaryView.save',
       });
@@ -155,7 +158,7 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
     });
     writes.current = write;
     return write;
-  }, [editor, onSave]);
+  }, [editor, onSave, trackedWrites]);
 
   const handleEditorChange = useCallback((blocks: Block[]) => {
     // Only set dirty flag if content has finished loading
