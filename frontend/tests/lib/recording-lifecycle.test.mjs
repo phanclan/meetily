@@ -2304,49 +2304,134 @@ test('saved meeting discovery ignores stale reads and retries a failed page with
   runner.unmount();
 });
 
-test('summary polls survive rerenders, stay independent, and serialize slow reads', async () => {
-  const timers = new Map(), reads = [], updates = [];
-  let id = 0;
+function summaryObserverFixture() {
+  const timers = new Map(), reads = [], updates = [], logs = [];
+  let id = 0, now = 1000, handler, register, rejectRegistration, releases = 0;
   const runner = hookRunner('@/hooks/useSummaryPolling', 'useSummaryPolling', {
-    '@tauri-apps/api/core': { invoke: (_command, args) => new Promise(resolve => reads.push({ ...args, resolve })) },
-  }, { setInterval: callback => { timers.set(++id, callback); return id; }, clearInterval: id => timers.delete(id) });
+    '@tauri-apps/api/core': { invoke: (command, args) => {
+      assert.equal(command, 'api_get_summary');
+      return new Promise(resolve => reads.push({ ...args, resolve }));
+    } },
+    '@tauri-apps/api/event': { listen: (name, callback) => {
+      assert.equal(name, 'summary-completed'); handler = callback;
+      return new Promise((resolve, reject) => {
+        register = () => resolve(() => { releases++; }); rejectRegistration = reject;
+      });
+    } },
+  }, {
+    Date: { now: () => now },
+    console: { log: (...args) => logs.push(args), warn: noop, error: noop },
+    setInterval: (callback, delay) => { assert.equal(delay, 5000); timers.set(++id, callback); return id; },
+    clearInterval: id => timers.delete(id),
+  });
   const hook = runner.render();
-  hook.startSummaryPolling('A', 'A', result => updates.push(['A', result.status]));
-  const first = timers.get(1)();
-  hook.startSummaryPolling('B', 'B', result => updates.push(['B', result.status]));
-  const next = runner.render();
-  assert.equal(next.startSummaryPolling, hook.startSummaryPolling);
-  assert.equal(next.stopSummaryPolling, hook.stopSummaryPolling);
-  assert.equal(timers.size, 2, 'Adding B must not clear A on rerender');
-  await timers.get(1)();
-  assert.equal(reads.length, 1, 'A slow read must not overlap the next tick');
-  reads[0].resolve({ status: 'completed' }); await first;
-  assert.deepEqual(updates, [['A', 'completed']]);
-  assert.equal(timers.has(1), false); assert.equal(timers.has(2), true);
-  const oldRead = timers.get(2)();
-  hook.startSummaryPolling('B', 'B', result => updates.push(['new B', result.status]));
-  reads[1].resolve({ status: 'completed' }); await oldRead;
-  assert.equal(updates.length, 1, 'Replaced observers ignore late responses');
-  assert.equal(timers.has(3), true, 'Old completion must not stop the replacement');
-  const pending = timers.get(3)();
-  runner.unmount();
-  assert.equal(timers.size, 0);
-  reads[2].resolve({ status: 'completed' }); await pending;
-  assert.equal(updates.length, 1, 'Unmounted observers ignore late responses');
+  return { runner, hook, timers, reads, updates, logs,
+    start: (meetingId, label = meetingId) => hook.startSummaryPolling(meetingId, meetingId, result => updates.push([label, result.status])),
+    event: (meetingId, savedAt = now) => handler({ payload: { meeting_id: meetingId, saved_at_ms: savedAt } }),
+    register: () => register(), rejectRegistration: () => rejectRegistration(new Error('No event bridge')),
+    advance: ms => { now += ms; }, releases: () => releases,
+    flush: () => new Promise(setImmediate),
+  };
+}
+
+test('summary polls survive rerenders, stay independent, and serialize slow reads', async () => {
+  const f = summaryObserverFixture();
+  f.start('A'); f.start('B');
+  assert.equal(f.reads.length, 2, 'Each observer immediately reads saved state');
+  const next = f.runner.render();
+  assert.equal(next.startSummaryPolling, f.hook.startSummaryPolling);
+  assert.equal(next.stopSummaryPolling, f.hook.stopSummaryPolling);
+  await f.timers.get(1)();
+  assert.equal(f.reads.length, 2, 'A slow read must not overlap the next tick');
+  f.reads[0].resolve({ status: 'completed' }); await f.flush();
+  assert.deepEqual(f.updates, [['A', 'completed']]);
+  assert.equal(f.timers.has(1), false); assert.equal(f.timers.has(2), true);
+  f.start('B', 'new B');
+  f.reads[1].resolve({ status: 'completed' }); await f.flush();
+  assert.equal(f.updates.length, 1, 'Replaced observers ignore late responses');
+  assert.equal(f.timers.has(3), true, 'Old completion must not stop the replacement');
+  f.runner.unmount();
+  assert.equal(f.timers.size, 0);
+  f.reads[2].resolve({ status: 'completed' }); await f.flush();
+  assert.equal(f.updates.length, 1, 'Unmounted observers ignore late responses');
+  f.register(); await f.flush();
+  assert.equal(f.releases(), 1, 'Late listener registration is released');
 });
 
-test('a disappeared summary job unlocks the UI instead of silently abandoning its poll', async () => {
-  let tick, stopped = false;
-  const updates = [];
-  const runner = hookRunner('@/hooks/useSummaryPolling', 'useSummaryPolling', {
-    '@tauri-apps/api/core': { invoke: async () => ({ status: 'idle' }) },
-  }, { setInterval: callback => { tick = callback; return 1; }, clearInterval: () => { stopped = true; } });
-  runner.render().startSummaryPolling('A', 'A', result => updates.push(result));
-  await tick(); assert.equal(stopped, false);
-  await tick(); assert.equal(stopped, true);
-  assert.equal(updates[1].status, 'error');
-  assert.match(updates[1].error, /no longer running/);
-  runner.unmount();
+test('a disappeared summary job unlocks the UI after its startup grace period', async () => {
+  const f = summaryObserverFixture();
+  f.start('A');
+  f.reads[0].resolve({ status: 'idle' }); await f.flush();
+  assert.equal(f.timers.size, 1);
+  f.advance(5000); const tick = f.timers.get(1)();
+  f.reads[1].resolve({ status: 'idle' }); await tick;
+  assert.equal(f.timers.size, 0);
+  assert.deepEqual(f.updates, [['A', 'idle'], ['A', 'error']]);
+  f.runner.unmount();
+});
+
+test('completion events fetch immediately, filter meetings, and report timing without note content', async () => {
+  const f = summaryObserverFixture();
+  f.register(); await f.flush(); f.start('A');
+  f.reads[0].resolve({ status: 'processing' }); await f.flush();
+  f.event('B'); assert.equal(f.reads.length, 1);
+  f.event('A'); assert.equal(f.reads.length, 2, 'No timer tick required');
+  f.event('A'); assert.equal(f.reads.length, 2, 'Duplicate events do not overlap reads');
+  f.advance(12);
+  f.reads[1].resolve({ status: 'completed', data: { markdown: 'Private synthetic note' } }); await f.flush();
+  assert.equal(f.timers.size, 0);
+  assert.deepEqual(f.updates, [['A', 'processing'], ['A', 'completed']]);
+  assert.equal(f.logs[0][1].afterSavedEventMs, 12);
+  assert.ok(!JSON.stringify(f.logs).includes('Private synthetic note'));
+  f.event('A'); assert.equal(f.reads.length, 2);
+  f.runner.unmount(); assert.equal(f.releases(), 1);
+});
+
+test('completion during a stale in-flight read queues one immediate authoritative refresh', async () => {
+  const f = summaryObserverFixture();
+  f.register(); await f.flush(); f.start('A');
+  f.event('A'); f.event('A');
+  assert.equal(f.reads.length, 1);
+  f.reads[0].resolve({ status: 'processing' }); await f.flush();
+  assert.equal(f.reads.length, 2);
+  f.reads[1].resolve({ status: 'completed' }); await f.flush();
+  assert.deepEqual(f.updates, [['A', 'processing'], ['A', 'completed']]);
+  f.runner.unmount();
+});
+
+test('completion before listener registration is recovered without waiting for polling', async () => {
+  const f = summaryObserverFixture();
+  f.start('A'); f.reads[0].resolve({ status: 'processing' }); await f.flush();
+  f.register(); await f.flush();
+  assert.equal(f.reads.length, 2);
+  f.reads[1].resolve({ status: 'completed' }); await f.flush();
+  assert.equal(f.updates.at(-1)[1], 'completed');
+  f.runner.unmount();
+});
+
+test('polling recovers missed events and unavailable listeners', async () => {
+  const f = summaryObserverFixture();
+  f.rejectRegistration(); await f.flush(); f.start('A');
+  f.reads[0].resolve({ status: 'processing' }); await f.flush();
+  f.advance(5000); const tick = f.timers.get(1)();
+  f.reads[1].resolve({ status: 'completed' }); await tick;
+  assert.equal(f.updates.at(-1)[1], 'completed');
+  assert.equal(f.logs[0][1].afterSavedEventMs, null);
+  f.runner.unmount();
+});
+
+test('extra event reads do not consume the summary timeout budget', async () => {
+  const f = summaryObserverFixture();
+  f.register(); await f.flush(); f.start('A');
+  for (let i = 0; i < 205; i++) {
+    f.reads[i].resolve({ status: 'processing' }); await f.flush();
+    f.event('A');
+  }
+  assert.equal(f.updates.some(([, status]) => status === 'error'), false);
+  f.reads.at(-1).resolve({ status: 'processing' }); await f.flush();
+  f.advance(1_000_000); await f.timers.get(1)();
+  assert.equal(f.updates.at(-1)[1], 'error');
+  assert.equal(f.timers.size, 0); f.runner.unmount();
 });
 
 for (const initialSummaryStatus of ['pending', 'processing']) {

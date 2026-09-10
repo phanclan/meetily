@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 use once_cell::sync::Lazy;
@@ -539,6 +539,8 @@ impl SummaryService {
         };
 
         let client = reqwest::Client::new();
+        let generation_started = Instant::now();
+        let preparation_ms = start_time.elapsed().as_millis();
         let result = generate_meeting_summary(
             &client,
             &provider,
@@ -563,6 +565,7 @@ impl SummaryService {
         .await;
 
         let duration = start_time.elapsed().as_secs_f64();
+        let generation_ms = generation_started.elapsed().as_millis();
 
         match result {
             Ok((final_markdown, english_markdown, num_chunks)) => {
@@ -579,7 +582,8 @@ impl SummaryService {
                     summary_language.as_deref(),
                 );
 
-                Self::persist_completed_summary(
+                let persistence_started = Instant::now();
+                let saved = Self::persist_completed_summary(
                     &pool,
                     &meeting_id,
                     result_json,
@@ -588,6 +592,21 @@ impl SummaryService {
                     extract_meeting_name_from_markdown(&final_markdown).as_deref(),
                 )
                 .await;
+                if saved {
+                    let persistence_ms = persistence_started.elapsed().as_millis();
+                    info!(
+                        "Enhancement timing meeting_id={} preparation_ms={} generation_ms={} persistence_ms={}",
+                        meeting_id, preparation_ms, generation_ms, persistence_ms
+                    );
+                    // Notify only after the result and suggested title are persisted.
+                    // The event is a hint; observers still read authoritative saved data.
+                    if let Err(error) = _app.emit("summary-completed", serde_json::json!({
+                        "meeting_id": meeting_id,
+                        "saved_at_ms": chrono::Utc::now().timestamp_millis(),
+                    })) {
+                        warn!("Could not publish enhancement completion; polling will recover: {}", error);
+                    }
+                }
             }
             Err(e) => {
                 // Check if error is due to cancellation
