@@ -224,7 +224,7 @@ export default function AnalyticsConsentSwitch() {
           <Info className="w-4 h-4 text-blue-600 mt-0.5 flex-shrink-0" />
           <div className="text-xs text-blue-700">
             <p className="mb-1">
-              Your meetings, transcripts, and recordings remain completely private and local.
+              Saved notes and recordings stay on this device. Cloud enhancement and chat send the relevant meeting text to your selected provider.
             </p>
             <button
               onClick={handlePrivacyPolicyClick}

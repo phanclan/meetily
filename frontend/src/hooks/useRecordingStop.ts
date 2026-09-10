@@ -11,6 +11,7 @@ import Analytics from '@/lib/analytics';
 import { readLiveMeetingNotes, clearLiveMeetingNotes } from '@/lib/liveMeetingNotes';
 import { blocksToPlainText } from '@/lib/meetingNotes';
 import { saveMeetingNotes } from '@/meetnola/ipc';
+import { clearLiveMeetingFolder, saveLiveMeetingFolder } from '@/lib/liveMeetingFolder';
 
 // The quick-note page and global tray handler both use this hook.
 let stopProcessing = false;
@@ -296,6 +297,9 @@ export function useRecordingStop(
               notesJson: JSON.stringify(liveNotes),
             });
           }
+          // Folder membership must be confirmed before discarding retry data.
+          const noteFolderId = await saveLiveMeetingFolder(liveId, meetingId);
+          const meetingPath = `/meeting-details?id=${encodeURIComponent(meetingId)}${noteFolderId ? `&folder=${encodeURIComponent(noteFolderId)}` : ''}`;
           await options.onSaved?.(meetingId);
           if (liveId) clearLiveMeetingNotes(liveId);
           savedId = meetingId;
@@ -330,6 +334,7 @@ export function useRecordingStop(
 
           // Mark meeting as saved in IndexedDB (for recovery system)
           await markMeetingAsSaved();
+          if (liveId) clearLiveMeetingFolder(liveId);
 
           // Clean up session storage
           sessionStorage.removeItem('last_recording_folder_path');
@@ -363,7 +368,7 @@ export function useRecordingStop(
             action: {
               label: 'View Meeting',
               onClick: () => {
-                router.push(`/meeting-details?id=${meetingId}`);
+                router.push(meetingPath);
                 Analytics.trackButtonClick('view_meeting_from_toast', 'recording_complete');
               }
             },
@@ -372,7 +377,7 @@ export function useRecordingStop(
 
           // Auto-navigate after a short delay with source parameter
           if (options.autoNavigate !== false) setTimeout(() => {
-            router.push(`/meeting-details?id=${meetingId}&source=recording`);
+            router.push(`${meetingPath}&source=recording`);
             clearTranscripts()
             Analytics.trackPageView('meeting_details');
 

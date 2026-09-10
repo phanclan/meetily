@@ -95,10 +95,10 @@ pub async fn api_save_meeting_summary<R: Runtime>(
         }
         Ok(false) => {
             log_warn!(
-                "Meeting not found or invalid JSON for meeting_id: {}",
+                "Summary is missing or not editable for meeting_id: {}",
                 meeting_id
             );
-            Err("Meeting not found or can't convert the json".into())
+            Err("Could not save edits. Wait for enhancement to finish, then reopen the note and try again.".into())
         }
         Err(e) => {
             log_error!("Failed to save meeting summary for {}: {}", meeting_id, e);
@@ -349,6 +349,9 @@ pub async fn api_process_transcript<R: Runtime>(
     );
 
     let pool = state.db_manager.pool().clone();
+    let trashed: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM meeting_trash WHERE meeting_id = ?)")
+        .bind(&m_id).fetch_one(&pool).await.map_err(|e| e.to_string())?;
+    if trashed { return Err("Restore this note from Trash before enhancing it.".into()); }
     let final_prompt = custom_prompt.unwrap_or_else(|| "".to_string());
     let final_template_id = template_id.unwrap_or_else(|| "daily_standup".to_string());
 

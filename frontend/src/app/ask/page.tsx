@@ -7,7 +7,7 @@ import { MeetingAssistantDock } from '@/components/MeetingDetails/MeetingAssista
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { useLibraryChat } from '@/hooks/useLibraryChat';
-import { loadLibraryAnswerContext, type LibraryPeriod } from '@/lib/libraryAnswerContext';
+import { loadLibraryAnswerContext, type LibraryPeriod, type LibrarySourceScope } from '@/lib/libraryAnswerContext';
 import { meetnolaInvoke } from '@/meetnola/ipc';
 
 interface Conversation { id: string; title: string; updatedAt: string }
@@ -43,7 +43,7 @@ function AskNotesRoute() {
 function AskWorkspace({ chatId }: { chatId: string }) {
   const router = useRouter();
   const chat = useLibraryChat(chatId);
-  const { draft: input, period, archived } = chat.settings;
+  const { draft: input, period, sourceScope, archived } = chat.settings;
   const setInput = chat.setInput;
   const [expanded, setExpanded] = useState(false);
   const [searching, setSearching] = useState(false);
@@ -91,7 +91,7 @@ function AskWorkspace({ chatId }: { chatId: string }) {
     setExpanded(true);
     setSearching(true);
     void chat.send(question, async () => {
-      try { return await loadLibraryAnswerContext(question, chat.messages, period); }
+      try { return await loadLibraryAnswerContext(question, chat.messages, period, sourceScope); }
       finally { if (request.current === id) setSearching(false); }
     });
   };
@@ -107,6 +107,10 @@ function AskWorkspace({ chatId }: { chatId: string }) {
         </div>
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-stone-500">
+        <label htmlFor="library-scope">Sources</label>
+        <select id="library-scope" value={sourceScope} disabled={chat.isLoading || !chat.ready || archived} onChange={event => chat.setSourceScope(event.target.value as LibrarySourceScope)} className="rounded-full border border-stone-200 bg-white px-3 py-1.5 text-stone-700 focus-visible:outline-stone-400">
+          <option value="keywords">Keyword matches</option><option value="recent">Recent meetings</option>
+        </select>
         <label htmlFor="library-period">Meetings from</label>
         <select id="library-period" value={period} disabled={chat.isLoading || !chat.ready || archived} onChange={event => chat.setPeriod(event.target.value as LibraryPeriod)} className="rounded-full border border-stone-200 bg-white px-3 py-1.5 text-stone-700 focus-visible:outline-stone-400">
           <option value="all">All time</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option>
@@ -120,14 +124,14 @@ function AskWorkspace({ chatId }: { chatId: string }) {
     {!expanded && <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center px-8 py-5">
       <MessageCircle className="mb-3 h-6 w-6 text-stone-400" />
       <h2 className="font-serif text-2xl text-stone-800">Connect the dots across meetings</h2>
-      <p className="mt-2 max-w-lg text-sm leading-6 text-stone-500">Ask about a project, a decision, or someone’s next steps. Answers use matching words in your original notes and transcripts, with links to the meetings.</p>
-      <p className="mt-3 max-w-lg text-xs leading-5 text-stone-500">Include a topic or name. Up to 16 excerpts inform each answer, so results may omit relevant details.</p>
+      <p className="mt-2 max-w-lg text-sm leading-6 text-stone-500">Ask about a project, a decision, or someone’s next steps. Use keyword matches for a topic, or recent meetings for broader questions. Answers link back to your original notes and transcripts.</p>
+      <p className="mt-3 max-w-lg text-xs leading-5 text-stone-500">{sourceScope === 'recent' ? 'Reviews the five newest meetings with saved source text in the chosen date range. Large sources need a narrower review.' : 'Include a topic or name. Up to 16 matching excerpts inform each answer, so results may omit relevant details.'}</p>
     </div>}
     <MeetingAssistantDock workspace expanded={expanded} onExpandedChange={setExpanded} messages={chat.messages} loading={chat.isLoading}
       input={input} onInputChange={setInput} onSend={send} onStop={stop} onClear={() => setConfirmClear(true)} canSend={chat.ready && !archived} readOnly={!chat.ready || archived} recipes={[]}
       historyStatus={chat.historyError || (!chat.ready ? 'Loading conversation…' : undefined)} onRetryHistory={chat.historyError ? chat.retryHistory : undefined}
-      title="Chat with your notes" inputLabel="Ask across meetings" loadingLabel={searching ? 'Finding matching notes…' : 'Writing an answer…'}
-      emptyMessage="Include a topic or name from your notes to find relevant meetings." />
+      title="Chat with your notes" inputLabel="Ask across meetings" loadingLabel={searching ? (sourceScope === 'recent' ? 'Reading recent meetings…' : 'Finding matching notes…') : 'Writing an answer…'}
+      emptyMessage={sourceScope === 'recent' ? 'Try “What follow-ups were agreed in these recent meetings?”' : 'Include a topic or name from your notes to find relevant meetings.'} />
     <Dialog open={confirmClear} onOpenChange={setConfirmClear}>
       <DialogContent onCloseAutoFocus={event => { event.preventDefault(); document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Ask across meetings"]')?.focus(); }}>
         <DialogTitle>Clear this conversation?</DialogTitle>

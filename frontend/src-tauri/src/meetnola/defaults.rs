@@ -15,7 +15,7 @@ pub const SUMMARY_PROVIDER: &str = "custom-openai";
 /// Documented OpenAI-compatible model id on Vercel AI Gateway
 /// (`GET https://ai-gateway.vercel.sh/v1/models`). Chosen as a cheap, capable
 /// default for meeting summaries; users can change it in Settings.
-pub const GATEWAY_MODEL: &str = "openai/gpt-4o-mini";
+pub const GATEWAY_MODEL: &str = "openai/gpt-5.6-luna";
 
 /// OpenAI-compatible Chat Completions base URL for Vercel AI Gateway.
 pub const GATEWAY_ENDPOINT: &str = "https://ai-gateway.vercel.sh/v1";

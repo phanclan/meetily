@@ -106,10 +106,7 @@ fn get_build_info() -> BuildInfo {
     let channel = env!("MEETNOLA_BUILD_CHANNEL").to_string();
     let flavor = env!("MEETNOLA_BUILD_FLAVOR").to_string();
 
-    let flavor_label = match flavor.as_str() {
-        "meetnola-tester" => "meetnola Tester",
-        _ => "Meetily",
-    };
+    let flavor_label = "Afterword";
 
     let display_name = format!("{} v{} ({}, {})", flavor_label, version, channel, build_id);
 

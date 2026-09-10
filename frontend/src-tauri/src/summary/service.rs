@@ -21,7 +21,7 @@ use tracing::{error, info, warn};
 use once_cell::sync::Lazy;
 
 // Global cache for model metadata (5 minute TTL)
-static METADATA_CACHE: Lazy<ModelMetadataCache> = Lazy::new(|| {
+pub(crate) static METADATA_CACHE: Lazy<ModelMetadataCache> = Lazy::new(|| {
     ModelMetadataCache::new(Duration::from_secs(300))
 });
 
@@ -72,6 +72,7 @@ const ENGLISH_CACHE_FIELD: &str = "english_cache";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct SummaryCacheSource {
+    report_instructions_fingerprint: String,
     transcript_fingerprint: String,
     custom_prompt_fingerprint: String,
     template_id: String,
@@ -121,6 +122,11 @@ fn build_summary_cache_source(
     top_p: Option<f32>,
 ) -> SummaryCacheSource {
     SummaryCacheSource {
+        // A language switch must not reuse a report generated with older factual
+        // rules. Template contents have their own fingerprint below.
+        report_instructions_fingerprint: stable_text_fingerprint(
+            &super::processor::build_final_report_system_prompt("", ""),
+        ),
         transcript_fingerprint: stable_text_fingerprint(text),
         custom_prompt_fingerprint: stable_text_fingerprint(custom_prompt),
         template_id: template_id.to_string(),
@@ -423,8 +429,8 @@ impl SummaryService {
         let token_threshold = if provider == LLMProvider::Ollama {
             match METADATA_CACHE.get_or_fetch(&model_name, ollama_endpoint.as_deref()).await {
                 Ok(metadata) => {
-                    // Reserve 300 tokens for prompt overhead
-                    let optimal = metadata.context_size.saturating_sub(300);
+                    // The processor budgets full prompts and answer space together.
+                    let optimal = metadata.context_size;
                     info!(
                         "✓ Using dynamic context for {}: {} tokens (chunk size: {})",
                         model_name, metadata.context_size, optimal
@@ -447,8 +453,7 @@ impl SummaryService {
 
             match model {
                 Ok(model_def) => {
-                    // Reserve 300 tokens for prompt overhead
-                    let optimal = model_def.context_size.saturating_sub(300) as usize;
+                    let optimal = model_def.context_size as usize;
                     info!(
                         "✓ Using BuiltInAI context size: {} tokens (chunk size: {})",
                         model_def.context_size, optimal
@@ -457,7 +462,7 @@ impl SummaryService {
                 }
                 Err(e) => {
                     warn!("{}, using default 2048", e);
-                    1748  // 2048 - 300 for overhead
+                    2048
                 }
             }
         } else {
@@ -567,17 +572,6 @@ impl SummaryService {
                 );
                 info!("Final markdown generated ({} chars)", final_markdown.len());
 
-                if let Some(name) = extract_meeting_name_from_markdown(&final_markdown)
-                    .filter(|n| !n.is_empty())
-                {
-                    info!("Extracted meeting name from summary: '{}'", name);
-                    match MeetingsRepository::suggest_meeting_name(&pool, &meeting_id, &name).await {
-                        Ok(true) => info!("Named previously untitled meeting {}", meeting_id),
-                        Ok(false) => info!("Preserved existing title for meeting {}", meeting_id),
-                        Err(e) => error!("Failed to update meeting name for {}: {}", meeting_id, e),
-                    }
-                }
-
                 let result_json = build_summary_result_json(
                     &final_markdown,
                     &english_markdown,
@@ -585,26 +579,15 @@ impl SummaryService {
                     summary_language.as_deref(),
                 );
 
-                // Update database with completed status
-                if let Err(e) = SummaryProcessesRepository::update_process_completed(
+                Self::persist_completed_summary(
                     &pool,
                     &meeting_id,
                     result_json,
                     num_chunks,
                     duration,
+                    extract_meeting_name_from_markdown(&final_markdown).as_deref(),
                 )
-                .await
-                {
-                    error!(
-                        "Failed to save completed process for {}: {}",
-                        meeting_id, e
-                    );
-                } else {
-                    info!(
-                        "Summary saved successfully for meeting_id: {}",
-                        meeting_id
-                    );
-                }
+                .await;
             }
             Err(e) => {
                 // Check if error is due to cancellation
@@ -618,6 +601,41 @@ impl SummaryService {
                 }
             }
         }
+    }
+
+    /// A generated result is successful only after storage accepts it.
+    async fn persist_completed_summary(
+        pool: &SqlitePool,
+        meeting_id: &str,
+        result: serde_json::Value,
+        chunk_count: i64,
+        duration: f64,
+        suggested_name: Option<&str>,
+    ) -> bool {
+        if let Err(e) = SummaryProcessesRepository::update_process_completed(
+            pool, meeting_id, result, chunk_count, duration,
+        )
+        .await
+        {
+            error!("Failed to save completed process for {}: {}", meeting_id, e);
+            Self::update_process_failed(
+                pool,
+                meeting_id,
+                "Could not save enhanced notes. Try again when local storage is available.",
+            )
+            .await;
+            return false;
+        }
+
+        info!("Summary saved successfully for meeting_id: {}", meeting_id);
+        if let Some(name) = suggested_name.filter(|name| !name.is_empty()) {
+            match MeetingsRepository::suggest_meeting_name(pool, meeting_id, name).await {
+                Ok(true) => info!("Named previously untitled meeting {}", meeting_id),
+                Ok(false) => info!("Preserved existing title for meeting {}", meeting_id),
+                Err(e) => error!("Failed to update meeting name for {}: {}", meeting_id, e),
+            }
+        }
+        true
     }
 
     /// Updates the summary process status to failed with error message
@@ -645,6 +663,89 @@ impl SummaryService {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn summary_storage_fixture() -> SqlitePool {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1).connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        sqlx::query("INSERT INTO meetings (id,title,created_at,updated_at) VALUES ('save-test','Untitled','','original')")
+            .execute(&pool).await.unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn summary_storage_failure_restores_current_and_history_then_allows_retry() {
+        let pool = summary_storage_fixture().await;
+        let first = serde_json::json!({"markdown": "First"});
+        let second = serde_json::json!({"markdown": "Second", "summary_json": [{"type": "checkListItem", "props": {"checked": true}}]});
+        let third = serde_json::json!({"markdown": "Third"});
+        for result in [&first, &second] {
+            SummaryProcessesRepository::create_or_reset_process(&pool, "save-test").await.unwrap();
+            assert!(SummaryService::persist_completed_summary(&pool, "save-test", result.clone(), 1, 1.0, None).await);
+        }
+        let history_before: (String, String) = sqlx::query_as("SELECT version_id,result FROM previous_summaries WHERE meeting_id='save-test'")
+            .fetch_one(&pool).await.unwrap();
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&history_before.1).unwrap(), first);
+        SummaryProcessesRepository::create_or_reset_process(&pool, "save-test").await.unwrap();
+        // Abort after the history trigger ran: the entire completion write must roll back.
+        sqlx::query("CREATE TRIGGER reject_completion AFTER UPDATE ON summary_processes WHEN NEW.status='completed' BEGIN SELECT RAISE(ABORT, 'Synthetic completion write failure'); END")
+            .execute(&pool).await.unwrap();
+        assert!(!SummaryService::persist_completed_summary(&pool, "save-test", third.clone(), 1, 1.0, Some("Generated title")).await);
+        let failed = SummaryProcessesRepository::get_summary_data(&pool, "save-test").await.unwrap().unwrap();
+        assert_eq!(failed.status, "failed");
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&failed.result.unwrap()).unwrap(), second);
+        assert!(failed.error.unwrap().contains("Could not save enhanced notes"));
+        let backup: Option<String> = sqlx::query_scalar("SELECT result_backup FROM summary_processes WHERE meeting_id='save-test'").fetch_one(&pool).await.unwrap();
+        assert!(backup.is_none());
+        let history_after: (String, String) = sqlx::query_as("SELECT version_id,result FROM previous_summaries WHERE meeting_id='save-test'")
+            .fetch_one(&pool).await.unwrap();
+        assert_eq!(history_after, history_before);
+        let title: String = sqlx::query_scalar("SELECT title FROM meetings WHERE id='save-test'").fetch_one(&pool).await.unwrap();
+        assert_eq!(title, "Untitled", "An unsaved result must not rename the note");
+
+        sqlx::query("DROP TRIGGER reject_completion").execute(&pool).await.unwrap();
+        SummaryProcessesRepository::create_or_reset_process(&pool, "save-test").await.unwrap();
+        assert!(SummaryService::persist_completed_summary(&pool, "save-test", third.clone(), 1, 1.0, Some("Generated title")).await);
+        let completed = SummaryProcessesRepository::get_summary_data(&pool, "save-test").await.unwrap().unwrap();
+        assert_eq!(completed.status, "completed");
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&completed.result.unwrap()).unwrap(), third);
+        assert!(completed.error.is_none());
+        let previous: String = sqlx::query_scalar("SELECT result FROM previous_summaries WHERE meeting_id='save-test'").fetch_one(&pool).await.unwrap();
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&previous).unwrap(), second);
+        let title: String = sqlx::query_scalar("SELECT title FROM meetings WHERE id='save-test'").fetch_one(&pool).await.unwrap();
+        assert_eq!(title, "Generated title");
+    }
+
+    #[tokio::test]
+    async fn summary_storage_rejects_missing_or_active_edit_targets() {
+        let pool = summary_storage_fixture().await;
+        let original = serde_json::json!({"markdown": "Original"});
+        let edited = serde_json::json!({"markdown": "Edited"});
+        assert!(!SummaryProcessesRepository::update_meeting_summary(&pool, "save-test", &edited).await.unwrap());
+        assert!(!SummaryProcessesRepository::update_meeting_summary(&pool, "missing", &edited).await.unwrap());
+        assert!(matches!(SummaryProcessesRepository::update_process_completed(&pool, "save-test", original.clone(), 1, 1.0).await, Err(sqlx::Error::RowNotFound)));
+        let timestamp: String = sqlx::query_scalar("SELECT updated_at FROM meetings WHERE id='save-test'").fetch_one(&pool).await.unwrap();
+        assert_eq!(timestamp, "original");
+        SummaryProcessesRepository::create_or_reset_process(&pool, "save-test").await.unwrap();
+        SummaryProcessesRepository::update_process_failed(&pool, "save-test", "First attempt failed").await.unwrap();
+        assert!(!SummaryProcessesRepository::update_meeting_summary(&pool, "save-test", &edited).await.unwrap(), "No saved enhancement exists after the first failure");
+        SummaryProcessesRepository::create_or_reset_process(&pool, "save-test").await.unwrap();
+        SummaryProcessesRepository::update_process_completed(&pool, "save-test", original.clone(), 1, 1.0).await.unwrap();
+        SummaryProcessesRepository::create_or_reset_process(&pool, "save-test").await.unwrap();
+        for status in ["PENDING", "processing"] {
+            sqlx::query("UPDATE summary_processes SET status=? WHERE meeting_id='save-test'").bind(status).execute(&pool).await.unwrap();
+            assert!(!SummaryProcessesRepository::update_meeting_summary(&pool, "save-test", &edited).await.unwrap());
+            let (result, backup): (String, String) = sqlx::query_as("SELECT result,result_backup FROM summary_processes WHERE meeting_id='save-test'").fetch_one(&pool).await.unwrap();
+            assert_eq!(serde_json::from_str::<serde_json::Value>(&result).unwrap(), original);
+            assert_eq!(result, backup);
+        }
+        let timestamp: String = sqlx::query_scalar("SELECT updated_at FROM meetings WHERE id='save-test'").fetch_one(&pool).await.unwrap();
+        assert_eq!(timestamp, "original");
+        SummaryProcessesRepository::update_process_failed(&pool, "save-test", "Synthetic failure").await.unwrap();
+        assert!(SummaryProcessesRepository::update_meeting_summary(&pool, "save-test", &edited).await.unwrap(), "Recovered enhancements remain editable");
+        let saved = SummaryProcessesRepository::get_summary_data(&pool, "save-test").await.unwrap().unwrap();
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&saved.result.unwrap()).unwrap(), edited);
+    }
 
     #[test]
     fn summary_admission_allows_one_concurrent_job_per_meeting() {
@@ -1014,6 +1115,17 @@ mod tests {
             extract_cached_english_markdown(&raw, &changed_template, Some("de")).unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn updated_report_rules_and_legacy_cache_require_regeneration() {
+        let source = sample_cache_source();
+        let mut cached = build_summary_result_json("Bonjour", "Hello", source.clone(), Some("fr"));
+        assert_eq!(extract_cached_english_markdown(&cached.to_string(), &source, Some("de")).unwrap(), Some("Hello".into()));
+        cached[ENGLISH_CACHE_FIELD]["source"]["report_instructions_fingerprint"] = serde_json::json!("old rules");
+        assert_eq!(extract_cached_english_markdown(&cached.to_string(), &source, Some("de")).unwrap(), None);
+        cached[ENGLISH_CACHE_FIELD]["source"].as_object_mut().unwrap().remove("report_instructions_fingerprint");
+        assert_eq!(extract_cached_english_markdown(&cached.to_string(), &source, Some("de")).unwrap(), None);
     }
 
     #[test]

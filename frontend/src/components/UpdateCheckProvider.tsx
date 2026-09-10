@@ -22,8 +22,8 @@ export function UpdateCheckProvider({ children }: { children: React.ReactNode })
 
   const handleShowDialog = useCallback(() => {
     if (isMeetnola) {
-      toast.info('Meetnola updates are installed manually', {
-        description: 'Use a verified Meetnola build. Upstream Meetily updates are not installed in this fork.',
+      toast.info('Afterword updates are installed manually', {
+        description: 'Use a verified Afterword build. Upstream Meetily updates are not installed in this fork.',
       });
       return;
     }

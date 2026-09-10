@@ -58,6 +58,7 @@ export function normalizeBlockNoteBlocks(input: unknown): Block[] {
 }
 
 function extractTextFromInline(content: unknown): string {
+  if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return '';
 
   return content
@@ -65,16 +66,16 @@ function extractTextFromInline(content: unknown): string {
       if (typeof item === 'string') return item;
       if (!isObject(item)) return '';
       if (typeof item.text === 'string') return item.text;
+      if (Array.isArray(item.content)) return extractTextFromInline(item.content);
       return '';
     })
-    .join('')
-    .trim();
+    .join('');
 }
 
 function extractTextFromBlock(block: Block, lines: string[]) {
-  const text = extractTextFromInline(block.content);
+  const text = extractTextFromInline(block.content).trim();
   if (text) {
-    lines.push(text);
+    lines.push(block.type === 'checkListItem' ? `- [${block.props?.checked ? 'x' : ' '}] ${text}` : text);
   }
 
   if (Array.isArray(block.children)) {
@@ -119,5 +120,29 @@ export function plainTextToBlocks(input: string): Block[] {
     return [];
   }
 
-  return normalized.map(line => createParagraphBlock(line));
+  let fence: { marker: string; length: number } | null = null;
+  return normalized.map(line => {
+    // Examples inside Markdown fences must not become real follow-ups.
+    const delimiter = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (fence) {
+      if (delimiter && delimiter[1][0] === fence.marker
+        && delimiter[1].length >= fence.length && !delimiter[2].trim()) {
+        fence = null;
+      }
+      return createParagraphBlock(line);
+    }
+    if (delimiter && (delimiter[1][0] !== '`' || !delimiter[2].includes('`'))) {
+      fence = { marker: delimiter[1][0], length: delimiter[1].length };
+      return createParagraphBlock(line);
+    }
+
+    const task = /^ {0,3}[-+*] +\[([ xX])\] +(\S.*)$/.exec(line);
+    if (!task) return createParagraphBlock(line);
+
+    return {
+      ...createParagraphBlock(task[2]),
+      type: 'checkListItem',
+      props: { checked: task[1].toLowerCase() === 'x' },
+    } as Block;
+  });
 }

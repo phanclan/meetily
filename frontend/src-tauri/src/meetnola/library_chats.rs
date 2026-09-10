@@ -71,23 +71,23 @@ async fn save(pool: &SqlitePool, id: &str, json: &str) -> Result<(), String> {
 
 #[derive(Serialize, sqlx::FromRow)]
 #[serde(rename_all = "camelCase")]
-pub struct ChatSettings { draft: String, period: String, archived: bool }
+pub struct ChatSettings { draft: String, period: String, source_scope: String, archived: bool }
 
-async fn save_settings(pool: &SqlitePool, id: &str, draft: &str, period: &str) -> Result<(), String> {
+async fn save_settings(pool: &SqlitePool, id: &str, draft: &str, period: &str, source_scope: &str) -> Result<(), String> {
     valid_id(id)?;
-    if draft.len() > 128 * 1024 || !matches!(period, "all" | "7" | "30" | "90") {
-        return Err("Invalid date range or draft exceeds 128 KB".into());
+    if draft.len() > 128 * 1024 || !matches!(period, "all" | "7" | "30" | "90") || !matches!(source_scope, "keywords" | "recent") {
+        return Err("Invalid source scope/date range or draft exceeds 128 KB".into());
     }
     let title: String = draft.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(80).collect();
-    sqlx::query("INSERT INTO library_chats(id, title, draft, period, updated_at)
-        SELECT ?, COALESCE(NULLIF(?, ''), 'New conversation'), ?, ?, ? WHERE ? <> '' OR ? <> 'all'
-        ON CONFLICT(id) DO UPDATE SET draft = excluded.draft, period = excluded.period,
+    sqlx::query("INSERT INTO library_chats(id, title, draft, period, source_scope, updated_at)
+        SELECT ?, COALESCE(NULLIF(?, ''), 'New conversation'), ?, ?, ?, ? WHERE ? <> '' OR ? <> 'all' OR ? <> 'keywords'
+        ON CONFLICT(id) DO UPDATE SET draft = excluded.draft, period = excluded.period, source_scope = excluded.source_scope,
           title = CASE WHEN library_chats.messages_json = '[]' AND excluded.draft <> '' THEN excluded.title ELSE library_chats.title END,
           updated_at = excluded.updated_at WHERE library_chats.archived = 0")
-        .bind(id).bind(title).bind(draft).bind(period).bind(chrono::Utc::now().to_rfc3339()).bind(draft).bind(period)
+        .bind(id).bind(title).bind(draft).bind(period).bind(source_scope).bind(chrono::Utc::now().to_rfc3339()).bind(draft).bind(period).bind(source_scope)
         .execute(pool).await.map_err(|e| e.to_string())?;
-    if draft.is_empty() && period == "all" {
-        sqlx::query("UPDATE library_chats SET draft = '', period = 'all' WHERE id = ? AND archived = 0")
+    if draft.is_empty() && period == "all" && source_scope == "keywords" {
+        sqlx::query("UPDATE library_chats SET draft = '', period = 'all', source_scope = 'keywords' WHERE id = ? AND archived = 0")
             .bind(id).execute(pool).await.map_err(|e| e.to_string())?;
     }
     Ok(())
@@ -104,15 +104,15 @@ pub async fn get_library_chat(state: tauri::State<'_, AppState>, chat_id: String
         .fetch_optional(state.db_manager.pool()).await.map_err(|e| e.to_string())
 }
 #[tauri::command]
-pub async fn save_library_chat_settings(state: tauri::State<'_, AppState>, chat_id: String, draft: String, period: String) -> Result<(), String> {
-    save_settings(state.db_manager.pool(), &chat_id, &draft, &period).await
+pub async fn save_library_chat_settings(state: tauri::State<'_, AppState>, chat_id: String, draft: String, period: String, source_scope: String) -> Result<(), String> {
+    save_settings(state.db_manager.pool(), &chat_id, &draft, &period, &source_scope).await
 }
 #[tauri::command]
 pub async fn get_library_chat_settings(state: tauri::State<'_, AppState>, chat_id: String) -> Result<ChatSettings, String> {
     valid_id(&chat_id)?;
-    Ok(sqlx::query_as("SELECT draft, period, archived FROM library_chats WHERE id = ?").bind(chat_id)
+    Ok(sqlx::query_as("SELECT draft, period, source_scope, archived FROM library_chats WHERE id = ?").bind(chat_id)
         .fetch_optional(state.db_manager.pool()).await.map_err(|e| e.to_string())?
-        .unwrap_or(ChatSettings { draft: String::new(), period: "all".into(), archived: false }))
+        .unwrap_or(ChatSettings { draft: String::new(), period: "all".into(), source_scope: "keywords".into(), archived: false }))
 }
 #[derive(Serialize, sqlx::FromRow)]
 #[serde(rename_all = "camelCase")]
@@ -141,6 +141,7 @@ mod tests {
         sqlx::raw_sql("PRAGMA foreign_keys = ON; CREATE TABLE meetings(id TEXT PRIMARY KEY); INSERT INTO meetings VALUES ('A'), ('B');")
             .execute(&pool).await.unwrap();
         sqlx::raw_sql(include_str!("../../migrations/20260909020000_library_chats.sql")).execute(&pool).await.unwrap();
+        sqlx::raw_sql(include_str!("../../migrations/20260909210000_library_recent_scope.sql")).execute(&pool).await.unwrap();
         pool
     }
     async fn read(pool: &SqlitePool, id: &str) -> serde_json::Value {
@@ -148,13 +149,26 @@ mod tests {
         serde_json::from_str(&text).unwrap()
     }
     #[tokio::test]
+    async fn source_scope_saves_without_a_draft_and_archived_settings_stay_unchanged() {
+        let pool = fixture().await;
+        save_settings(&pool, FIRST, "", "all", "recent").await.unwrap();
+        let scope: String = sqlx::query_scalar("SELECT source_scope FROM library_chats WHERE id = ?").bind(FIRST).fetch_one(&pool).await.unwrap();
+        assert_eq!(scope, "recent");
+        sqlx::query("UPDATE library_chats SET archived = 1 WHERE id = ?").bind(FIRST).execute(&pool).await.unwrap();
+        save_settings(&pool, FIRST, "", "all", "keywords").await.unwrap();
+        let scope: String = sqlx::query_scalar("SELECT source_scope FROM library_chats WHERE id = ?").bind(FIRST).fetch_one(&pool).await.unwrap();
+        assert_eq!(scope, "recent");
+        assert!(save_settings(&pool, FIRST, "", "all", "invalid").await.is_err());
+    }
+
+    #[tokio::test]
     async fn messages_and_drafts_are_isolated_and_archive_preserves_them() {
         let pool = fixture().await;
         save(&pool, FIRST, "[]").await.unwrap();
-        save_settings(&pool, FIRST, "", "all").await.unwrap();
+        save_settings(&pool, FIRST, "", "all", "keywords").await.unwrap();
         let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM library_chats").fetch_one(&pool).await.unwrap();
         assert_eq!(count, 0);
-        save_settings(&pool, FIRST, "Unsent follow-up", "30").await.unwrap();
+        save_settings(&pool, FIRST, "Unsent follow-up", "30", "keywords").await.unwrap();
         let draft_title: String = sqlx::query_scalar("SELECT title FROM library_chats WHERE id = ?").bind(FIRST).fetch_one(&pool).await.unwrap();
         assert_eq!(draft_title, "Unsent follow-up");
         save(&pool, FIRST, r#"[{"role":"user","content":"What changed in Comet?"},{"role":"assistant","content":"Synthetic answer"}]"#).await.unwrap();
@@ -163,14 +177,14 @@ mod tests {
         assert_eq!(row, ("What changed in Comet?".into(), "Unsent follow-up".into(), "30".into()));
         sqlx::query("UPDATE library_chats SET archived = 1 WHERE id = ?").bind(FIRST).execute(&pool).await.unwrap();
         save(&pool, FIRST, "[]").await.unwrap();
-        save_settings(&pool, FIRST, "late draft", "7").await.unwrap();
+        save_settings(&pool, FIRST, "late draft", "7", "keywords").await.unwrap();
         assert_eq!(read(&pool, FIRST).await.as_array().unwrap().len(), 2);
         sqlx::query("UPDATE library_chats SET archived = 0 WHERE id = ?").bind(FIRST).execute(&pool).await.unwrap();
         save(&pool, FIRST, "[]").await.unwrap();
         assert_eq!(read(&pool, FIRST).await, serde_json::json!([]));
         assert_eq!(read(&pool, SECOND).await[0]["content"], "Independent second conversation");
         assert!(save(&pool, "bad-id", "[]").await.is_err());
-        assert!(save_settings(&pool, FIRST, "draft", "invalid").await.is_err());
+        assert!(save_settings(&pool, FIRST, "draft", "invalid", "keywords").await.is_err());
     }
     #[tokio::test]
     async fn deleting_a_source_redacts_only_affected_answers_and_late_writes_cannot_restore_it() {
@@ -206,14 +220,15 @@ mod tests {
         let pool = sqlx::sqlite::SqlitePoolOptions::new().max_connections(1).connect_with(options.clone()).await.unwrap();
         sqlx::query("CREATE TABLE meetings(id TEXT PRIMARY KEY)").execute(&pool).await.unwrap();
         sqlx::raw_sql(include_str!("../../migrations/20260909020000_library_chats.sql")).execute(&pool).await.unwrap();
+        sqlx::raw_sql(include_str!("../../migrations/20260909210000_library_recent_scope.sql")).execute(&pool).await.unwrap();
         let messages = r#"[{"role":"user","content":"Synthetic durable question"},{"role":"assistant","content":"Synthetic durable answer"}]"#;
         save(&pool, FIRST, messages).await.unwrap();
-        save_settings(&pool, FIRST, "Unsent follow-up", "30").await.unwrap();
+        save_settings(&pool, FIRST, "Unsent follow-up", "30", "recent").await.unwrap();
         pool.close().await;
         let reopened = sqlx::sqlite::SqlitePoolOptions::new().max_connections(1).connect_with(options).await.unwrap();
         assert_eq!(read(&reopened, FIRST).await, serde_json::from_str::<serde_json::Value>(messages).unwrap());
-        let row: (String, String) = sqlx::query_as("SELECT draft, period FROM library_chats WHERE id = ?").bind(FIRST).fetch_one(&reopened).await.unwrap();
-        assert_eq!(row, ("Unsent follow-up".into(), "30".into()));
+        let row: (String, String, String) = sqlx::query_as("SELECT draft, period, source_scope FROM library_chats WHERE id = ?").bind(FIRST).fetch_one(&reopened).await.unwrap();
+        assert_eq!(row, ("Unsent follow-up".into(), "30".into(), "recent".into()));
         reopened.close().await;
         std::fs::remove_file(path).unwrap();
     }

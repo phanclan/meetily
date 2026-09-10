@@ -40,6 +40,10 @@ impl TranscriptsRepository {
         .await;
 
         let inserted = result?;
+        #[cfg(feature = "meetnola")]
+        if let Some(recording_id) = source_recording_id {
+            crate::meetnola::chat_history::attach_recording_chat(&mut transaction, recording_id, &meeting_id).await?;
+        }
         if inserted.rows_affected() == 0 {
             transaction.commit().await?;
             return Ok(meeting_id);
@@ -108,6 +112,7 @@ impl TranscriptsRepository {
                  WHERE meeting_id = m.id AND LOWER(transcript) LIKE ? ESCAPE '\\'
                  ORDER BY audio_start_time ASC, id ASC LIMIT 1
              )
+             WHERE NOT EXISTS(SELECT 1 FROM meeting_trash WHERE meeting_id = m.id)
              ORDER BY m.created_at DESC, m.id ASC LIMIT 100",
         )
         .bind(&search_query)

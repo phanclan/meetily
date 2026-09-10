@@ -1,0 +1,82 @@
+[
+  {
+    "id": "requirements-only",
+    "texts": [
+      "Acceptance: retain the review folder, keep the original text, and find this zirconium note in library search.",
+      "Title Verification. Preserve the custom meeting title when saving."
+    ],
+    "expected": "No explicit follow-up commitments. These are acceptance criteria and a product requirement. Do not call them agreed tasks or assign an owner or date."
+  },
+  {
+    "id": "requirement-and-commitment",
+    "texts": [
+      "Requirements: preserve existing titles and keep notes editable. No implementation assignment was made.",
+      "Morgan: I will send the test results Friday."
+    ],
+    "expected": "Morgan sending test results Friday is the only agreed follow-up; cite S2. Preserve/keep requirements are not assigned tasks."
+  },
+  {
+    "id": "declined-request",
+    "texts": [
+      "Nina: Could Omar run the rehearsal Friday? Omar: I cannot commit; I need to check availability. Nina: Owner and date remain open.",
+      "Nina: I will publish the release notes Thursday."
+    ],
+    "expected": "Nina publishing release notes Thursday is the only confirmed task. Do not assign Omar a rehearsal or checking availability as a commitment."
+  },
+  {
+    "id": "completed-versus-new",
+    "texts": [
+      "Avery: I sent the audit yesterday. That task is complete. Lee: The application must retain source notes.",
+      "Alex: I will review the revised budget Tuesday. Morgan: I will send results Friday."
+    ],
+    "expected": "Alex reviews revised budget Tuesday and Morgan sends results Friday. Audit is completed, retention is a requirement, neither is a new task."
+  },
+  {
+    "id": "unresolved-owner",
+    "texts": [
+      "Action item: Riley owns the migration checklist, due Monday.",
+      "Sam: I will draft the migration checklist Thursday. Morgan: I will send the test results Friday. No one resolved the difference with the written assignment."
+    ],
+    "expected": "Morgan Friday confirmed. Checklist has unresolved Riley Monday versus Sam Thursday; preserve both and cite both, do not pick a winner, combine pairs, or invent a reconciliation task."
+  },
+  {
+    "id": "explicit-reassignment",
+    "texts": [
+      "Riley owns the migration checklist, due Monday.",
+      "Avery: Cancel the old Riley/Monday assignment. Sam now owns the checklist due Thursday. Sam: Agreed, I will deliver Thursday. Morgan: I will send test results Friday."
+    ],
+    "expected": "Sam checklist Thursday and Morgan results Friday are confirmed. Old Riley Monday canceled; no reconcile task."
+  },
+  {
+    "id": "written-todo-without-owner",
+    "texts": [
+      "Agreed follow-up: send the finalized agenda before the next meeting. We did not assign an owner or a calendar date.",
+      "Requirement: private notes must remain editable."
+    ],
+    "expected": "Send finalized agenda before next meeting is a real task even without named owner. Owner unspecified, no invented date. Requirement is not a task."
+  },
+  {
+    "id": "conditional-and-direct",
+    "texts": [
+      "If funding is approved, we could hire a designer. Funding is pending; no hiring commitment today. Requirement: export plain Markdown.",
+      "Casey: I will disable guest access by Wednesday. Do not remove existing employee accounts. Avery: Agreed."
+    ],
+    "expected": "Casey disables guest access Wednesday while retaining employee accounts. No hire designer or implement Markdown export task."
+  },
+  {
+    "id": "explicit-availability-check",
+    "texts": [
+      "Nina: Could Omar run the rehearsal Friday? Omar: I cannot commit to running it. I will check my availability tomorrow and report back to Nina.",
+      "Nina: I will publish the release notes Thursday."
+    ],
+    "expected": "Omar explicitly commits to checking availability tomorrow and reporting back, not running rehearsal Friday. Nina publishes release notes Thursday. Preserve both genuine tasks."
+  },
+  {
+    "id": "conditional-commitment",
+    "texts": [
+      "If funding is approved, we could hire a designer. No hiring commitment today.",
+      "Priya: If the staging check passes, I will deploy the patch Friday. The staging check is still pending."
+    ],
+    "expected": "Priya deployment Friday is an explicit conditional commitment. Preserve the staging-check condition; do not claim it is satisfied or deployment unconditional. Hiring is a suggestion, not a task."
+  }
+]

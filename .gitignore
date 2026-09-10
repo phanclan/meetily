@@ -4,6 +4,7 @@
 
 # dependencies
 /node_modules
+/.pnpm-store/
 **/models
 /.pnp
 .pnp.*
@@ -16,6 +17,7 @@
 
 # testing
 /coverage
+/.playwright-mcp/
 /dist
 
 # next.js

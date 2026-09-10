@@ -2,7 +2,6 @@
 
 import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { motion } from 'framer-motion';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { appDataDir } from '@tauri-apps/api/path';
 import { invoke } from '@tauri-apps/api/core';
@@ -11,17 +10,17 @@ import {
   CheckCircle2,
   CircleDot,
   Copy,
+  Folder,
   Loader2,
   Mic,
-  Send,
-  Sparkles,
+  MoreHorizontal,
   Square,
-  Wand2,
 } from 'lucide-react';
 import type { Block } from '@blocknote/core';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
-import { AssistantMessage } from '@/components/AssistantMessage';
+import { MeetingAssistantDock } from '@/components/MeetingDetails/MeetingAssistantDock';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useTranscripts } from '@/contexts/TranscriptContext';
 import { RecordingStatus, useRecordingState } from '@/contexts/RecordingStateContext';
 import { useConfig } from '@/contexts/ConfigContext';
@@ -30,10 +29,14 @@ import { useMeetingTitleSave } from '@/hooks/useMeetingTitleSave';
 import { useAutoSizeTitle } from '@/hooks/useAutoSizeTitle';
 import { NoteSaveStatus } from '@/components/NoteSaveStatus';
 import { useRecordingStop } from '@/hooks/useRecordingStop';
-import { useLiveMeetingChat } from '@/hooks/useLiveMeetingChat';
+import { usePersistentChat } from '@/hooks/useSavedMeetingChat';
 import { useSummaryGeneration } from '@/hooks/meeting-details/useSummaryGeneration';
 import { useTemplates } from '@/hooks/meeting-details/useTemplates';
-import { clearQuickNoteDraft, loadQuickNoteDraft, saveQuickNoteDraft } from '@/lib/quickNoteDraft';
+import { clearQuickNoteDraft, loadQuickNoteDraftForFolder, saveQuickNoteDraft } from '@/lib/quickNoteDraft';
+import { readLiveMeetingFolder } from '@/lib/liveMeetingFolder';
+import { consumeQuickNoteStartToken } from '@/lib/quickNoteRoute';
+import { useSidebar } from '@/components/Sidebar/SidebarProvider';
+import { saveDraftNote } from '@/lib/saveDraftNote';
 import { blocksToPlainText, plainTextToBlocks } from '@/lib/meetingNotes';
 import { recordingService } from '@/services/recordingService';
 import { storageService } from '@/services/storageService';
@@ -42,7 +45,7 @@ import { SummaryGeneratorButtonGroup } from '@/components/MeetingDetails/Summary
 import { EmptyStateSummary } from '@/components/EmptyStateSummary';
 import { BlockNoteSummaryView, BlockNoteSummaryViewRef } from '@/components/AISummary/BlockNoteSummaryView';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { buildMeetingContext } from '@/lib/meetingContext';
+import { buildMeetingAnswerContext } from '@/lib/meetingAnswerContext';
 import { EnhanceNotesCta } from '@/components/EnhanceNotesCta';
 
 const Editor = dynamic(() => import('@/components/BlockNoteEditor/Editor'), {
@@ -57,7 +60,7 @@ const Editor = dynamic(() => import('@/components/BlockNoteEditor/Editor'), {
 type Recipe = {
   label: string;
   prompt: string;
-  scope: 'last3min' | 'last5min' | 'full';
+  scope: 'last5min' | 'full';
 };
 
 const RECIPES: Recipe[] = [
@@ -84,22 +87,6 @@ function formatTranscriptTime(seconds?: number) {
   const minutes = Math.floor(totalSeconds / 60);
   const remainder = totalSeconds % 60;
   return `${minutes}:${remainder.toString().padStart(2, '0')}`;
-}
-
-function getScopedTranscript(
-  transcripts: { text: string; audio_start_time?: number | null }[],
-  scope: Recipe['scope'],
-) {
-  if (scope === 'full' || transcripts.length === 0) {
-    return transcripts.map(item => item.text).join('\n');
-  }
-
-  const latest = transcripts[transcripts.length - 1]?.audio_start_time ?? 0;
-  const cutoff = latest - (scope === 'last5min' ? 300 : 180);
-  return transcripts
-    .filter(item => item.audio_start_time == null || item.audio_start_time >= cutoff)
-    .map(item => item.text)
-    .join('\n');
 }
 
 function isGeneratedMeetingTitle(title: string) {
@@ -169,8 +156,17 @@ export default function QuickNotePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const freshToken = searchParams.get('fresh');
+  const requestedFolderId = searchParams.get('folder');
+  const { noteFolders, refetchMeetings } = useSidebar();
+  const [noteFolderId, setNoteFolderId] = useState<string | null>(null);
+  const [isSavingToLibrary, setIsSavingToLibrary] = useState(false);
+  const [isDraftLocked, setIsDraftLocked] = useState(false);
+  const [draftSaveError, setDraftSaveError] = useState('');
+  const librarySaveInFlight = useRef(false);
+  const noteFolder = noteFolders.data?.find(folder => folder.id === noteFolderId);
   const recordingState = useRecordingState();
   const titleRef = useRef<HTMLTextAreaElement | null>(null);
+  const transcriptTriggerRef = useRef<HTMLButtonElement | null>(null);
   const summaryRef = useRef<BlockNoteSummaryViewRef>(null);
   const [isSummaryDirty, setIsSummaryDirty] = useState(false);
   const [isSummarySaving, setIsSummarySaving] = useState(false);
@@ -193,6 +189,7 @@ export default function QuickNotePage() {
   const [chatInput, setChatInput] = useState('');
   const [isStoppingSession, setIsStoppingSession] = useState(false);
   const [savedMeetingId, setSavedMeetingId] = useState<string | null>(null);
+  const [chatRecordingId, setChatRecordingId] = useState<string | null>(null);
   const [savedTranscriptCount, setSavedTranscriptCount] = useState(0);
   const [isTranscriptOpen, setIsTranscriptOpen] = useState(false);
   const [isAiComposerOpen, setIsAiComposerOpen] = useState(false);
@@ -213,7 +210,13 @@ export default function QuickNotePage() {
     loadError,
     retryLoad,
   } = useMeetingNotes(activeNotesMeetingId);
-  const { messages, isLoading: isChatLoading, send, clearMessages, stop } = useLiveMeetingChat();
+  // Keep the recording identity across Stop; native persistence redirects it to
+  // the saved meeting atomically, including answers that finish after Stop.
+  const conversationRecordingId = currentMeetingId || chatRecordingId;
+  const { messages, isLoading: isChatLoading, send, clearMessages, stop, ready: chatReady, historyError, retryHistory } = usePersistentChat(
+    conversationRecordingId || savedMeetingId || '', conversationRecordingId ? 'recording' : 'meeting',
+  );
+  useEffect(() => { if (currentMeetingId) setChatRecordingId(currentMeetingId); }, [currentMeetingId]);
 
   const seededSessionIdsRef = useRef<Set<string>>(new Set());
   const autoStartRequestedRef = useRef(false);
@@ -246,7 +249,9 @@ export default function QuickNotePage() {
     recordingState.status === RecordingStatus.SAVING;
 
   useLayoutEffect(() => {
-    const draft = loadQuickNoteDraft();
+    const draft = loadQuickNoteDraftForFolder(requestedFolderId);
+    setIsDraftLocked(Boolean(draft.saveId));
+    setNoteFolderId(currentMeetingId ? readLiveMeetingFolder(currentMeetingId) : draft.folderId);
     autoStartRequestedRef.current = false;
     consumedFreshTokenRef.current = null;
     seededSessionIdsRef.current.clear();
@@ -266,7 +271,7 @@ export default function QuickNotePage() {
     setDraftContent(draft.content);
     setUpdatedAt(draft.updatedAt);
     setHasLoadedDraft(true);
-  }, [freshToken]);
+  }, [freshToken, requestedFolderId]);
 
   useEffect(() => {
     if (currentMeetingId) return;
@@ -283,13 +288,13 @@ export default function QuickNotePage() {
   }, [currentMeetingId]);
 
   useEffect(() => {
-    if (!hasLoadedDraft || currentMeetingId || isLiveSessionVisible || savedMeetingId) {
+    if (!hasLoadedDraft || isDraftLocked || currentMeetingId || isLiveSessionVisible || savedMeetingId) {
       return;
     }
 
-    const saved = saveQuickNoteDraft(noteTitle, draftContent);
+    const saved = saveQuickNoteDraft(noteTitle, draftContent, noteFolderId);
     setUpdatedAt(saved.updatedAt);
-  }, [noteTitle, draftContent, hasLoadedDraft, currentMeetingId, isLiveSessionVisible, savedMeetingId]);
+  }, [noteTitle, draftContent, noteFolderId, hasLoadedDraft, isDraftLocked, currentMeetingId, isLiveSessionVisible, savedMeetingId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -317,6 +322,7 @@ export default function QuickNotePage() {
 
     if (
       !hasLoadedDraft ||
+      isDraftLocked ||
       !freshToken ||
       consumedFreshTokenRef.current === freshToken ||
       autoStartRequestedRef.current ||
@@ -330,6 +336,13 @@ export default function QuickNotePage() {
 
     autoStartRequestedRef.current = true;
     consumedFreshTokenRef.current = freshToken;
+    try {
+      if (!consumeQuickNoteStartToken(freshToken)) return;
+    } catch (error) {
+      console.error('Could not consume the recording start request:', error);
+      toast.error('Could not start recording safely. Return Home and use Start recording.');
+      return;
+    }
     void maybeAutoStart();
 
     return () => {
@@ -339,6 +352,7 @@ export default function QuickNotePage() {
     currentMeetingId,
     freshToken,
     hasLoadedDraft,
+    isDraftLocked,
     isLiveSessionVisible,
     isStoppingSession,
     recordingState.isRecording,
@@ -350,6 +364,7 @@ export default function QuickNotePage() {
     if (seededSessionIdsRef.current.has(currentMeetingId)) return;
 
     seededSessionIdsRef.current.add(currentMeetingId);
+    setNoteFolderId(readLiveMeetingFolder(currentMeetingId));
     const fallbackSeed = preSessionDraftRef.current;
     const liveDraftTitle = noteTitle.trim();
     const liveDraftContent = draftContent;
@@ -416,7 +431,6 @@ export default function QuickNotePage() {
     return draftContent;
   }, [activeNotesMeetingId, blocks, draftContent, isReady]);
 
-  const liveTranscript = transcripts.slice(-16);
   const isPostRecording = !recordingState.isRecording && !isStoppingSession && Boolean(savedMeetingId);
   const shouldWaitForSessionHydration =
     Boolean(currentMeetingId) &&
@@ -429,7 +443,6 @@ export default function QuickNotePage() {
   const shouldRenderPendingTextarea = !shouldRenderEditor && !isPostRecording;
   const isNoteEmpty = noteText.trim().length === 0;
   const showSavedSummary = isPostRecording && activeSavedView === 'summary' && Boolean(aiSummary);
-  const isComposerExpanded = isAiComposerOpen || isChatLoading;
 
 
   const handleRegisterModalOpen = (openFn: () => void) => {
@@ -654,10 +667,12 @@ export default function QuickNotePage() {
     } catch {
       return;
     }
-    clearMessages();
+    // Switching identity resets the view without erasing the previous meeting.
+    setChatRecordingId(null);
+    setChatInput('');
     const currentText = noteText;
     const normalizedTitle = noteTitle.trim() || 'New note';
-    saveQuickNoteDraft(normalizedTitle, currentText);
+    saveQuickNoteDraft(normalizedTitle, currentText, noteFolderId);
     setDraftContent(currentText);
     setAiSummary(null);
     preSessionDraftRef.current = {
@@ -676,12 +691,34 @@ export default function QuickNotePage() {
     }
   };
 
-  const handleGoHome = async () => {
+  const handleSaveDraft = async () => {
+    if (librarySaveInFlight.current || activeNotesMeetingId || isLiveSessionVisible || !hasLoadedDraft) return;
+    librarySaveInFlight.current = true;
+    setIsSavingToLibrary(true);
+    setDraftSaveError('');
+    setIsDraftLocked(true);
     try {
-      if (!activeNotesMeetingId) saveQuickNoteDraft(noteTitle, draftContent);
+      const saved = await saveDraftNote(noteTitle, draftContent, noteFolderId);
+      await refetchMeetings().catch(() => {});
+      const params = new URLSearchParams({ id: saved.meetingId });
+      if (saved.folderId) params.set('folder', saved.folderId);
+      router.push(`/meeting-details?${params}`);
+    } catch (error) {
+      setIsDraftLocked(Boolean(loadQuickNoteDraftForFolder(noteFolderId).saveId));
+      setDraftSaveError(error instanceof Error ? error.message : String(error));
+    } finally {
+      librarySaveInFlight.current = false;
+      setIsSavingToLibrary(false);
+    }
+  };
+
+  const handleGoHome = async () => {
+    if (librarySaveInFlight.current) return;
+    try {
+      if (!activeNotesMeetingId) saveQuickNoteDraft(noteTitle, draftContent, noteFolderId);
       await flushPendingSave(false);
       await titleSave.flush();
-      router.push('/');
+      router.push(noteFolderId ? `/?view=all&folder=${encodeURIComponent(noteFolderId)}` : '/');
     } catch {
       // Keep the editor open so a failed note save can be retried.
     }
@@ -697,25 +734,25 @@ export default function QuickNotePage() {
   const handleRecipe = (recipe: Recipe) => {
     if (!notesSourceReady || isChatLoading) return;
     setIsAiComposerOpen(true);
-    const transcriptContext = buildMeetingContext(getScopedTranscript(transcripts, recipe.scope), noteText);
-    if (!transcriptContext.trim()) {
+    const source = buildMeetingAnswerContext(transcripts, noteText, recipe.scope);
+    if (!source.context.trim()) {
       toast.error('Add notes or record a transcript before asking about this meeting.');
       return;
     }
-    void send(recipe.prompt, transcriptContext);
+    void send(recipe.prompt, async () => source);
   };
 
   const handleSendChat = () => {
     if (!notesSourceReady || isChatLoading) return;
     setIsAiComposerOpen(true);
     const userPrompt = chatInput.trim();
-    const transcriptContext = buildMeetingContext(transcripts.map(item => item.text).join('\n'), noteText);
+    const source = buildMeetingAnswerContext(transcripts, noteText);
     if (!userPrompt) return;
-    if (!transcriptContext) {
+    if (!source.context) {
       toast.error('Add notes or record a transcript before asking about this meeting.');
       return;
     }
-    void send(userPrompt, transcriptContext);
+    void send(userPrompt, async () => source);
     setChatInput('');
   };
 
@@ -724,22 +761,20 @@ export default function QuickNotePage() {
     saveNotes(updatedBlocks);
   };
 
+  // Recording controls must remain visible even when WebKit stalls an animation.
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.22, ease: 'easeOut' }}
-      className="document-page"
-    >
-      <div className="document-shell">
-        <div className="flex flex-wrap items-center justify-between gap-4">
+    <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-background text-stone-900">
+      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col px-5 pb-5 md:px-8">
+        <div className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 bg-background py-4">
           <button
             type="button"
             onClick={() => void handleGoHome()}
+            disabled={isSavingToLibrary}
             className="document-back"
           >
             <ArrowLeft className="h-4 w-4" />
-            Home
+            {noteFolderId ? 'Back to folder' : 'Home'}
           </button>
 
           <div className="flex flex-wrap items-center justify-end gap-2">
@@ -768,23 +803,15 @@ export default function QuickNotePage() {
                       : 'Ready'}
             </StatusPill>
 
-            <Button
-              variant="outline"
-              className={`rounded-md border-stone-200/75 bg-white/70 text-stone-600 shadow-none ${isPostRecording ? 'border-stone-200/60 bg-white/55 text-stone-500' : ''}`}
-              onClick={handleCopyNote}
-            >
-              <Copy className="h-4 w-4" />
-              Copy
-            </Button>
-            {!isPostRecording && (
-              <Button
-                variant="outline"
-                className="rounded-md border-stone-200/75 bg-white/70 text-stone-600 shadow-none"
-                onClick={handleClearNote}
-              >
-                Clear
-              </Button>
-            )}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" aria-label="Note actions"><MoreHorizontal className="h-4 w-4" /></Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={handleCopyNote}>Copy note</DropdownMenuItem>
+                {!isPostRecording && <DropdownMenuItem disabled={isDraftLocked} onSelect={handleClearNote}>Clear note</DropdownMenuItem>}
+              </DropdownMenuContent>
+            </DropdownMenu>
             {recordingState.isRecording && (
               <Button
                 className="rounded-md bg-stone-900 text-white hover:bg-stone-800"
@@ -804,10 +831,17 @@ export default function QuickNotePage() {
                 )}
               </Button>
             )}
+            {!activeNotesMeetingId && !isLiveSessionVisible && (
+              <Button onClick={() => void handleSaveDraft()} disabled={isSavingToLibrary || !hasLoadedDraft || !draftContent.trim()}>
+                {isSavingToLibrary && <Loader2 className="h-4 w-4 animate-spin" />}
+                {isSavingToLibrary ? 'Saving…' : isDraftLocked ? 'Retry save' : 'Save note'}
+              </Button>
+            )}
             {!isLiveSessionVisible && (
               <Button
                 className="rounded-md bg-stone-900 text-white hover:bg-stone-800"
                 onClick={handleNewRecording}
+                disabled={isDraftLocked}
               >
                 <Mic className="h-4 w-4" />
                 {isPostRecording ? 'New recording' : 'Start recording'}
@@ -816,23 +850,24 @@ export default function QuickNotePage() {
           </div>
         </div>
 
+        {noteFolderId && <p className="mt-3 flex min-w-0 items-center gap-2 text-sm text-stone-500"><Folder className="h-3.5 w-3.5 shrink-0" /><span className="min-w-0 break-words [overflow-wrap:anywhere]">{noteFolder?.name || 'Selected folder'}</span></p>}
+        {isDraftLocked && !isSavingToLibrary && <p role="status" className="mt-3 text-sm text-stone-600">{draftSaveError ? `Could not save: ${draftSaveError}. ` : ''}Your draft is retained. Choose Retry save to finish saving and continue editing.</p>}
+        {draftSaveError && !isDraftLocked && <p role="status" className="mt-3 text-sm text-stone-600">Could not save: {draftSaveError}</p>}
         {loadError && <p role="status" className="mt-3 text-sm text-stone-600">Could not load written notes. <button type="button" onClick={retryLoad} className="underline">Retry loading notes</button></p>}
         {isPostRecording ? (
           <div className="mt-3 flex min-h-0 flex-col gap-4 pb-8">
             <section className="flex min-h-0 flex-1 flex-col">
               <div className="document-header">
                 <div className="space-y-4">
-                  <div className="inline-flex items-center gap-2 text-xs font-medium text-stone-500">
-                    <Wand2 className="h-3.5 w-3.5" />
-                    Captured note
-                  </div>
                   <textarea
                     ref={titleRef}
                     value={noteTitle}
+                    readOnly={isDraftLocked}
                     onChange={(event) => handleTitleChange(event.target.value)}
                     placeholder="New note"
                     rows={1}
-                    className="document-title"
+                    aria-label="Meeting title"
+                    className="document-title font-serif font-normal"
                   />
                   <div className="flex flex-wrap items-center gap-2 text-sm text-stone-500">
                     <InlineMeta>
@@ -868,7 +903,7 @@ export default function QuickNotePage() {
                       )}
                     </div>
 
-                    <Button variant="ghost" onClick={() => setIsTranscriptOpen(true)}>Transcript</Button>
+                    <Button ref={transcriptTriggerRef} variant="ghost" onClick={() => setIsTranscriptOpen(true)}>Transcript</Button>
                     {showEnhanceNotesCta && <EnhanceNotesCta disabled={!notesSourceReady} onClick={handleEnhanceNotes} />}
                     <div className="ml-auto rounded-md bg-white/75 p-1 ring-1 ring-stone-200/70">
                       <SummaryGeneratorButtonGroup
@@ -939,175 +974,21 @@ export default function QuickNotePage() {
                 )}
               </div>
             </section>
-
-            <div className="border-t border-stone-200 pt-4">
-              <div className="mx-auto flex w-full items-end gap-3">
-                <div className="min-w-0 flex-1 overflow-hidden rounded-lg border border-stone-200/70 bg-white/84">
-                  {isComposerExpanded ? (
-                    <div className="p-4">
-                      {messages.length > 0 && (
-                        <div className="mb-4 max-h-52 space-y-3 overflow-y-auto pr-1">
-                          {messages.map((message, index) => (
-                            <div
-                              key={`${message.role}-${index}`}
-                              className={`max-w-[78%] rounded-2xl px-4 py-3 text-sm leading-6 ${
-                                message.role === 'user'
-                                  ? 'ml-auto bg-stone-900 text-white shadow-sm'
-                                  : 'border border-stone-200/80 bg-stone-50 text-stone-700'
-                              }`}
-                            >
-                              {message.role === 'assistant' ? <AssistantMessage content={message.content} notice={message.notice} copyable={!isChatLoading || index < messages.length - 1} /> : message.content}
-                            </div>
-                          ))}
-                          {isChatLoading && (
-                        <div className="rounded-2xl bg-stone-100/85 px-4 py-3 text-sm text-stone-600">
-                              <span className="inline-flex items-center gap-2">
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                                Thinking...
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      <div className="mb-3 flex flex-wrap items-center gap-2">
-                        {RECIPES.map(recipe => (
-                          <button
-                            key={recipe.label}
-                            type="button"
-                            onClick={() => handleRecipe(recipe)}
-                            disabled={isChatLoading || !notesSourceReady}
-                            className="rounded-md border border-stone-200/75 bg-stone-50/80 px-3 py-1.5 text-xs font-medium text-stone-700 transition-colors hover:border-stone-300 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {recipe.label}
-                          </button>
-                        ))}
-                        <button
-                          type="button"
-                          onClick={() => setIsAiComposerOpen(false)}
-                          className="ml-auto rounded-md border border-stone-200 px-3 py-1.5 text-xs font-medium text-stone-500 transition-colors hover:border-stone-300 hover:text-stone-700"
-                        >
-                          Collapse
-                        </button>
-                      </div>
-
-                      <div className="flex items-center gap-2 rounded-lg border border-stone-200/80 bg-stone-50/80 p-2">
-                        <div className="flex items-center gap-2 pl-2 text-stone-400">
-                          <Sparkles className="h-4 w-4" />
-                        </div>
-                        <input
-                          value={chatInput}
-                          onFocus={() => setIsAiComposerOpen(true)}
-                          onChange={(event) => setChatInput(event.target.value)}
-                          onKeyDown={(event) => {
-                            if (event.key === 'Enter' && !event.shiftKey) {
-                              event.preventDefault();
-                              handleSendChat();
-                            }
-                          }}
-                          placeholder="Ask anything about this meeting"
-                          className="min-w-0 flex-1 border-0 bg-transparent px-2 py-2 text-sm text-stone-700 outline-none placeholder:text-stone-400"
-                        />
-                        <button
-                          type="button"
-                          onClick={handleSendChat}
-                          disabled={isChatLoading || !notesSourceReady || !chatInput.trim() || (!noteText.trim() && transcripts.length === 0)}
-                          aria-label="Send question"
-                          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-stone-900 text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {isChatLoading ? <Square className="h-4 w-4" /> : <Send className="h-4 w-4" />}
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setIsAiComposerOpen(true)}
-                      className="flex w-full items-center gap-3 px-5 py-3.5 text-left"
-                    >
-                      <div className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-md bg-stone-100/85 md:flex text-stone-700">
-                        <Sparkles className="h-4 w-4" />
-                      </div>
-                      <div className="flex-1">
-                        <p className="text-sm font-medium text-stone-900">Ask anything</p>
-                        <p className="hidden text-xs text-stone-500 md:block">Open follow-up prompts, action-item recipes, and Q&A for this meeting.</p>
-                      </div>
-                      <div className="rounded-md border border-stone-200/80 px-3 py-1.5 text-xs font-medium text-stone-600">
-                        View recipes
-                      </div>
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <Sheet open={isTranscriptOpen} onOpenChange={setIsTranscriptOpen}>
-              <SheetContent
-                side="bottom"
-                className="h-[78vh] rounded-t-xl border-stone-200 bg-white px-0 pb-0 pt-4"
-              >
-                <div className="flex h-full flex-col">
-                  <SheetHeader className="border-b border-stone-200 px-6 pb-4">
-                    <div className="flex items-start justify-between gap-4 pr-10">
-                      <div>
-                        <SheetTitle className="text-stone-900">Transcript</SheetTitle>
-                        <SheetDescription className="text-stone-600">
-                          Review everything captured in this note and copy it when needed.
-                        </SheetDescription>
-                      </div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="rounded-md border-stone-200 bg-white"
-                        onClick={handleCopyTranscript}
-                      >
-                        <Copy className="h-4 w-4" />
-                        Copy Transcript
-                      </Button>
-                    </div>
-                  </SheetHeader>
-
-                  <div className="flex-1 overflow-y-auto px-6 py-5">
-                    <div className="mx-auto max-w-4xl space-y-3">
-                      {transcripts.length > 0 ? (
-                        transcripts.map((item) => (
-                          <div
-                            key={item.id}
-                            className="rounded-lg border border-stone-200 bg-white/90 px-4 py-4 shadow-sm"
-                          >
-                            <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-stone-500">
-                              {formatTranscriptTime(item.audio_start_time)}
-                            </div>
-                            <p className="text-sm leading-7 text-stone-700">{item.text}</p>
-                          </div>
-                        ))
-                      ) : (
-                        <div className="rounded-lg border border-dashed border-stone-300 bg-stone-50 px-4 py-8 text-sm leading-6 text-stone-500">
-                          No transcript segments were captured for this note.
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </SheetContent>
-            </Sheet>
           </div>
         ) : (
-          <div className={`mt-5 grid min-h-0 flex-1 gap-5 ${isLiveSessionVisible ? 'md:grid-cols-[minmax(0,1.2fr)_minmax(300px,0.86fr)] xl:grid-cols-[minmax(0,1.4fr)_420px]' : 'mx-auto w-full max-w-[980px]'}`}>
+          <div className="mt-3 flex min-h-0 flex-1 flex-col">
             <section className="flex min-h-0 flex-col">
               <div className="document-header">
                 <div className="space-y-4">
-                  <div className="inline-flex items-center gap-2 text-xs font-medium text-stone-500">
-                    <Wand2 className="h-3.5 w-3.5" />
-                    {isLiveSessionVisible ? 'Live notes' : 'Draft note'}
-                  </div>
                   <textarea
                     ref={titleRef}
                     value={noteTitle}
+                    readOnly={isDraftLocked}
                     onChange={(event) => handleTitleChange(event.target.value)}
                     placeholder="New note"
                     rows={1}
-                    className="document-title"
+                    aria-label="Meeting title"
+                    className="document-title font-serif font-normal"
                   />
                   <div className="flex flex-wrap items-center gap-2 text-sm">
                     <StatusPill icon={<Mic className="h-3.5 w-3.5 text-stone-500" />}>
@@ -1115,9 +996,12 @@ export default function QuickNotePage() {
                     </StatusPill>
                     <StatusPill>{formatSavedAt(updatedAt)}</StatusPill>
                     {isSaving && <StatusPill>Saving notes...</StatusPill>}
+                    {isLiveSessionVisible && <button ref={transcriptTriggerRef} type="button" onClick={() => setIsTranscriptOpen(true)} className="ml-auto rounded-full border border-stone-200 px-3 py-1.5 text-xs text-stone-600 hover:bg-stone-100">Transcript · {transcripts.length}</button>}
                   </div>
                 </div>
               </div>
+
+              {isLiveSessionVisible && <p className="mt-3 line-clamp-2 text-xs leading-5 text-stone-500" aria-label="Latest transcript passage">{transcripts.at(-1)?.text || 'Listening for speech. Open Transcript to follow the recording.'}</p>}
 
               <div className="min-h-0 py-5">
                 {shouldRenderEditor ? (
@@ -1132,6 +1016,7 @@ export default function QuickNotePage() {
                 ) : shouldRenderPendingTextarea ? (
                   <textarea
                     value={draftContent}
+                    readOnly={isDraftLocked}
                     onChange={(event) => {
                       setDraftContent(event.target.value);
                       setUpdatedAt(Date.now());
@@ -1146,140 +1031,71 @@ export default function QuickNotePage() {
                 )}
               </div>
             </section>
-
-            <aside className={`${isLiveSessionVisible ? 'flex' : 'hidden'} min-h-0 flex-col gap-4 md:sticky md:top-5 md:max-h-[calc(100vh-2.5rem)]`}>
-              <section className="rounded-lg border border-stone-200/80 bg-white/90 p-5 shadow-sm">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">
-                      Live transcript
-                    </p>
-                    <h2 className="mt-2 text-lg font-semibold text-stone-900">
-                      Listen and write at the same time
-                    </h2>
-                  </div>
-                  <span className="rounded-md bg-stone-100 px-3 py-1 text-xs font-medium text-stone-600">
-                    {transcripts.length} segments
-                  </span>
-                </div>
-
-                <div className="mt-4 max-h-[220px] space-y-2 overflow-y-auto pr-1 lg:max-h-[260px]">
-                  {liveTranscript.length > 0 ? (
-                    liveTranscript.map(item => (
-                      <div
-                        key={item.id}
-                        className="rounded-2xl border border-stone-200 bg-stone-50 px-3 py-3"
-                      >
-                        <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-stone-500">
-                          {formatTranscriptTime(item.audio_start_time)}
-                        </div>
-                        <p className="text-sm leading-6 text-stone-700">{item.text}</p>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="rounded-2xl border border-dashed border-stone-300 bg-stone-50 px-4 py-6 text-sm leading-6 text-stone-500">
-                      Transcript will appear here once speech is detected.
-                    </div>
-                  )}
-                </div>
-              </section>
-
-              <section className="flex min-h-0 flex-1 flex-col rounded-lg border border-stone-200/80 bg-white p-5 shadow-sm md:min-h-[320px]">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">
-                      AI copilot
-                    </p>
-                    <h2 className="mt-2 text-lg font-semibold text-stone-900">
-                      Get to the useful part faster
-                    </h2>
-                  </div>
-                  {messages.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={clearMessages}
-                      className="text-xs font-medium text-stone-500 transition-colors hover:text-stone-700"
-                    >
-                      Clear
-                    </button>
-                  )}
-                </div>
-
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {RECIPES.map(recipe => (
-                    <button
-                      key={recipe.label}
-                      type="button"
-                      onClick={() => handleRecipe(recipe)}
-                      disabled={isChatLoading || !notesSourceReady}
-                      className="rounded-md border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-700 transition-colors hover:border-stone-300 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {recipe.label}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="mt-4 flex-1 space-y-3 overflow-y-auto pr-1">
-                  {messages.length > 0 ? (
-                    messages.map((message, index) => (
-                      <div
-                        key={`${message.role}-${index}`}
-                        className={`rounded-2xl px-4 py-3 text-sm leading-6 ${
-                          message.role === 'user'
-                            ? 'bg-stone-900 text-white shadow-sm'
-                            : 'border border-stone-200/80 bg-white/90 text-stone-700'
-                        }`}
-                      >
-                        {message.role === 'assistant' ? <AssistantMessage content={message.content} notice={message.notice} copyable={!isChatLoading || index < messages.length - 1} /> : message.content}
-                      </div>
-                    ))
-                  ) : (
-                    <div className="rounded-2xl border border-dashed border-stone-300 bg-stone-50 px-4 py-6 text-sm leading-6 text-stone-500">
-                      Ask for a recap, suggested topics, or action items while the meeting is still happening.
-                    </div>
-                  )}
-                  {isChatLoading && (
-                    <div className="rounded-2xl bg-stone-100 px-4 py-3 text-sm text-stone-600">
-                      <span className="inline-flex items-center gap-2">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        Thinking...
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                <div className="mt-4 flex items-center gap-2 rounded-lg border border-stone-200 bg-stone-50 p-2">
-                  <div className="flex items-center gap-2 pl-2 text-stone-400">
-                    <Sparkles className="h-4 w-4" />
-                  </div>
-                  <input
-                    value={chatInput}
-                    onChange={(event) => setChatInput(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' && !event.shiftKey) {
-                        event.preventDefault();
-                        handleSendChat();
-                      }
-                    }}
-                    placeholder="Ask anything about this meeting"
-                    className="min-w-0 flex-1 border-0 bg-transparent px-2 py-2 text-sm text-stone-700 outline-none placeholder:text-stone-400"
-                  />
-                  <button
-                    type="button"
-                    onClick={isChatLoading ? stop : handleSendChat}
-                    disabled={!isChatLoading && (!notesSourceReady || !chatInput.trim() || (!noteText.trim() && transcripts.length === 0))}
-                    aria-label={isChatLoading ? "Stop answer" : "Send question"}
-                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-stone-900 text-white transition-colors hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {isChatLoading ? <Square className="h-4 w-4" /> : <Send className="h-4 w-4" />}
-                  </button>
-                </div>
-              </section>
-            </aside>
           </div>
         )}
       </div>
-    </motion.div>
+      </div>
+      {(isLiveSessionVisible || isPostRecording) && <MeetingAssistantDock
+        expanded={isAiComposerOpen} onExpandedChange={setIsAiComposerOpen}
+        messages={messages} loading={isChatLoading} input={chatInput} onInputChange={setChatInput}
+        onSend={handleSendChat} onStop={stop} onClear={clearMessages}
+        canSend={chatReady && notesSourceReady && Boolean(noteText.trim() || transcripts.length)}
+        historyStatus={historyError || (!chatReady ? 'Loading conversation…' : undefined)}
+        onRetryHistory={historyError ? retryHistory : undefined}
+        recipes={RECIPES.map(recipe => ({ label: recipe.label, onSelect: () => handleRecipe(recipe) }))}
+      />}
+      <Sheet open={isTranscriptOpen} onOpenChange={setIsTranscriptOpen}>
+        <SheetContent
+          side="bottom"
+          onCloseAutoFocus={event => { event.preventDefault(); transcriptTriggerRef.current?.focus(); }}
+          className="h-[78dvh] rounded-t-xl border-stone-200 bg-white px-0 pb-0 pt-4"
+        >
+          <div className="flex h-full flex-col">
+            <SheetHeader className="border-b border-stone-200 px-6 pb-4">
+              <div className="flex items-start justify-between gap-4 pr-10">
+                <div>
+                  <SheetTitle className="text-stone-900">Transcript</SheetTitle>
+                  <SheetDescription className="text-stone-600">
+                    {isLiveSessionVisible ? 'Updates as speech is captured. Your written notes remain separate.' : 'Review everything captured in this note and copy it when needed.'}
+                  </SheetDescription>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="rounded-md border-stone-200 bg-white"
+                  onClick={handleCopyTranscript}
+                >
+                  <Copy className="h-4 w-4" />
+                  Copy Transcript
+                </Button>
+              </div>
+            </SheetHeader>
+
+            <div className="flex-1 overflow-y-auto px-6 py-5">
+              <div className="mx-auto max-w-3xl">
+                {transcripts.length > 0 ? (
+                  transcripts.map((item) => (
+                    <div
+                      key={item.id}
+                      className="border-b border-stone-100 py-4 last:border-0"
+                    >
+                      <div className="mb-2 text-xs text-stone-400">
+                        {formatTranscriptTime(item.audio_start_time)}
+                      </div>
+                      <p className="text-sm leading-7 text-stone-700">{item.text}</p>
+                    </div>
+                  ))
+                ) : (
+                  <div className="rounded-lg border border-dashed border-stone-300 bg-stone-50 px-4 py-8 text-sm leading-6 text-stone-500">
+                    {isLiveSessionVisible ? 'Waiting for speech. New transcript passages will appear here.' : 'No transcript segments were captured for this note.'}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
+    </div>
   );
 }
 

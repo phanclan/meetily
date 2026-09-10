@@ -9,6 +9,12 @@ use super::platform;
 
 /// List all available audio devices on the system
 pub async fn list_audio_devices() -> Result<Vec<AudioDevice>> {
+    // Driver discovery can block while probing stream configurations. Keep it off
+    // Tokio workers used by capture, transcription, and recording controls.
+    tokio::task::spawn_blocking(list_audio_devices_blocking).await?
+}
+
+fn list_audio_devices_blocking() -> Result<Vec<AudioDevice>> {
     let host = cpal::default_host();
 
     // Platform-specific device enumeration

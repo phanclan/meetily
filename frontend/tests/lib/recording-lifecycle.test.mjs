@@ -43,6 +43,30 @@ function loader(stubs = {}, globals = {}) {
 const blocks = [{ id: 'note-1', type: 'paragraph', content: [{ type: 'text', text: 'Synthetic recovery note', styles: {} }], children: [] }];
 const quietReact = { useCallback: f => f, useEffect: noop, useRef: value => ({ current: value }), useState: value => [value, noop] };
 
+test('Markdown export waits for pending saves and preserves the meeting identity', async () => {
+  const calls = [];
+  const load = loader({ '@/meetnola/ipc': { meetnolaInvoke: async (command, args) => {
+    calls.push([command, args.meetingId]); return '/exports/note.md';
+  } } });
+  const { exportSavedMeeting } = load('@/lib/exportSavedMeeting');
+  let finish;
+  const pending = exportSavedMeeting('synthetic-A', () => new Promise(resolve => { finish = resolve; }));
+  assert.deepEqual(calls, []);
+  finish();
+  assert.equal(await pending, '/exports/note.md');
+  assert.deepEqual(calls, [['export_meeting_markdown', 'synthetic-A']]);
+});
+
+test('Markdown export stops on save failure and surfaces native write failures', async () => {
+  let invoked = 0;
+  const load = loader({ '@/meetnola/ipc': { meetnolaInvoke: async () => { invoked++; throw new Error('Folder unavailable'); } } });
+  const { exportSavedMeeting } = load('@/lib/exportSavedMeeting');
+  await assert.rejects(exportSavedMeeting('synthetic-A', async () => { throw new Error('Save failed'); }), /Save failed/);
+  assert.equal(invoked, 0);
+  await assert.rejects(exportSavedMeeting('synthetic-A', async () => {}), /Folder unavailable/);
+  assert.equal(invoked, 1);
+});
+
 test('assistant answers render task lists, paragraphs and links as Markdown', () => {
   const load = loader({ 'react-markdown': Markdown, 'remark-gfm': remarkGfm });
   const { AssistantMessage } = load(path.join(root, 'src/components/AssistantMessage.tsx'));
@@ -135,6 +159,260 @@ test('draft navigation does not request a fresh recording while explicit recordi
   assert.match(route.createQuickNotePath(), /^\/quick-note\?fresh=\d+$/);
   assert.equal(route.createRecordingWorkspacePath(true), '/quick-note');
   assert.match(route.createRecordingWorkspacePath(false), /fresh=/);
+});
+
+test('recording start links are consumed once across reloads and older history entries', () => {
+  const sessionStorage = storage();
+  const open = () => loader({}, { window: { sessionStorage } })('@/lib/quickNoteRoute');
+  const first = open();
+  assert.equal(first.consumeQuickNoteStartToken('100'), true);
+  assert.equal(first.consumeQuickNoteStartToken('100'), false);
+  const reloaded = open();
+  assert.equal(reloaded.consumeQuickNoteStartToken('100'), false);
+  assert.equal(reloaded.consumeQuickNoteStartToken('101'), true);
+  assert.equal(open().consumeQuickNoteStartToken('100'), false);
+  for (const invalid of ['0', '-1', 'Infinity', '9007199254740992', 'not-a-start']) {
+    assert.equal(reloaded.consumeQuickNoteStartToken(invalid), false);
+  }
+  const clockMovedBack = loader({}, { window: { sessionStorage }, Date: { now: () => 50 } })('@/lib/quickNoteRoute');
+  assert.equal(clockMovedBack.createQuickNotePath(), '/quick-note?fresh=102');
+  assert.equal(clockMovedBack.consumeQuickNoteStartToken('102'), true);
+});
+
+test('recording start fails closed when its replay guard cannot persist', () => {
+  const sessionStorage = { getItem: () => null, setItem: () => { throw new Error('Storage unavailable'); } };
+  const route = loader({}, { window: { sessionStorage } })('@/lib/quickNoteRoute');
+  assert.throws(() => route.consumeQuickNoteStartToken('100'), /Storage unavailable/);
+});
+
+test('folder entry is encoded and an existing draft keeps its original folder', () => {
+  const localStorage = storage();
+  const load = loader({}, { localStorage, window: { sessionStorage: storage() } });
+  const route = load('@/lib/quickNoteRoute');
+  assert.equal(route.createDraftNotePath('folder & a'), '/quick-note?folder=folder%20%26%20a');
+  assert.match(route.createQuickNotePath('folder & a'), /fresh=\d+&folder=folder%20%26%20a$/);
+  const drafts = load('@/lib/quickNoteDraft');
+  const initial = drafts.loadQuickNoteDraftForFolder('folder-a');
+  assert.equal(initial.folderId, 'folder-a');
+  drafts.saveQuickNoteDraft('Draft A', 'Keep this text', initial.folderId);
+  assert.equal(drafts.loadQuickNoteDraftForFolder('folder-b').folderId, 'folder-a');
+  assert.equal(drafts.loadQuickNoteDraftForFolder(null).content, 'Keep this text');
+  drafts.saveQuickNoteDraft('Edited title', 'Updated text');
+  assert.equal(drafts.loadQuickNoteDraft().folderId, 'folder-a');
+  drafts.clearQuickNoteDraft();
+  assert.equal(drafts.loadQuickNoteDraft().folderId, null);
+  drafts.saveQuickNoteDraft('Existing unfiled draft', 'Keep unfiled', null);
+  assert.equal(drafts.loadQuickNoteDraftForFolder('folder-b').folderId, null);
+});
+
+test('folder binding survives draft cleanup and reload without leaking to another recording', () => {
+  const localStorage = storage();
+  const sessionStorage = storage();
+  const window = { location: { pathname: '/quick-note' } };
+  const load = loader({}, { localStorage, sessionStorage, window });
+  const drafts = load('@/lib/quickNoteDraft');
+  const folders = load('@/lib/liveMeetingFolder');
+  drafts.saveQuickNoteDraft('Folder draft', 'Synthetic text', 'folder-a');
+  folders.prepareRecordingFolder(folders.currentRecordingFolder());
+  folders.bindRecordingFolder('meeting-1');
+  drafts.clearQuickNoteDraft();
+  assert.equal(folders.readLiveMeetingFolder('meeting-1'), 'folder-a');
+  folders.bindRecordingFolder('meeting-2');
+  assert.equal(folders.readLiveMeetingFolder('meeting-2'), null);
+  const reloaded = loader({}, { localStorage, sessionStorage, window })('@/lib/liveMeetingFolder');
+  assert.equal(reloaded.readLiveMeetingFolder('meeting-1'), 'folder-a');
+  drafts.saveQuickNoteDraft('Another draft', 'Text', 'folder-b');
+  window.location.pathname = '/';
+  assert.equal(reloaded.currentRecordingFolder(), null);
+});
+
+test('recording folder assignment uses the real Meetnola IPC namespace', async () => {
+  const calls = [];
+  const load = loader({ '@tauri-apps/api/core': { invoke: async (command, args) => calls.push({ command, args }) } },
+    { localStorage: storage(), sessionStorage: storage() });
+  const folders = load('@/lib/liveMeetingFolder');
+  folders.prepareRecordingFolder('folder-a');
+  folders.bindRecordingFolder('meeting-1');
+  await folders.saveLiveMeetingFolder('meeting-1', 'saved-1');
+  assert.equal(calls[0].command, 'plugin:meetnola|set_meeting_note_folder');
+  assert.equal(calls[0].args.meetingId, 'saved-1');
+});
+
+test('standalone note save persists its immutable submission through failure and reload', async () => {
+  const localStorage = storage();
+  const requests = [];
+  let fail = true, sequence = 0;
+  const stubs = { '@tauri-apps/api/core': { invoke: async (command, args) => {
+    assert.equal(command, 'plugin:meetnola|create_note');
+    requests.push(args);
+    if (fail) throw new Error('Synthetic lost response');
+    return 'meeting-note-saved';
+  } } };
+  const globals = { localStorage, window: {}, crypto: { randomUUID: () => `synthetic-${++sequence}` } };
+  const load = loader(stubs, globals);
+  const drafts = load('@/lib/quickNoteDraft');
+  drafts.saveQuickNoteDraft('Written note', 'Synthetic source text', 'folder-a');
+  await assert.rejects(load('@/lib/saveDraftNote').saveDraftNote('Written note', 'Synthetic source text', 'folder-a'), /lost response/);
+  const pending = drafts.loadQuickNoteDraft();
+  assert.equal(pending.saveId, requests[0].draftId);
+  drafts.saveQuickNoteDraft('Late stale render', 'Must not replace pending text', null);
+  assert.equal(drafts.loadQuickNoteDraft().content, 'Synthetic source text');
+  assert.equal(drafts.loadQuickNoteDraft().folderId, 'folder-a');
+  fail = false;
+  const reloaded = loader(stubs, globals);
+  const saved = await reloaded('@/lib/saveDraftNote').saveDraftNote('Ignored on retry', 'Ignored', null);
+  assert.equal(saved.meetingId, 'meeting-note-saved');
+  assert.equal(saved.folderId, 'folder-a');
+  assert.equal(requests[1].draftId, requests[0].draftId);
+  assert.equal(requests[1].title, 'Written note');
+  assert.equal(requests[1].notesMarkdown, 'Synthetic source text');
+  assert.equal(JSON.parse(requests[1].notesJson)[0].content[0].text, 'Synthetic source text');
+  assert.equal(drafts.loadQuickNoteDraft().content, '');
+  assert.equal(drafts.loadQuickNoteDraft().saveId, null);
+});
+
+test('empty standalone drafts do not call IPC or lock the draft', async () => {
+  const load = loader({ '@tauri-apps/api/core': { invoke: async () => assert.fail('Empty draft reached IPC') } },
+    { localStorage: storage(), window: {} });
+  await assert.rejects(load('@/lib/saveDraftNote').saveDraftNote('Title', '  ', null), /Write something/);
+  assert.equal(load('@/lib/quickNoteDraft').loadQuickNoteDraft().saveId, null);
+});
+
+test('quick-note task syntax saves real checkboxes with their original completion state', async () => {
+  let sequence = 0, request;
+  const load = loader({ '@tauri-apps/api/core': { invoke: async (_command, args) => {
+    request = args;
+    return 'meeting-note-tasks';
+  } } }, { localStorage: storage(), window: {}, crypto: { randomUUID: () => `task-${++sequence}` } });
+  const source = 'Release review\r\n- [ ] Send results Friday\r\n* [x] Review captions\r\n+ [X] Check résumé 🧭';
+  await load('@/lib/saveDraftNote').saveDraftNote('Tasks', source, null);
+  const saved = JSON.parse(request.notesJson);
+  assert.deepEqual(saved.map(block => block.type), ['paragraph', 'checkListItem', 'checkListItem', 'checkListItem']);
+  assert.deepEqual(saved.slice(1).map(block => block.props.checked), [false, true, true]);
+  assert.equal(new Set(saved.map(block => block.id)).size, 4);
+  assert.equal(request.notesMarkdown, source);
+  assert.equal(load('@/lib/meetingNotes').blocksToPlainText(saved),
+    'Release review\n- [ ] Send results Friday\n- [x] Review captions\n- [x] Check résumé 🧭');
+});
+
+test('quoted, fenced, indented-code, and non-task text does not create follow-ups', () => {
+  let sequence = 0;
+  const { plainTextToBlocks } = loader({}, {
+    crypto: { randomUUID: () => `example-${++sequence}` },
+  })('@/lib/meetingNotes');
+  const source = [
+    'Example: - [ ] Do not assign', '> - [ ] Quoted', '    - [ ] Indented code',
+    '- [maybe] Proposal', '- [ ]', '- ordinary bullet',
+    '````markdown', '- [ ] Fenced', '```', '- [x] Still fenced', '````',
+    '~~~', '- [ ] Tilde example', '~~~', '- [ ] Real task',
+  ].join('\n');
+  const converted = plainTextToBlocks(source);
+  assert.equal(converted.filter(block => block.type === 'checkListItem').length, 1);
+  assert.equal(converted.at(-1).content[0].text, 'Real task');
+  assert.equal(converted.slice(0, -1).map(block => block.content[0].text).join('\n'),
+    source.slice(0, source.lastIndexOf('\n')));
+});
+
+for (const fail of [false, true]) {
+  test(`recording start ${fail ? 'failure clears' : 'captures'} folder context across asynchronous setup`, async () => {
+    const localStorage = storage();
+    const sessionStorage = storage();
+    const window = { location: { pathname: '/quick-note' } };
+    let folders;
+    const load = loader({
+      react: quietReact,
+      '@tauri-apps/api/core': { invoke: async command => {
+        // Model setup may resolve after the user has left the folder's workspace.
+        window.location.pathname = '/';
+        return command === 'parakeet_has_available_models' ? true : null;
+      } },
+      '@/contexts/TranscriptContext': { useTranscripts: () => ({ clearTranscripts: noop, setMeetingTitle: noop }) },
+      '@/components/Sidebar/SidebarProvider': { useSidebar: () => ({ setIsMeetingActive: noop }) },
+      '@/contexts/ConfigContext': { useConfig: () => ({ selectedDevices: {}, transcriptModelConfig: { provider: 'parakeet' } }) },
+      '@/contexts/RecordingStateContext': { useRecordingState: () => ({ setStatus: noop }), RecordingStatus: {} },
+      '@/services/recordingService': { recordingService: { startRecordingWithDevices: async () => {
+        if (fail) throw new Error('Synthetic start failure');
+        folders.bindRecordingFolder('meeting-1');
+      } } },
+      '@/lib/analytics': { default: { trackButtonClick: noop }, __esModule: true },
+      '@/lib/recordingNotification': { showRecordingNotification: async () => {} },
+      sonner: { toast: { info: noop, error: noop } },
+    }, { localStorage, sessionStorage, window });
+    folders = load('@/lib/liveMeetingFolder');
+    load('@/lib/quickNoteDraft').saveQuickNoteDraft('Synthetic draft', 'Text', 'folder-a');
+    const start = load('@/hooks/useRecordingStart').useRecordingStart(false, noop).handleRecordingStart();
+    if (fail) {
+      await assert.rejects(start, /Synthetic start failure/);
+      folders.bindRecordingFolder('meeting-1');
+      assert.equal(folders.readLiveMeetingFolder('meeting-1'), null);
+    } else {
+      await start;
+      assert.equal(folders.readLiveMeetingFolder('meeting-1'), 'folder-a');
+    }
+  });
+}
+
+for (const tray of [false, true]) {
+  test(`${tray ? 'tray' : 'editor'} stop retains a failed folder assignment and retries before cleanup`, async () => {
+    let fail = true;
+    const f = stopFixture({ folderId: 'folder-a', assignFolder: async () => { if (fail) throw new Error('Folder write unavailable'); } });
+    const stop = f.useRecordingStop(noop, noop);
+    const options = tray ? undefined : { autoNavigate: false, showToast: false, onSaved: () => f.events.push('callback') };
+    assert.equal(await stop.handleRecordingStop(true, options), undefined);
+    assert.deepEqual(f.events, ['meeting', 'notes', 'folder']);
+    assert.notEqual(f.notes.readLiveMeetingNotes('meeting-1'), null);
+    assert.equal(f.folders.readLiveMeetingFolder('meeting-1'), 'folder-a');
+    fail = false;
+    assert.equal(await stop.handleRecordingStop(true, options), 'meeting-a5ce2dc0-f470-485c-b35d-1b2bd0b49059');
+    assert.equal(f.notes.readLiveMeetingNotes('meeting-1'), null);
+    assert.equal(f.folders.readLiveMeetingFolder('meeting-1'), null);
+    assert.ok(f.events.lastIndexOf('folder') < f.events.indexOf('marked'));
+    if (tray) assert.match(f.routes[0], /&folder=folder-a&source=recording$/);
+  });
+}
+
+test('recovery retains its folder when assignment fails, including after a fresh module load', async () => {
+  const localStorage = storage();
+  const sessionStorage = storage();
+  const events = [];
+  let fail = true;
+  const stubs = {
+    react: quietReact,
+    sonner: { toast: { error: noop, warning: noop } },
+    '@tauri-apps/api/core': { invoke: async (command, args) => {
+      if (command !== 'set_meeting_note_folder') return null;
+      assert.equal(args.meetingId, 'meeting-saved-uuid');
+      assert.equal(args.folderId, 'folder-a');
+      events.push('folder');
+      if (fail) throw new Error('Folder write unavailable');
+    } },
+    '@/services/indexedDBService': { indexedDBService: {
+      getMeetingMetadata: async () => ({ title: 'Synthetic interrupted note' }),
+      getTranscripts: async () => [],
+      markMeetingSaved: async () => events.push('marked'),
+    } },
+    '@/services/storageService': { storageService: { saveMeeting: async (_title, _transcripts, _folderPath, sourceId) => {
+      assert.equal(sourceId, 'meeting-1');
+      return { meeting_id: 'meeting-saved-uuid' };
+    } } },
+    '@/lib/summary-language-preferences': { applyPinnedSummaryLanguageToMeeting: async () => {} },
+    '@/meetnola/ipc': { saveMeetingNotes: async () => events.push('notes'), meetnolaInvoke: (...args) => stubs['@tauri-apps/api/core'].invoke(...args) },
+  };
+  const load = loader(stubs, { localStorage, sessionStorage });
+  const notes = load('@/lib/liveMeetingNotes');
+  const folders = load('@/lib/liveMeetingFolder');
+  notes.writeLiveMeetingNotes('meeting-1', blocks);
+  folders.prepareRecordingFolder('folder-a');
+  folders.bindRecordingFolder('meeting-1');
+  await assert.rejects(load('@/hooks/useTranscriptRecovery').useTranscriptRecovery().recoverMeeting('meeting-1'), /Folder write unavailable/);
+  assert.deepEqual(events, ['notes', 'folder']);
+  assert.notEqual(notes.readLiveMeetingNotes('meeting-1'), null);
+  assert.equal(folders.readLiveMeetingFolder('meeting-1'), 'folder-a');
+  fail = false;
+  const reloaded = loader(stubs, { localStorage, sessionStorage });
+  assert.equal((await reloaded('@/hooks/useTranscriptRecovery').useTranscriptRecovery().recoverMeeting('meeting-1')).success, true);
+  assert.deepEqual(events, ['notes', 'folder', 'notes', 'folder', 'marked']);
+  assert.equal(folders.readLiveMeetingFolder('meeting-1'), null);
 });
 
 test('rapid title edits are serialized and navigation waits for the final write', async () => {
@@ -233,16 +511,25 @@ test('legacy text notes load into the editor and a failed edit can be retried in
   assert.equal(writes.at(-1).notesMarkdown, 'Synthetic recovery note');
 });
 
-function stopFixture({ failNotes = false, meetingTitle = 'Synthetic meeting' } = {}) {
+function stopFixture({ failNotes = false, meetingTitle = 'Synthetic meeting', folderId = null, assignFolder = async () => {} } = {}) {
   const localStorage = storage();
   const sessionStorage = storage();
   const events = [];
+  const routes = [];
   const transcripts = [{ text: 'Synthetic transcript', audio_start_time: 0, audio_end_time: 1 }];
   const savedTitles = [];
   let saves = 0;
   const load = loader({
     react: quietReact,
-    'next/navigation': { useRouter: () => ({ push: () => events.push('navigate') }) },
+    'next/navigation': { useRouter: () => ({ push: path => { routes.push(path); events.push('navigate'); } }) },
+    '@tauri-apps/api/core': { invoke: async (command, args) => {
+      assert.equal(command, 'set_meeting_note_folder');
+      assert.equal(args.folderId, folderId);
+      assert.equal(args.included, true);
+      assert.equal(args.meetingId, 'meeting-a5ce2dc0-f470-485c-b35d-1b2bd0b49059');
+      events.push('folder');
+      await assignFolder();
+    } },
     '@tauri-apps/api/event': { listen: async () => noop },
     '@tauri-apps/plugin-store': { Store: { load: async () => ({ get: async () => 2 }) } },
     sonner: { toast: { success: () => events.push('toast'), warning: noop, error: noop } },
@@ -253,12 +540,24 @@ function stopFixture({ failNotes = false, meetingTitle = 'Synthetic meeting' } =
     '@/services/storageService': { storageService: { saveMeeting: async (title, received, _folder, sourceId) => { savedTitles.push(title); assert.equal(sourceId, 'meeting-1'); assert.equal(received.length, 1); saves++; events.push('meeting'); return { meeting_id: 'meeting-a5ce2dc0-f470-485c-b35d-1b2bd0b49059' }; }, getMeeting: async () => ({ id: 'meeting-a5ce2dc0-f470-485c-b35d-1b2bd0b49059', title: 'Synthetic meeting' }) } },
     '@/lib/analytics': { default: new Proxy({}, { get: () => async () => {} }), __esModule: true },
     '@/lib/summary-language-preferences': { applyPinnedSummaryLanguageToMeeting: async () => true },
-    '@/meetnola/ipc': { saveMeetingNotes: async args => { events.push('notes'); if (failNotes) throw new Error('disk full'); assert.equal(args.meetingId, 'meeting-a5ce2dc0-f470-485c-b35d-1b2bd0b49059'); assert.match(args.notesMarkdown, /Synthetic recovery note/); } },
+    '@/meetnola/ipc': {
+      meetnolaInvoke: async (command, args) => {
+        assert.equal(command, 'set_meeting_note_folder');
+        assert.equal(args.folderId, folderId);
+        assert.equal(args.included, true);
+        assert.equal(args.meetingId, 'meeting-a5ce2dc0-f470-485c-b35d-1b2bd0b49059');
+        events.push('folder'); await assignFolder();
+      },
+      saveMeetingNotes: async args => { events.push('notes'); if (failNotes) throw new Error('disk full'); assert.equal(args.meetingId, 'meeting-a5ce2dc0-f470-485c-b35d-1b2bd0b49059'); assert.match(args.notesMarkdown, /Synthetic recovery note/); },
+    },
   }, { localStorage, sessionStorage });
   const notes = load('@/lib/liveMeetingNotes');
   notes.writeLiveMeetingNotes('meeting-1', blocks);
+  const folders = load('@/lib/liveMeetingFolder');
+  folders.prepareRecordingFolder(folderId);
+  folders.bindRecordingFolder('meeting-1');
   const { useRecordingStop } = load('@/hooks/useRecordingStop');
-  return { notes, events, savedTitles, useRecordingStop, saves: () => saves };
+  return { notes, folders, routes, events, savedTitles, useRecordingStop, saves: () => saves };
 }
 
 function titleFixture() {
@@ -1273,6 +1572,7 @@ function hookRunner(modulePath, exportName, stubs = {}, globals = {}) {
   let cursor = 0;
   const changed = (a, b) => !a || b.some((value, i) => value !== a[i]);
   const react = {
+    createContext: value => ({ Provider: 'test-context-provider', value }),
     useState(initial) {
       const i = cursor++;
       if (!(i in slots)) slots[i] = typeof initial === 'function' ? initial() : initial;
@@ -1300,6 +1600,91 @@ function hookRunner(modulePath, exportName, stubs = {}, globals = {}) {
     unmount() { slots.forEach(slot => slot?.cleanup?.()); },
   };
 }
+
+function recordingStateFixture({ delayedListeners = false } = {}) {
+  const handlers = {}, reads = [], timers = new Map(), registrations = [], removed = [];
+  let timerId = 0;
+  const service = { getRecordingState: () => new Promise((resolve, reject) => reads.push({ resolve, reject })) };
+  for (const event of ['Started', 'Stopped', 'Paused', 'Resumed']) service[`onRecording${event}`] = callback => {
+    handlers[event] = callback;
+    const remove = () => removed.push(event);
+    if (delayedListeners) return new Promise(resolve => registrations.push(() => resolve(remove)));
+    return Promise.resolve(remove);
+  };
+  const runner = hookRunner(path.join(root, 'src/contexts/RecordingStateContext.tsx'), 'RecordingStateProvider', {
+    '@/services/recordingService': { recordingService: service },
+  }, { setInterval: callback => { timers.set(++timerId, callback); return timerId; }, clearInterval: id => timers.delete(id) });
+  return { runner, handlers, reads, timers, registrations, removed, render: () => runner.render({ children: null }).props.value };
+}
+const backendRecording = (recording = true) => ({ is_recording: recording, is_paused: false, is_active: recording,
+  recording_duration: recording ? 4 : null, active_duration: recording ? 4 : null });
+
+test('reopening an active recording restores lifecycle status and keeps its setter stable', async () => {
+  const f = recordingStateFixture();
+  const before = f.render(); await new Promise(setImmediate);
+  f.reads[0].resolve(backendRecording()); await new Promise(setImmediate);
+  const restored = f.render();
+  assert.equal(restored.status, 'recording'); assert.equal(restored.isRecording, true);
+  assert.equal(restored.setStatus, before.setStatus);
+  f.reads[1].resolve(backendRecording()); await new Promise(setImmediate);
+  assert.equal(f.render(), restored, 'Unchanged backend values should not rerender every consumer');
+  f.runner.unmount();
+});
+
+test('slow recording polls do not overlap or resurrect capture after Stop and Saving', async () => {
+  const f = recordingStateFixture();
+  f.render(); await new Promise(setImmediate);
+  f.reads[0].resolve(backendRecording()); await new Promise(setImmediate); f.render();
+  const tick = [...f.timers.values()][0];
+  tick(); tick(); tick(); assert.equal(f.reads.length, 2);
+  f.handlers.Stopped({ message: 'Stopped' });
+  let state = f.render(); assert.equal(state.isRecording, false); assert.equal(state.status, 'stopping');
+  state.setStatus('saving', 'Saving meeting'); f.render();
+  f.reads[1].resolve(backendRecording()); await new Promise(setImmediate);
+  f.reads[2].resolve(backendRecording()); await new Promise(setImmediate);
+  state = f.render();
+  assert.equal(state.isRecording, false); assert.equal(state.status, 'saving'); assert.equal(state.statusMessage, 'Saving meeting');
+  f.runner.unmount();
+});
+
+test('Starting polls recover a missed event without allowing an older idle response to undo it', async () => {
+  const f = recordingStateFixture();
+  f.render(); await new Promise(setImmediate);
+  f.reads[0].resolve(backendRecording(false)); await new Promise(setImmediate);
+  f.render().setStatus('starting'); f.render();
+  f.reads[1].resolve(backendRecording()); await new Promise(setImmediate);
+  assert.equal(f.render().status, 'recording', 'Backend confirmation is sufficient even without a started event');
+  f.handlers.Started(); f.render();
+  f.reads[2].resolve(backendRecording(false)); await new Promise(setImmediate);
+  assert.equal(f.render().status, 'recording', 'Ignore a pre-event poll');
+  f.reads[3].resolve(backendRecording()); await new Promise(setImmediate);
+  assert.equal(f.render().isRecording, true);
+  f.runner.unmount();
+});
+
+test('a missed stopped event clears capture flags without interrupting transcript processing', async () => {
+  const f = recordingStateFixture();
+  f.render(); await new Promise(setImmediate);
+  f.reads[0].resolve(backendRecording()); await new Promise(setImmediate);
+  f.render().setStatus('processing', 'Finishing transcript'); f.render();
+  f.reads[1].resolve(backendRecording(false)); await new Promise(setImmediate);
+  f.reads[2].resolve(backendRecording(false)); await new Promise(setImmediate);
+  const state = f.render();
+  assert.equal(state.isRecording, false); assert.equal(state.isActive, false);
+  assert.equal(state.status, 'processing'); assert.equal(state.statusMessage, 'Finishing transcript');
+  assert.equal(f.timers.size, 0);
+  f.runner.unmount();
+});
+
+test('recording listeners registered after unmount are released and cannot restart polling', async () => {
+  const f = recordingStateFixture({ delayedListeners: true });
+  f.render(); f.runner.unmount();
+  for (let i = 0; i < 4; i++) { f.registrations[i](); await new Promise(setImmediate); }
+  assert.deepEqual(f.removed, ['Started', 'Stopped', 'Paused', 'Resumed']);
+  f.handlers.Started();
+  f.reads[0].resolve(backendRecording()); await new Promise(setImmediate);
+  assert.equal(f.timers.size, 0); assert.equal(f.reads.length, 1);
+});
 
 test('library questions retrieve topical words and retain a topic for follow-ups', () => {
   const { librarySearchTerms } = loader({ '@/meetnola/ipc': {} })('@/lib/libraryAnswerContext');
@@ -1351,6 +1736,28 @@ test('library search failures and stopped retrieval never call the model', async
   assert.equal(modelCalls, 0);
 });
 
+test('recent questions bypass keywords, preserve final sources and disclose omitted meetings', async () => {
+  const calls = [];
+  let result = { totalMeetings: 8, excerpts: Array.from({ length: 205 }, (_, n) => ({
+    meetingId: 'A', title: 'Synthetic review', createdAt: '2026-09-01', kind: 'transcript', audioStartTime: n,
+    text: n === 204 ? 'Morgan will send results Friday.' : 'Synthetic discussion.',
+  })) };
+  const { loadLibraryAnswerContext } = loader({ '@/meetnola/ipc': { meetnolaInvoke: async (...args) => { calls.push(args); return result; } } })('@/lib/libraryAnswerContext');
+  const context = await loadLibraryAnswerContext('What is this?', [], '7', 'recent');
+  assert.equal(calls[0][0], 'get_recent_library_sources');
+  assert.equal(calls[0][1].sinceDays, 7);
+  assert.equal(calls[0][1].terms, undefined);
+  assert.equal(context.sources.length, 205);
+  assert.match(context.context, /\[S205\].*Transcript · 3:24\nMorgan will send results Friday/);
+  assert.match(context.coverage, /1 of 8 meetings/);
+  assert.match(context.coverage, /older meetings were not reviewed/);
+  result = { ...result, totalMeetings: 1 };
+  assert.match((await loadLibraryAnswerContext('List todos', [], 'all', 'recent')).coverage, /All meetings with saved source text/);
+  assert.equal(calls.at(-1)[1].sinceDays, null);
+  result = { totalMeetings: 0, excerpts: [] };
+  await assert.rejects(loadLibraryAnswerContext('List todos', [], '7', 'recent'), /No saved notes or transcripts/);
+});
+
 test('library conversations use separate durable storage and retain citation coverage', async () => {
   const calls = [];
   const messages = [{ role: 'user', content: 'Who owns comet?' }, { role: 'assistant', content: 'Mira [S1](#source-S1)', sources: [{ id: 'S1', meetingId: 'A', label: 'Comet plan', text: 'Mira owns comet.' }], coverage: '1 meeting' }];
@@ -1386,7 +1793,7 @@ function librarySettingsFixture(invoke) {
 test('library drafts restore with their date scope and flush immediately on Quit', async () => {
   const calls = [];
   const f = librarySettingsFixture(async (command, args) => {
-    if (command === 'get_library_chat_settings') return { draft: 'Saved draft', period: '30', archived: false };
+    if (command === 'get_library_chat_settings') return { draft: 'Saved draft', period: '30', sourceScope: 'keywords', archived: false };
     calls.push(args);
   });
   let state = f.runner.render('A');
@@ -1396,10 +1803,13 @@ test('library drafts restore with their date scope and flush immediately on Quit
   state = f.runner.render('A');
   assert.equal(state.settings.draft, 'Saved draft');
   assert.equal(state.settings.period, '30');
+  state.setSourceScope('recent');
+  state = f.runner.render('A');
   state.setInput('Last edit immediately before Quit');
   await f.flush();
   assert.equal(calls.at(-1).draft, 'Last edit immediately before Quit');
   assert.equal(calls.at(-1).period, '30');
+  assert.equal(calls.at(-1).sourceScope, 'recent');
 });
 
 test('library settings reject stale reads and preserve failed writes for retry', async () => {
@@ -1411,8 +1821,8 @@ test('library settings reject stale reads and preserve failed writes for retry',
   });
   f.runner.render('A'); await new Promise(setImmediate);
   f.runner.render('B'); await new Promise(setImmediate);
-  reads.get('B')({ draft: 'B draft', period: '7', archived: false }); await new Promise(setImmediate);
-  reads.get('A')({ draft: 'Late A', period: 'all', archived: false }); await new Promise(setImmediate);
+  reads.get('B')({ draft: 'B draft', period: '7', sourceScope: 'keywords', archived: false }); await new Promise(setImmediate);
+  reads.get('A')({ draft: 'Late A', period: 'all', sourceScope: 'keywords', archived: false }); await new Promise(setImmediate);
   let state = f.runner.render('B');
   assert.equal(state.settings.draft, 'B draft');
   state.setInput('B edited'); f.runner.render('B'); f.fire(); await new Promise(setImmediate);
@@ -1425,7 +1835,7 @@ test('library settings reject stale reads and preserve failed writes for retry',
 test('archived conversations cannot overwrite their saved draft', async () => {
   let writes = 0;
   const f = librarySettingsFixture(async command => {
-    if (command === 'get_library_chat_settings') return { draft: 'Archived draft', period: '90', archived: true };
+    if (command === 'get_library_chat_settings') return { draft: 'Archived draft', period: '90', sourceScope: 'recent', archived: true };
     writes++;
   });
   f.runner.render('A'); await new Promise(setImmediate);
@@ -1741,6 +2151,53 @@ function savedChatFixture(invoke, exportName = 'useSavedMeetingChat') {
   return { runner, live, flush: writes.flushPendingWrites };
 }
 
+test('recording conversation waits for identity and restores cited history from its own scope', async () => {
+  const calls = [];
+  const saved = [{ role: 'assistant', content: 'Morgan [S1](#source-S1)', sources: [{ id: 'S1', label: 'Written notes', text: 'Morgan will send results Friday.' }] }];
+  const f = savedChatFixture(async (command, args) => {
+    calls.push({ command, ...args });
+    if (command === 'get_recording_chat') return JSON.stringify(saved);
+  }, 'usePersistentChat');
+  f.runner.render('', 'recording'); await new Promise(setImmediate);
+  assert.equal(f.runner.render('', 'recording').ready, false);
+  assert.equal(calls.length, 0, 'An idle scratchpad must not create a conversation');
+  f.runner.render('meeting-123', 'recording'); await new Promise(setImmediate);
+  const state = f.runner.render('meeting-123', 'recording'); await new Promise(setImmediate);
+  assert.equal(state.ready, true);
+  assert.equal(state.messages[0].sources[0].text, saved[0].sources[0].text);
+  assert.equal(calls[0].command, 'get_recording_chat');
+  assert.equal(calls[0].recordingId, 'meeting-123');
+  assert.equal(calls.at(-1).command, 'save_recording_chat');
+  assert.equal(calls.at(-1).recordingId, 'meeting-123');
+});
+
+test('opening a saved recording waits for its final live conversation write', async () => {
+  const writes = loader()('@/lib/pendingWrites');
+  let stored = null, release, allowWrite;
+  let reads = 0;
+  const live = { messages: [], isLoading: false, send: async () => {}, restoreMessages: saved => { live.messages = saved; } };
+  const invoke = async (command, args) => {
+    if (command === 'get_recording_chat') return null;
+    if (command === 'get_meeting_chat') { reads++; return stored; }
+    if (allowWrite) await new Promise(resolve => { release = resolve; });
+    stored = args.messagesJson;
+  };
+  const stubs = { './useLiveMeetingChat': { useLiveMeetingChat: () => live }, '@/meetnola/ipc': { meetnolaInvoke: invoke }, '@/lib/pendingWrites': writes };
+  const recording = hookRunner('@/hooks/useSavedMeetingChat', 'usePersistentChat', stubs);
+  recording.render('meeting-123', 'recording'); await new Promise(setImmediate);
+  recording.render('meeting-123', 'recording'); await new Promise(setImmediate);
+  allowWrite = true;
+  live.messages = [{ role: 'user', content: 'Question' }, { role: 'assistant', content: 'Last visible partial' }]; live.isLoading = true;
+  recording.render('meeting-123', 'recording'); recording.unmount(); await new Promise(setImmediate);
+  const saved = hookRunner('@/hooks/useSavedMeetingChat', 'useSavedMeetingChat', stubs);
+  saved.render('meeting-recording-meeting-123'); await new Promise(setImmediate);
+  assert.equal(reads, 0, 'Do not read history before the navigation checkpoint finishes');
+  allowWrite = false; release(); await new Promise(setImmediate);
+  const state = saved.render('meeting-recording-meeting-123');
+  assert.equal(state.messages[1].content, 'Last visible partial');
+  assert.match(state.messages[1].notice, /incomplete/);
+});
+
 test('history load errors block questions and writes until a successful retry', async () => {
   let fail = true, saves = 0;
   const f = savedChatFixture(async command => {
@@ -1807,6 +2264,45 @@ test('failed conversation writes retain the latest answer for retry', async () =
   assert.equal(f.runner.render('A').historyError, null);
 });
 
+
+test('saved meeting discovery ignores stale reads and retries a failed page without losing results', async () => {
+  const flush = () => new Promise(resolve => setImmediate(resolve));
+  const requests = [], timers = new Map();
+  let timerId = 0;
+  const runner = hookRunner('@/hooks/useSavedMeetingSearch', 'useSavedMeetingSearch', {
+    '@/meetnola/ipc': { meetnolaInvoke: (command, args) => new Promise((resolve, reject) => requests.push({ command, ...args, resolve, reject })) },
+  }, { setTimeout: callback => { timers.set(++timerId, callback); return timerId; }, clearTimeout: id => timers.delete(id) });
+  const match = meetingId => ({ meetingId, title: meetingId, createdAt: '', kind: 'notes', text: 'Original source match', audioStartTime: null });
+  runner.render('alpha'); timers.get(1)();
+  assert.equal(requests[0].command, 'search_saved_meetings');
+  assert.equal(requests[0].query, 'alpha');
+  runner.render('beta'); timers.get(2)();
+  requests[0].resolve({ meetings: [match('old')], hasMore: false }); await flush();
+  assert.equal(runner.render('beta').results.length, 0);
+  requests[1].resolve({ meetings: [match('B')], hasMore: true }); await flush();
+  let hook = runner.render('beta');
+  assert.deepEqual([...hook.results].map(row => row.meetingId), ['B']);
+  const failed = hook.loadMore(); hook.loadMore();
+  assert.equal(requests.length, 3, 'Repeated load-more clicks cannot overlap');
+  assert.equal(requests[2].offset, 1);
+  requests[2].reject(new Error('Synthetic search failure')); await failed;
+  hook = runner.render('beta');
+  assert.equal(hook.results[0].meetingId, 'B');
+  assert.match(hook.error, /Synthetic search failure/);
+  const retry = hook.retry();
+  assert.equal(requests[3].offset, 1, 'Retry must not skip the failed page');
+  requests[3].resolve({ meetings: [match('B'), match('C')], hasMore: false }); await retry;
+  hook = runner.render('beta');
+  assert.deepEqual([...hook.results].map(row => row.meetingId), ['B', 'C']);
+  assert.equal(hook.error, null);
+  assert.equal(hook.hasMore, false);
+  runner.render('gamma'); timers.get(3)();
+  runner.render('');
+  requests[4].resolve({ meetings: [match('late')], hasMore: false }); await flush();
+  assert.equal(runner.render('').results.length, 0);
+  assert.equal(runner.render('').loading, false);
+  runner.unmount();
+});
 
 test('summary polls survive rerenders, stay independent, and serialize slow reads', async () => {
   const timers = new Map(), reads = [], updates = [];
@@ -1891,6 +2387,49 @@ for (const initialSummaryStatus of ['pending', 'processing']) {
     runner.unmount();
     assert.ok(stopped.includes('B'));
   });
+}
+
+for (const status of ['cancelled', 'failed']) {
+  for (const outcome of ['resolved', 'rejected']) {
+    for (const destination of ['other-meeting', 'unmounted']) {
+      test(`late ${status} restoration is ignored when ${outcome} after ${destination}`, async () => {
+        const callbacks = [], summaries = [], notices = [];
+        let settle;
+        const startSummaryPolling = (_id, _process, callback) => callbacks.push(callback);
+        const runner = hookRunner('@/hooks/meeting-details/useSummaryGeneration', 'useSummaryGeneration', {
+          sonner: { toast: { dismiss: noop, error: (...args) => notices.push(args), warning: noop,
+            info: (...args) => notices.push(args), success: (...args) => notices.push(args) } },
+          '@/components/Sidebar/SidebarProvider': { useSidebar: () => ({ startSummaryPolling, stopSummaryPolling: noop }) },
+          '@tauri-apps/api/core': { invoke: () => new Promise((resolve, reject) => {
+            settle = () => outcome === 'resolved'
+              ? resolve({ data: { markdown: 'Old meeting summary' } }) : reject(new Error('Old meeting read failed'));
+          }) },
+          '@/lib/analytics': { default: new Proxy({}, { get: () => async () => {} }), __esModule: true },
+          '@/lib/utils': { isOllamaNotInstalledError: () => false },
+        });
+        const props = { meeting: { id: 'A', title: 'First meeting' }, transcripts: [], notesText: 'Original notes.',
+          initialSummaryStatus: 'processing', modelConfig: { provider: 'groq', model: 'synthetic' },
+          isModelConfigLoading: false, selectedTemplate: 'default', updateMeetingTitle: noop,
+          setAiSummary: summary => summaries.push(summary) };
+        runner.render(props);
+        const pending = callbacks[0]({ status, error: 'Synthetic generation failure' });
+        assert.equal(typeof settle, 'function', 'The restore read must already be in flight');
+        const other = { ...props, meeting: { id: 'B', title: 'Second meeting' } };
+        if (destination === 'unmounted') runner.unmount();
+        else { runner.render(other); assert.equal(runner.render(other).summaryStatus, 'processing'); }
+        settle(); await pending;
+        assert.deepEqual(summaries, [], 'A late restore must not replace another meeting or an unmounted editor');
+        assert.deepEqual(notices, [], 'A departed request must not report success or failure on the current screen');
+        if (destination === 'other-meeting') {
+          assert.equal(runner.render(other).summaryStatus, 'processing');
+          assert.equal(runner.render(other).summaryError, null);
+          await callbacks.at(-1)({ status: 'completed', data: { markdown: 'Second meeting result' } });
+          assert.equal(summaries.at(-1).markdown, 'Second meeting result');
+          runner.unmount();
+        }
+      });
+    }
+  }
 }
 
 test('enhancement suppresses duplicate entry points through preparation and active polling', async () => {
@@ -2065,4 +2604,346 @@ test('claim checking keeps quoted text separate from original meeting evidence a
   assert.equal(evidence.sources[0].label, 'Transcript · 0:42');
   assert.throws(() => summaryClaimQuestion(' '), /Select a statement/);
   assert.throws(() => summaryClaimQuestion('a'.repeat(MAX_SUMMARY_CLAIM_LENGTH + 1)), /Select a statement/);
+});
+
+test('search source reads follow meeting and source identity, with missing and retry states', async () => {
+  const requests = [];
+  const runner = hookRunner('@/hooks/useSavedSearchMatch', 'useSavedSearchMatch', {
+    '@/meetnola/ipc': { meetnolaInvoke: (command, args) => new Promise((resolve, reject) => requests.push({ command, ...args, resolve, reject })) },
+  });
+  const flush = () => new Promise(setImmediate);
+  const target = { kind: 'transcript', sourceId: 'A-late-segment', query: 'launch & title' };
+  assert.equal(runner.render('A', target).loading, true);
+  assert.equal(requests[0].command, 'get_saved_search_match');
+  assert.equal(requests[0].sourceId, 'A-late-segment');
+  assert.equal(requests[0].query, 'launch & title');
+  const next = { ...target, sourceId: 'B-notes', kind: 'notes' };
+  runner.render('B', next);
+  requests[0].resolve({ text: 'Old meeting passage' }); await flush();
+  assert.equal(runner.render('B', next).match, null);
+  requests[1].reject(new Error('Synthetic read failure')); await flush();
+  let state = runner.render('B', next);
+  assert.match(state.error, /Synthetic read failure/);
+  state.retry(); runner.render('B', next);
+  assert.equal(requests.length, 3);
+  requests[2].resolve(null); await flush();
+  state = runner.render('B', next);
+  assert.equal(state.loading, false); assert.equal(state.error, null); assert.equal(state.match, null);
+  const changed = { ...next, query: 'new query' };
+  assert.equal(runner.render('B', changed).loading, true);
+  requests[3].resolve({ text: 'Current passage' }); await flush();
+  assert.equal(runner.render('B', changed).match.text, 'Current passage');
+  const other = { ...changed, sourceId: 'B-other' };
+  assert.equal(runner.render('B', other).match, null, 'Never flash the prior source while the next one loads');
+  runner.unmount(); requests[4].resolve({ text: 'Late unmounted result' }); await flush();
+});
+
+test('matching source renders current excerpts safely and distinguishes failed from removed passages', () => {
+  let source = { loading: true, match: null, error: null, retry: noop };
+  const rows = loader()(path.join(root, 'src/components/MeetingDetails/SavedTranscriptRows.tsx'));
+  const { SearchResultSource } = loader({
+    '@/hooks/useSavedSearchMatch': { useSavedSearchMatch: () => source },
+    './SavedTranscriptRows': rows,
+  })(path.join(root, 'src/components/MeetingDetails/SearchResultSource.tsx'));
+  const props = { meetingId: 'A', target: { kind: 'transcript', sourceId: 'late', query: 'custom <script>' }, onShowAll: noop };
+  const html = () => renderToStaticMarkup(createElement(SearchResultSource, props));
+  assert.match(html(), /Loading the matching passage/); assert.ok(!html().includes('no longer matches'));
+  source = { ...source, loading: false, error: 'failure' };
+  assert.match(html(), /Retry passage/); assert.ok(!html().includes('no longer matches'));
+  source = { ...source, error: null };
+  assert.match(html(), /no longer matches/);
+  source = { ...source, match: { text: 'Keep <script> out of source markup.', audioStartTime: 125 } };
+  assert.match(html(), /2:05/); assert.match(html(), /&lt;script&gt;/); assert.ok(!html().includes('<script>'));
+  assert.match(html(), /Show full transcript/);
+  props.target.kind = 'notes'; assert.match(html(), /Show all written notes/);
+});
+
+test('folder reads discard stale selections, retain confirmed data during refresh, and retry failures', async () => {
+  const requests = [];
+  const runner = hookRunner('@/hooks/useNoteFolders', 'useFolderRead', {
+    '@/meetnola/ipc': { meetnolaInvoke: (command, args) => new Promise((resolve, reject) => requests.push({ command, ...args, resolve, reject })) },
+  });
+  const flush = () => new Promise(setImmediate);
+  const render = (folderId, revision = 0, enabled = true) => runner.render('get_note_folder_members', { folderId }, enabled, revision);
+  render('A'); render('B');
+  requests[0].resolve(['wrong-note']); await flush(); assert.equal(render('B').data, null);
+  requests[1].resolve(['B-note']); await flush(); assert.deepEqual([...render('B').data], ['B-note']);
+  render('B', 1); assert.deepEqual([...render('B', 1).data], ['B-note']);
+  requests[2].reject(new Error('Synthetic folder read failure')); await flush();
+  let state = render('B', 1); assert.match(state.error, /Synthetic folder read failure/); assert.deepEqual([...state.data], ['B-note']);
+  state.retry(); render('B', 1); requests[3].resolve(['B-note', 'new-note']); await flush();
+  state = render('B', 1); assert.equal(state.error, null); assert.equal(state.data.length, 2);
+  const oldSetter = state.setData;
+  assert.equal(render('C').data, null); oldSetter(['stale-choice']); assert.equal(render('C').data, null);
+  render('C', 0, false); requests[4].resolve(['late']); await flush();
+  state = render('C', 0, false); assert.equal(state.loading, false); assert.equal(state.data, null);
+  runner.unmount();
+});
+
+test('search results never flash matches from a previously selected folder', async () => {
+  const requests = [], timers = [];
+  const runner = hookRunner('@/hooks/useSavedMeetingSearch', 'useSavedMeetingSearch', {
+    '@/meetnola/ipc': { meetnolaInvoke: (command, args) => new Promise(resolve => requests.push({ command, ...args, resolve })) },
+  }, { setTimeout: callback => { timers.push(callback); return timers.length; }, clearTimeout: noop });
+  const flush = () => new Promise(setImmediate);
+  runner.render('launch', 'A'); timers[0]();
+  requests[0].resolve({ meetings: [{ meetingId: 'A-note' }], hasMore: false }); await flush();
+  assert.equal(runner.render('launch', 'A').results[0].meetingId, 'A-note');
+  assert.equal(runner.render('launch', 'B').results.length, 0);
+  timers[1](); assert.equal(requests[1].folderId, 'B');
+  runner.render('launch', 'C'); timers[2]();
+  requests[1].resolve({ meetings: [{ meetingId: 'B-note' }], hasMore: false }); await flush();
+  assert.equal(runner.render('launch', 'C').results.length, 0);
+  requests[2].resolve({ meetings: [{ meetingId: 'C-note' }], hasMore: false }); await flush();
+  assert.equal(runner.render('launch', 'C').results[0].meetingId, 'C-note');
+  runner.unmount();
+});
+
+test('coverage review uses current editor snapshots without transcript or chat history', async () => {
+  const calls = [], cancelled = [];
+  const runner = hookRunner('@/hooks/useNotesCoverage', 'useNotesCoverage', {
+    '@/meetnola/ipc': {
+      prepareLiveQuery: async () => 'review-1',
+      liveQuery: async args => { calls.push(args); return JSON.stringify({ findings: [] }); },
+      cancelLiveQuery: async id => { cancelled.push(id); },
+    },
+  });
+  const read = async () => ({ notes: 'Current original notes.', draft: 'Unsaved current enhancement.' });
+  runner.render('A', true, read); await new Promise(setImmediate);
+  const state = runner.render('A', true, read);
+  assert.equal(state.loading, false); assert.equal(state.findings.length, 0);
+  assert.equal(state.notes, 'Current original notes.');
+  assert.equal(calls.length, 1); assert.equal(calls[0].notesReview.draft, 'Unsaved current enhancement.');
+  assert.equal(calls[0].transcriptContext, ''); assert.equal(calls[0].userMessage, '');
+  assert.equal(calls[0].history, undefined); assert.ok(cancelled.includes('review-1'));
+  runner.unmount();
+});
+
+test('coverage review cancels registrations resolved after closing and never dispatches them', async () => {
+  let resolvePrepare; const cancelled = [], calls = [];
+  const runner = hookRunner('@/hooks/useNotesCoverage', 'useNotesCoverage', {
+    '@/meetnola/ipc': {
+      prepareLiveQuery: () => new Promise(resolve => { resolvePrepare = resolve; }),
+      liveQuery: async args => { calls.push(args); return '{"findings":[]}'; },
+      cancelLiveQuery: async id => { cancelled.push(id); },
+    },
+  });
+  const read = async () => ({ notes: 'Original', draft: 'Draft' });
+  runner.render('A', true, read); await new Promise(setImmediate);
+  runner.render('A', false, read); resolvePrepare('late-review'); await new Promise(setImmediate);
+  assert.equal(calls.length, 0); assert.ok(cancelled.includes('late-review'));
+  assert.equal(runner.render('A', false, read).findings, null);
+  runner.unmount();
+});
+
+test('coverage review ignores obsolete results after meeting changes and unmount', async () => {
+  const requests = [], cancelled = []; let nextId = 0;
+  const runner = hookRunner('@/hooks/useNotesCoverage', 'useNotesCoverage', {
+    '@/meetnola/ipc': {
+      prepareLiveQuery: async () => `review-${++nextId}`,
+      liveQuery: args => new Promise(resolve => requests.push({ args, resolve })),
+      cancelLiveQuery: async id => { cancelled.push(id); },
+    },
+  });
+  const read = async () => ({ notes: 'Original', draft: 'Draft' });
+  runner.render('A', true, read); await new Promise(setImmediate);
+  runner.render('B', true, read); await new Promise(setImmediate);
+  requests[0].resolve('{"findings":[{"explanation":"Obsolete"}]}'); await new Promise(setImmediate);
+  assert.equal(runner.render('B', true, read).findings, null);
+  assert.ok(cancelled.includes('review-1'));
+  runner.unmount(); requests[1].resolve('{"findings":[]}'); await new Promise(setImmediate);
+  assert.ok(cancelled.includes('review-2'));
+});
+
+test('coverage review retries failures with a fresh snapshot and rejects missing sources', async () => {
+  let current = { notes: '', draft: 'Draft' }; const calls = [];
+  const runner = hookRunner('@/hooks/useNotesCoverage', 'useNotesCoverage', {
+    '@/meetnola/ipc': {
+      prepareLiveQuery: async () => 'review', cancelLiveQuery: async () => {},
+      liveQuery: async args => { calls.push(args); if (calls.length === 1) throw Error('Synthetic model failure'); return '{"findings":[]}'; },
+    },
+  });
+  const read = async () => current;
+  const render = () => runner.render('A', true, read);
+  render(); await new Promise(setImmediate);
+  assert.match(render().error, /Add written notes/); assert.equal(calls.length, 0);
+  current = { notes: 'First snapshot', draft: 'Draft' };
+  render().retry(); render(); await new Promise(setImmediate);
+  assert.match(render().error, /Synthetic model failure/);
+  current = { notes: 'Updated snapshot', draft: 'Edited draft' };
+  render().retry(); render(); await new Promise(setImmediate);
+  assert.equal(render().error, ''); assert.equal(render().notes, 'Updated snapshot');
+  assert.equal(calls[1].notesReview.draft, 'Edited draft');
+  runner.unmount();
+});
+
+test('previous enhancement waits for pending edits and exposes failed saves before reading', async () => {
+  const calls = [];
+  let finishSave;
+  let save = () => new Promise(resolve => { finishSave = resolve; });
+  const runner = hookRunner('@/hooks/usePreviousSummary', 'usePreviousSummary', {
+    '@tauri-apps/api/core': { invoke: async (command, args) => { calls.push({ command, args }); return null; } },
+  });
+  const props = { meetingId: 'A', open: true, beforeRead: () => save(), onRestored: noop };
+  runner.render(props);
+  assert.equal(calls.length, 0);
+  finishSave(); await new Promise(setImmediate);
+  assert.equal(calls[0].command, 'plugin:meetnola|get_previous_summary');
+  assert.equal(runner.render(props).data, null);
+  runner.render({ ...props, open: false });
+  save = async () => { throw Error('Could not save latest edit'); };
+  runner.render(props); await new Promise(setImmediate);
+  assert.match(runner.render(props).error, /Could not save your current edits/);
+  assert.equal(calls.length, 1);
+  save = async () => {};
+  runner.render(props).retry(); runner.render(props); await new Promise(setImmediate);
+  assert.equal(calls.length, 2);
+});
+
+test('previous enhancement ignores reads after closing, changing notes, or unmounting', async () => {
+  const requests = [];
+  const runner = hookRunner('@/hooks/usePreviousSummary', 'usePreviousSummary', {
+    '@/meetnola/ipc': { meetnolaInvoke: (command, args) => new Promise(resolve => requests.push({ command, ...args, resolve })) },
+  });
+  const props = { meetingId: 'A', open: true, beforeRead: async () => {}, onRestored: noop };
+  const flush = () => new Promise(setImmediate);
+  runner.render(props); await flush();
+  runner.render({ ...props, open: false });
+  requests[0].resolve({ result: { markdown: 'Old A' } }); await flush();
+  assert.equal(runner.render({ ...props, open: false }).data, null);
+  const other = { ...props, meetingId: 'B' };
+  runner.render(props); await flush();
+  runner.render(other); await flush();
+  requests[1].resolve({ result: { markdown: 'Old A' } }); await flush();
+  assert.equal(runner.render(other).data, null);
+  runner.unmount(); requests[2].resolve({ result: { markdown: 'Old B' } }); await flush();
+});
+
+test('previous enhancement suppresses duplicate restores and retries the same version after failure', async () => {
+  const requests = [], restored = [];
+  const version = { versionId: 'version-A', currentRevision: 'revision-A', result: { markdown: 'Previous A' } };
+  const runner = hookRunner('@/hooks/usePreviousSummary', 'usePreviousSummary', {
+    '@tauri-apps/api/core': { invoke: async (command, args) => {
+      if (command.endsWith('|get_previous_summary')) return version;
+      return new Promise((resolve, reject) => requests.push({ command, args, resolve, reject }));
+    } },
+  });
+  const props = { meetingId: 'A', open: true, beforeRead: async () => {}, onRestored: value => restored.push(value) };
+  const flush = () => new Promise(setImmediate);
+  runner.render(props); await flush();
+  let state = runner.render(props);
+  const first = state.restore(); await state.restore();
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].command, 'plugin:meetnola|restore_previous_summary');
+  assert.equal(requests[0].args.versionId, 'version-A');
+  assert.equal(requests[0].args.currentRevision, 'revision-A');
+  requests[0].reject('Synthetic lost response'); await first;
+  state = runner.render(props); assert.match(state.error, /Could not confirm the restore/);
+  assert.equal(restored.length, 0);
+  const retry = state.restore();
+  assert.deepEqual(requests[0].args, requests[1].args);
+  requests[1].resolve(version.result); await retry;
+  assert.equal(restored[0].markdown, 'Previous A');
+  state = runner.render(props);
+  const late = state.restore();
+  runner.render({ ...props, meetingId: 'B' });
+  requests[2].resolve({ markdown: 'Late A' }); await late;
+  assert.equal(restored.length, 1);
+});
+
+test('previous enhancement previews structured edits read-only ahead of fallback Markdown', () => {
+  const load = loader({
+    '@/components/ui/button': {},
+    '@/components/ui/dialog': {},
+    'next/dynamic': () => props => createElement('div', { 'data-editable': String(props.editable) }, JSON.stringify(props.initialContent)),
+    '@/hooks/usePreviousSummary': {},
+    '@/components/AssistantMessage': { AssistantMessage: ({ content }) => createElement('p', null, content) },
+  });
+  const { PreviousSummaryPreview } = load(path.join(root, 'src/components/MeetingDetails/PreviousSummaryDialog.tsx'));
+  const html = renderToStaticMarkup(createElement(PreviousSummaryPreview, { result: { summary_json: blocks, markdown: 'Stale fallback' } }));
+  assert.match(html, /data-editable="false"/);
+  assert.match(html, /Synthetic recovery note/);
+  assert.ok(!html.includes('Stale fallback'));
+});
+
+
+test('note find treats punctuation literally and keeps Unicode offsets in the original text', () => {
+  const { noteMatchOffsets } = loader()(path.join(root, 'src/lib/noteFind.ts'));
+  const text = 'Résumé 🧭 [Q1]+ cost $9.00; RÉSUMÉ';
+  const snippets = query => noteMatchOffsets(text, query).map(match => text.slice(match.start, match.end)).join('|');
+  assert.equal(snippets('résumé'), 'Résumé|RÉSUMÉ');
+  assert.equal(snippets('[Q1]+'), '[Q1]+');
+  assert.equal(snippets('$9.00'), '$9.00');
+  assert.equal(snippets('🧭'), '🧭');
+  assert.equal(noteMatchOffsets('İ item', 'item')[0].start, 2);
+  assert.equal(noteMatchOffsets('nothing', 'missing').length, 0);
+  assert.equal(noteMatchOffsets('words', '   ').length, 0);
+});
+
+test('note find bounds repeated matches without skipping the final match', () => {
+  const { noteMatchOffsets, MAX_NOTE_MATCHES } = loader()(path.join(root, 'src/lib/noteFind.ts'));
+  assert.equal(noteMatchOffsets('a'.repeat(2000), 'a').length, MAX_NOTE_MATCHES + 1);
+  assert.equal(noteMatchOffsets('banana', 'ana').length, 1);
+  assert.equal(noteMatchOffsets('word word', 'word')[1].end, 9);
+});
+
+test('follow-up writes flush notes and preserve nested source blocks and checkbox status', async () => {
+  const original = JSON.stringify([{ id: 'paragraph', type: 'paragraph', content: [{ type: 'text', text: 'Keep this paragraph.' }], children: [
+    { id: 'task', type: 'checkListItem', props: { checked: false }, content: [{ type: 'text', text: 'Send ' }, { type: 'link', content: [{ type: 'text', text: 'the results ' }] }, { type: 'text', text: 'Friday' }] },
+  ] }]);
+  const calls = [];
+  const load = loader({
+    '@/lib/pendingWrites': { createWriteQueue: key => ({ flush: async () => calls.push(['flush', key]) }) },
+    '@/meetnola/ipc': {
+      getMeetingNotes: async id => { calls.push(['read', id]); return { notes_json: original, updated_at: 'r1' }; },
+      meetnolaInvoke: async (command, args) => calls.push([command, args]),
+    },
+  });
+  await load('@/lib/noteTasks').setNoteTaskChecked({ meetingId: 'A', blockId: 'task', checked: false, revision: 'r1' }, true);
+  assert.deepEqual(calls.slice(0, 2), [['flush', 'notes:A'], ['read', 'A']]);
+  const [command, saved] = calls[2];
+  assert.equal(command, 'save_meeting_notes_if_unchanged'); assert.equal(saved.expectedNotesJson, original);
+  const blocks = JSON.parse(saved.notesJson);
+  assert.equal(blocks[0].content[0].text, 'Keep this paragraph.');
+  assert.equal(blocks[0].children[0].props.checked, true);
+  assert.equal(saved.notesMarkdown, 'Keep this paragraph.\n- [x] Send the results Friday');
+  assert.equal(JSON.parse(original)[0].children[0].props.checked, false);
+});
+
+test('stale or ambiguous follow-up sources never overwrite a note', async () => {
+  for (const [revision, blocks] of [
+    ['newer', [{ id: 'task', type: 'checkListItem', props: { checked: false } }]],
+    ['r1', [{ id: 'task', type: 'checkListItem', props: { checked: true } }]],
+    ['r1', [{ id: 'task', type: 'paragraph' }]],
+    ['r1', [{ id: 'task', type: 'checkListItem' }, { id: 'task', type: 'checkListItem' }]],
+    ['r1', []],
+  ]) {
+    const load = loader({
+      '@/lib/pendingWrites': { createWriteQueue: () => ({ flush: async () => {} }) },
+      '@/meetnola/ipc': { getMeetingNotes: async () => ({ notes_json: JSON.stringify(blocks), updated_at: revision }), meetnolaInvoke: () => assert.fail('Must not write a stale or ambiguous source') },
+    });
+    await assert.rejects(load('@/lib/noteTasks').setNoteTaskChecked({ meetingId: 'A', blockId: 'task', checked: false, revision: 'r1' }, true), /changed/);
+  }
+});
+
+test('follow-up lists ignore late folder results and prevent duplicate writes', async () => {
+  const requests = []; let finishSave; let writes = 0;
+  const runner = hookRunner('@/hooks/useNoteTasks', 'useNoteTasks', {
+    '@/meetnola/ipc': { meetnolaInvoke: (command, args) => new Promise((resolve, reject) => requests.push({ ...args, resolve, reject })) },
+    '@/lib/noteTasks': { setNoteTaskChecked: () => { writes++; return new Promise(resolve => { finishSave = resolve; }); } },
+  });
+  const flush = () => new Promise(setImmediate);
+  runner.render(false, 'A'); runner.render(false, 'B');
+  requests[0].resolve({ tasks: [{ blockId: 'old' }], hasMore: false }); await flush();
+  assert.equal(runner.render(false, 'B').tasks.length, 0);
+  const task = { meetingId: 'B', blockId: 'task', checked: false };
+  requests[1].resolve({ tasks: [task], hasMore: false }); await flush();
+  let state = runner.render(false, 'B'); assert.equal(state.tasks[0].blockId, 'task');
+  const pending = state.toggle(task);
+  assert.equal(await state.toggle(task), false); assert.equal(writes, 1);
+  finishSave(); await flush();
+  assert.equal(requests[2].folderId, 'B'); assert.equal(requests[2].offset, 0);
+  requests[2].resolve({ tasks: [], hasMore: false }); await pending;
+  state = runner.render(false, 'B'); assert.equal(state.tasks.length, 0); assert.equal(state.saving, false);
+  runner.unmount();
 });

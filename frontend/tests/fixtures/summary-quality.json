@@ -81,6 +81,7 @@
     ],
     "absent": [
       "both proposals were rejected",
+      "proposals for cloud transcription and a $900 budget were rejected",
       "budget was rejected",
       "budget is approved",
       "Next Tuesday",
@@ -239,6 +240,7 @@
       "disable all webhooks",
       "remove all webhooks"
     ],
+    "allowed_negations": ["the goal is not to remove all webhooks"],
     "max_words": 160,
     "section_required_any": {"Action Items": [["Sam"], ["Friday"], ["old webhook"]]}
   },
@@ -423,7 +425,8 @@
         "nothing",
         "no data",
         "not related to lost source data",
-        "not lost source data"
+        "not lost source data",
+        "not by lost source data"
       ]
     ],
     "absent": [
@@ -554,6 +557,7 @@
         ],
         [
           "withdraw",
+          "withdrew",
           "not place",
           "do not order",
           "no order",
@@ -573,5 +577,25 @@
       ]
     },
     "max_words": 650
+  },
+  {
+    "id": "unresolved-written-transcript-assignment",
+    "text": "Jordan: Sam offered to deliver the migration checklist Thursday. Taylor: My written notes say Riley, Monday. We have not checked which is correct; neither source supersedes the other. Jordan: Preserve both versions as unresolved. We are not assigning a reconciliation task. Separately, Morgan will send the test results Friday.",
+    "notes": "Migration checklist: Riley, Monday. Keep the original written notes editable after enhancement.",
+    "required_any": [["Riley"], ["Monday"], ["Sam"], ["Thursday"], ["unresolved", "conflict", "discrepancy", "disagree"], ["editable"]],
+    "absent": [],
+    "action_absent": ["Riley", "Sam", "migration checklist", "reconcile"],
+    "action_required_together": [[["test results"], ["Morgan"], ["Friday"]]],
+    "max_words": 220
+  },
+  {
+    "id": "resolved-written-transcript-assignment",
+    "text": "Jordan: Sam offered to deliver the migration checklist Thursday. Taylor: My written notes say Riley, Monday. Riley: That written entry was from last week. Cancel it. Sam has now accepted the checklist for Thursday. Sam: Confirmed, I will deliver the migration checklist Thursday. Separately, Morgan will send the test results Friday.",
+    "notes": "Migration checklist: Riley, Monday. Keep the original written notes editable after enhancement.",
+    "required_any": [["editable"]],
+    "absent": ["unresolved conflict", "unresolved discrepancy"],
+    "action_absent": ["Riley", "Monday"],
+    "action_required_together": [[["migration checklist"], ["Sam"], ["Thursday"]], [["test results"], ["Morgan"], ["Friday"]]],
+    "max_words": 220
   }
 ]

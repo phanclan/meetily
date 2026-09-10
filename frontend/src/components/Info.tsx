@@ -1,6 +1,5 @@
 import React from "react";
-import { isMeetnola } from "@/flavor";
-const productName = isMeetnola ? "Meetnola" : "Meetily";
+const productName = "Afterword";
 import { Info as InfoIcon } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "./ui/dialog";
 import { VisuallyHidden } from "./ui/visually-hidden";

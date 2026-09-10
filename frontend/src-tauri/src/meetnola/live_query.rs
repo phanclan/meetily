@@ -1,6 +1,7 @@
 use crate::database::repositories::setting::SettingsRepository;
 use crate::state::AppState;
 use crate::summary::llm_client::{query_with_context, LLMProvider, MeetingExchange};
+use crate::summary::notes_review::{self, NotesReviewInput};
 use reqwest::Client;
 use tauri::{AppHandle, Manager, Runtime, ipc::Channel};
 use tracing::info;
@@ -51,6 +52,7 @@ pub async fn live_query<R: Runtime>(
     user_message: String,
     transcript_context: String,
     history: Option<Vec<MeetingExchange>>,
+    notes_review: Option<NotesReviewInput>,
     request_id: String,
     requests: tauri::State<'_, QueryRequests>,
     on_delta: Channel<String>,
@@ -59,7 +61,7 @@ pub async fn live_query<R: Runtime>(
     let result = tokio::select! {
         biased;
         _ = token.cancelled() => Err("Meeting question was cancelled".to_string()),
-        result = run_query(app, state, user_message, transcript_context, history, &token, on_delta) => result,
+        result = run_query(app, state, user_message, transcript_context, history, notes_review, &token, on_delta) => result,
     };
     requests.cancel(&request_id);
     result
@@ -71,6 +73,7 @@ async fn run_query<R: Runtime>(
     user_message: String,
     transcript_context: String,
     history: Option<Vec<MeetingExchange>>,
+    notes_review: Option<NotesReviewInput>,
     token: &CancellationToken,
     on_delta: Channel<String>,
 ) -> Result<String, String> {
@@ -132,6 +135,26 @@ async fn run_query<R: Runtime>(
     };
 
     let client = Client::new();
+
+    if let Some(input) = notes_review {
+        let user = input.prompt()?;
+        let context = match provider {
+            LLMProvider::Ollama => crate::summary::service::METADATA_CACHE
+                .get_or_fetch(&config.model, ollama_endpoint.as_deref()).await?.context_size,
+            LLMProvider::BuiltInAI => crate::summary::summary_engine::models::get_model_by_name(&config.model)
+                .ok_or("Unknown built-in model context size")?.context_size as usize,
+            _ => usize::MAX,
+        };
+        let budget = crate::summary::processor::LocalRequestBudget::new(&provider, context, Some(2048))?;
+        if let Some(budget) = budget { budget.check(notes_review::SYSTEM_PROMPT, &user)?; }
+        let answer = crate::summary::llm_client::generate_summary(
+            &client, &provider, &config.model, &final_api_key, notes_review::SYSTEM_PROMPT, &user,
+            ollama_endpoint.as_deref(), custom_openai_endpoint.as_deref(),
+            Some(budget.map(|budget| budget.output_tokens).unwrap_or(2048)), None, None,
+            app_data_dir.as_ref(), Some(token), None,
+        ).await?;
+        return notes_review::validated_review(&answer, &input.notes, &input.draft);
+    }
 
     let emit = |text: &str| on_delta.send(text.to_string()).map_err(|_| "Assistant view closed".to_string());
     query_with_context(

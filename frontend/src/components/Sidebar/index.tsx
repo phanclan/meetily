@@ -1,4 +1,5 @@
 'use client';
+import { NoteFolderSidebar } from '@/components/NoteFolderControls';
 
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { File, Settings, PanelLeftClose, PanelLeftOpen, Home, Trash2, Mic, Pencil, SearchIcon, X, Upload, FolderOpen, ChevronDown, MoreHorizontal, MessageCircle } from 'lucide-react';
@@ -185,7 +186,6 @@ const Sidebar: React.FC = () => {
     const setupListener = async () => {
       const { listen } = await import('@tauri-apps/api/event');
       const unlisten = await listen<ModelConfig>('model-config-updated', (event) => {
-        console.log('Sidebar received model-config-updated event:', event.payload);
         setModelConfig(event.payload);
       });
 
@@ -237,7 +237,6 @@ const Sidebar: React.FC = () => {
         model: configToSave.model,
         apiKey: configToSave.apiKey ?? null
       };
-      console.log('Saving transcript config with payload:', payload);
 
       await invoke('api_save_transcript_config', {
         provider: payload.provider,
@@ -694,6 +693,7 @@ const Sidebar: React.FC = () => {
             </div>
           ) : (
             <>
+              <NoteFolderSidebar />
               {/* Collapsible section header */}
               <button
                 ref={meetingsToggleRef}

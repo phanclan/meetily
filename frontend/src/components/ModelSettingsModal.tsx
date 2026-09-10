@@ -305,6 +305,13 @@ export function ModelSettingsModal({
   const [customTopP, setCustomTopP] = useState<string>(modelConfig.topP?.toString() || '');
   const [isCustomOpenAIAdvancedOpen, setIsCustomOpenAIAdvancedOpen] = useState<boolean>(false);
   const [isTestingConnection, setIsTestingConnection] = useState<boolean>(false);
+  const [connectionResult, setConnectionResult] = useState<{ success: boolean; message: string } | null>(null);
+  const connectionTestVersion = useRef(0);
+  useEffect(() => {
+    connectionTestVersion.current++;
+    setConnectionResult(null);
+    return () => { connectionTestVersion.current++; };
+  }, [customOpenAIEndpoint, customOpenAIModel, customOpenAIApiKey, modelConfig.provider]);
 
   // Combobox state
   const [modelComboboxOpen, setModelComboboxOpen] = useState<boolean>(false);
@@ -397,7 +404,8 @@ export function ModelSettingsModal({
   // Custom OpenAI validation
   const isCustomOpenAIInvalid = modelConfig.provider === 'custom-openai' && (
     !customOpenAIEndpoint.trim() ||
-    !customOpenAIModel.trim()
+    !customOpenAIModel.trim() ||
+    (customOpenAIEndpoint.trim().replace(/\/$/, '').toLowerCase() === MEETNOLA_GATEWAY_ENDPOINT.toLowerCase() && !customOpenAIApiKey.trim())
   );
 
   const isDoneDisabled =
@@ -806,7 +814,6 @@ export function ModelSettingsModal({
       model: modelConfig.provider === 'custom-openai' ? customOpenAIModel.trim() : modelConfig.model,
     };
     setModelConfig(updatedConfig);
-    console.log('ModelSettingsModal - handleSave - Updated ModelConfig:', updatedConfig);
 
     // Persist confirmed model choice to per-provider cache
     if (updatedConfig.model) {
@@ -831,16 +838,22 @@ export function ModelSettingsModal({
     }
 
     setIsTestingConnection(true);
+    const version = ++connectionTestVersion.current;
+    setConnectionResult(null);
     try {
       const result = await invoke<{ status: string; message: string }>('api_test_custom_openai_connection', {
         endpoint: customOpenAIEndpoint.trim(),
         apiKey: customOpenAIApiKey.trim() || null,
         model: customOpenAIModel.trim(),
       });
-      toast.success(result.message || 'Connection successful!');
+      if (version === connectionTestVersion.current) {
+        setConnectionResult({ success: true, message: result.message || 'Connection successful!' });
+      }
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
-      toast.error(errorMsg);
+      if (version === connectionTestVersion.current) {
+        setConnectionResult({ success: false, message: errorMsg });
+      }
     } finally {
       setIsTestingConnection(false);
     }
@@ -1029,12 +1042,26 @@ export function ModelSettingsModal({
                     } else if (isMeetnola) {
                       setCustomOpenAIEndpoint(MEETNOLA_GATEWAY_ENDPOINT);
                       setCustomOpenAIModel(MEETNOLA_GATEWAY_MODEL);
+                  // A preset must not carry another server's credential or sampling settings.
+                  if (customOpenAIEndpoint.trim().replace(/\/$/, '').toLowerCase() !== MEETNOLA_GATEWAY_ENDPOINT.toLowerCase()) {
+                    setCustomOpenAIApiKey('');
+                  }
+                  setCustomMaxTokens('');
+                  setCustomTemperature('');
+                  setCustomTopP('');
                     }
                   }).catch((err) => {
                     console.error('Failed to load custom OpenAI config:', err);
                     if (isMeetnola) {
                       setCustomOpenAIEndpoint(MEETNOLA_GATEWAY_ENDPOINT);
                       setCustomOpenAIModel(MEETNOLA_GATEWAY_MODEL);
+                  // A preset must not carry another server's credential or sampling settings.
+                  if (customOpenAIEndpoint.trim().replace(/\/$/, '').toLowerCase() !== MEETNOLA_GATEWAY_ENDPOINT.toLowerCase()) {
+                    setCustomOpenAIApiKey('');
+                  }
+                  setCustomMaxTokens('');
+                  setCustomTemperature('');
+                  setCustomTopP('');
                     }
                   });
                 }
@@ -1203,6 +1230,13 @@ export function ModelSettingsModal({
                 onClick={() => {
                   setCustomOpenAIEndpoint(MEETNOLA_GATEWAY_ENDPOINT);
                   setCustomOpenAIModel(MEETNOLA_GATEWAY_MODEL);
+                  // A preset must not carry another server's credential or sampling settings.
+                  if (customOpenAIEndpoint.trim().replace(/\/$/, '').toLowerCase() !== MEETNOLA_GATEWAY_ENDPOINT.toLowerCase()) {
+                    setCustomOpenAIApiKey('');
+                  }
+                  setCustomMaxTokens('');
+                  setCustomTemperature('');
+                  setCustomTopP('');
                   toast.success('Applied Vercel AI Gateway preset', {
                     description: 'Paste your Gateway API key below, then Save. Provider is set to custom-openai.',
                   });
@@ -1211,7 +1245,7 @@ export function ModelSettingsModal({
                 Vercel AI Gateway preset
               </Button>
               <p className="text-xs text-muted-foreground">
-                Fills endpoint + model ({MEETNOLA_GATEWAY_MODEL}). Key stays in settings only.
+                Luna handles enhanced notes and questions through Vercel AI Gateway. Transcription stays local.
               </p>
             </div>
             <div>
@@ -1250,12 +1284,14 @@ export function ModelSettingsModal({
               </Label>
               <Input
                 id="custom-api-key"
+                autoComplete="off"
+                spellCheck={false}
                 type="password"
                 value={customOpenAIApiKey}
                 onChange={(e) => setCustomOpenAIApiKey(e.target.value)}
                 placeholder={
                   customOpenAIEndpoint.trim().replace(/\/$/, '').toLowerCase() === MEETNOLA_GATEWAY_ENDPOINT.toLowerCase()
-                    ? 'AI_GATEWAY_API_KEY (never commit / never NEXT_PUBLIC_*)'
+                    ? 'Paste your Vercel AI Gateway key'
                     : 'Leave empty if not required'
                 }
                 className="mt-1"
@@ -1342,6 +1378,11 @@ export function ModelSettingsModal({
                 </>
               )}
             </Button>
+            {connectionResult && (
+              <p role={connectionResult.success ? 'status' : 'alert'} className="rounded-md bg-stone-100 px-3 py-2 text-sm text-stone-700">
+                {connectionResult.message}
+              </p>
+            )}
           </div>
         )}
 

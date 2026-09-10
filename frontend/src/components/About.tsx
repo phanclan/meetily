@@ -54,15 +54,15 @@ export function About() {
                 <div className="mb-3">
                     <Image
                         src="icon_128x128.png"
-                        alt="Meetnola Logo"
+                        alt="Afterword Logo"
                         width={64}
                         height={64}
                         className="mx-auto"
                     />
                 </div>
-                {/* <h1 className="text-xl font-bold text-gray-900">Meetnola</h1> */}
+                {/* <h1 className="text-xl font-bold text-gray-900">Afterword</h1> */}
                 <span className="text-sm text-gray-500">
-                    {buildInfo ? buildInfo.displayName : 'Meetnola'}
+                    {buildInfo ? buildInfo.displayName : 'Afterword'}
                 </span>
                 <p className="text-medium text-gray-600 mt-1">
                     {isMeetnola
@@ -99,7 +99,7 @@ export function About() {
 
             {/* Features Grid - Compact */}
             <div className="space-y-3">
-                <h2 className="text-base font-semibold text-gray-800">What makes Meetnola different</h2>
+                <h2 className="text-base font-semibold text-gray-800">What makes Afterword different</h2>
                 <div className="grid grid-cols-2 gap-2">
                     <div className="bg-gray-50 rounded p-3 hover:bg-gray-100 transition-colors">
                         <h3 className="font-bold text-sm text-gray-900 mb-1">Privacy-first</h3>

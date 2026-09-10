@@ -2,10 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePersistentChat } from './useSavedMeetingChat';
 import { meetnolaInvoke } from '@/meetnola/ipc';
 import { createWriteQueue, registerBeforeQuit } from '@/lib/pendingWrites';
-import type { LibraryPeriod } from '@/lib/libraryAnswerContext';
+import type { LibraryPeriod, LibrarySourceScope } from '@/lib/libraryAnswerContext';
 
-interface Settings { draft: string; period: LibraryPeriod; archived: boolean }
-const defaults: Settings = { draft: '', period: 'all', archived: false };
+interface Settings { draft: string; period: LibraryPeriod; sourceScope: LibrarySourceScope; archived: boolean }
+const defaults: Settings = { draft: '', period: 'all', sourceScope: 'keywords', archived: false };
 
 /** Messages and draft/settings use separate queues, so neither can overwrite the other. */
 export function useLibraryChat(chatId: string) {
@@ -24,12 +24,12 @@ export function useLibraryChat(chatId: string) {
   const flushSettings = useCallback(async () => {
     const snapshot = latest.current;
     if (snapshot?.id !== chatId || snapshot.settings.archived) return;
-    const { draft, period } = snapshot.settings;
-    const signature = JSON.stringify({ draft, period });
+    const { draft, period, sourceScope } = snapshot.settings;
+    const signature = JSON.stringify({ draft, period, sourceScope });
     if (signature === saved.current) return queue.flush();
     if (owner.current === chatId) setSaving(true);
     try {
-      await queue.enqueue(() => meetnolaInvoke<void>('save_library_chat_settings', { chatId, draft, period }));
+      await queue.enqueue(() => meetnolaInvoke<void>('save_library_chat_settings', { chatId, draft, period, sourceScope }));
       if (owner.current === chatId) { saved.current = signature; setSettingsError(null); }
     } catch (error) {
       if (owner.current === chatId) setSettingsError(`Draft not saved: ${String(error)}`);
@@ -46,8 +46,8 @@ export function useLibraryChat(chatId: string) {
         await queue.flush();
         const result = await meetnolaInvoke<Settings>('get_library_chat_settings', { chatId });
         if (cancelled || owner.current !== chatId) return;
-        if (typeof result.draft !== 'string' || !['all', '7', '30', '90'].includes(result.period) || typeof result.archived !== 'boolean') throw new Error('Invalid saved conversation settings');
-        saved.current = JSON.stringify({ draft: result.draft, period: result.period });
+        if (typeof result.draft !== 'string' || !['all', '7', '30', '90'].includes(result.period) || typeof result.archived !== 'boolean' || !['keywords', 'recent'].includes(result.sourceScope)) throw new Error('Invalid saved conversation settings');
+        saved.current = JSON.stringify({ draft: result.draft, period: result.period, sourceScope: result.sourceScope });
         setSettings(result);
         setLoadedFor(chatId);
       } catch (error) { if (!cancelled && owner.current === chatId) setSettingsError(String(error)); }
@@ -71,6 +71,7 @@ export function useLibraryChat(chatId: string) {
   return { ...chat, ready, settings, saving, settingsError,
     setInput: (draft: string) => updateSettings({ draft }),
     setPeriod: (period: LibraryPeriod) => updateSettings({ period }),
+    setSourceScope: (sourceScope: LibrarySourceScope) => updateSettings({ sourceScope }),
     retrySettings: () => { if (loadedFor !== chatId) setReload(value => value + 1); else void flushSettings().catch(() => {}); },
     reloadSettings: () => setReload(value => value + 1),
     flush: async () => { await flushSettings(); await chat.flushHistory(); },

@@ -81,8 +81,20 @@ fn derive_title_from_notes(notes_markdown: &str) -> Option<String> {
     None
 }
 
-/// Save (upsert) notes for a meeting.
-/// `notes_markdown` is the plain-text representation; `notes_json` is the BlockNote JSON.
+/// Create a saved note without starting an audio recording.
+#[tauri::command]
+pub async fn create_note(
+    state: tauri::State<'_, AppState>, draft_id: String, title: String,
+    notes_markdown: String, notes_json: String, folder_id: Option<String>,
+) -> Result<String, String> {
+    let title = if is_generated_or_placeholder_title(&title) {
+        derive_title_from_notes(&notes_markdown).unwrap_or_else(|| "New note".into())
+    } else { title.trim().to_owned() };
+    NotesRepository::create_note(state.db_manager.pool(), &draft_id, &title,
+        &notes_markdown, &notes_json, folder_id.as_deref()).await
+}
+
+/// Save (upsert) plain-text and BlockNote representations for an existing note.
 #[tauri::command]
 pub async fn save_meeting_notes<R: Runtime>(
     _app: tauri::AppHandle<R>,

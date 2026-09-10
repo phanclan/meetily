@@ -8,6 +8,7 @@ import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { useTranscriptSearch, type TranscriptSearchResult } from '@/hooks/useTranscriptSearch';
 import { createRecordingWorkspacePath } from '@/lib/quickNoteRoute';
 import { useSummaryPolling } from '@/hooks/useSummaryPolling';
+import { useFolderRead, type NoteFolder } from '@/hooks/useNoteFolders';
 
 
 interface SidebarItem {
@@ -25,6 +26,9 @@ export interface CurrentMeeting {
 }
 
 interface SidebarContextType {
+  noteFolders: ReturnType<typeof useFolderRead<NoteFolder[]>>;
+  folderRevision: number;
+  refreshNoteFolders: () => void;
   currentMeeting: CurrentMeeting | null;
   setCurrentMeeting: (meeting: CurrentMeeting | null) => void;
   sidebarItems: SidebarItem[];
@@ -70,6 +74,9 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const { searchResults, isSearching, searchTranscripts } = useTranscriptSearch();
   const [serverAddress, setServerAddress] = useState('');
   const [transcriptServerAddress, setTranscriptServerAddress] = useState('');
+  const [folderRevision, setFolderRevision] = useState(0);
+  const noteFolders = useFolderRead<NoteFolder[]>('list_note_folders', {}, Boolean(serverAddress), folderRevision);
+  const refreshNoteFolders = React.useCallback(() => setFolderRevision(value => value + 1), []);
   const { activeSummaryPolls, startSummaryPolling, stopSummaryPolling } = useSummaryPolling();
 
   // Use recording state from RecordingStateContext (single source of truth)
@@ -95,6 +102,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
           updated_at: meeting.updated_at,
         }));
         setMeetings(transformedMeetings);
+        refreshNoteFolders();
         Analytics.trackBackendConnection(true);
       } catch (error) {
         console.error('Error fetching meetings:', error);
@@ -102,7 +110,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
         Analytics.trackBackendConnection(false, error instanceof Error ? error.message : 'Unknown error');
       }
     }
-  }, [serverAddress]);
+  }, [serverAddress, refreshNoteFolders]);
 
   useEffect(() => {
     fetchMeetings();
@@ -152,6 +160,9 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <SidebarContext.Provider value={{
+      noteFolders,
+      folderRevision,
+      refreshNoteFolders,
       currentMeeting,
       setCurrentMeeting,
       sidebarItems,

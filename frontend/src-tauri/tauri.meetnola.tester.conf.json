@@ -1,5 +1,5 @@
 {
-  "productName": "meetnola Tester",
+  "productName": "Afterword",
   "identifier": "com.meetnola.tester",
   "plugins": {
     "updater": { "endpoints": [] }

@@ -9,6 +9,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { LoaderIcon } from "lucide-react";
 import { useConfig } from "@/contexts/ConfigContext";
 import { usePaginatedTranscripts } from "@/hooks/usePaginatedTranscripts";
+import type { SavedSearchTarget } from "@/hooks/useSavedSearchMatch";
 import {
   DEFAULT_SUMMARY_MODEL,
   DEFAULT_SUMMARY_PROVIDER,
@@ -29,6 +30,17 @@ const PROVIDERS_REQUIRING_API_KEY = new Set(['groq', 'openai', 'claude', 'openro
 function MeetingDetailsContent() {
   const searchParams = useSearchParams();
   const meetingId = searchParams.get('id');
+  const searchQuery = searchParams.get('search')?.trim() || '';
+  const folderId = searchParams.get('folder');
+  const fromFollowUps = searchParams.get('from') === 'follow-ups';
+  const backHref = fromFollowUps
+    ? `/follow-ups?${new URLSearchParams({ ...(folderId ? { folder: folderId } : {}), ...(searchParams.get('status') === 'completed' ? { status: 'completed' } : {}) })}`
+    : searchQuery || folderId ? `/?${new URLSearchParams({ view: 'all', ...(searchQuery ? { q: searchQuery } : {}), ...(folderId ? { folder: folderId } : {}) })}` : '/';
+  const backLabel = fromFollowUps ? 'Back to follow-ups' : searchQuery ? 'Back to search' : folderId ? 'Back to folder' : 'Home';
+  const sourceKind = searchParams.get('match');
+  const sourceId = searchParams.get('sourceId');
+  const searchMatch: SavedSearchTarget | undefined = searchQuery && sourceId && (sourceKind === 'notes' || sourceKind === 'transcript')
+    ? { kind: sourceKind, sourceId, query: searchQuery } : undefined;
   const source = searchParams.get('source'); // Check if navigated from recording
   const { setCurrentMeeting, refetchMeetings } = useSidebar();
   const { isAutoSummary } = useConfig(); // Get auto-summary toggle state
@@ -340,10 +352,10 @@ function MeetingDetailsContent() {
         <div className="text-center">
           <p className="text-red-500 mb-4">{error}</p>
           <button
-            onClick={() => router.push('/')}
+            onClick={() => router.push(backHref)}
             className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
           >
-            Go Back
+            {backLabel}
           </button>
         </div>
       </div>
@@ -364,10 +376,10 @@ function MeetingDetailsContent() {
         <div className="text-center">
           <p className="text-muted-foreground mb-4">Meeting not found.</p>
           <button
-            onClick={() => router.push('/')}
+            onClick={() => router.push(backHref)}
             className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
           >
-            Go Back
+            {backLabel}
           </button>
         </div>
       </div>
@@ -377,6 +389,10 @@ function MeetingDetailsContent() {
   return <PageContent
     key={meetingDetails.id}
     meeting={meetingDetails}
+    backHref={backHref}
+    backLabel={backLabel}
+    preferWrittenNotes={searchParams.get('view') === 'notes'}
+    initialSearchMatch={searchMatch}
     summaryData={meetingSummary}
     initialSummaryStatus={summaryStatus}
     shouldAutoGenerate={shouldAutoGenerate}

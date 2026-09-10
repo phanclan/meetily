@@ -1,4 +1,4 @@
-//! Decode Ollama's OpenAI-compatible text stream without exposing reasoning deltas.
+//! Decode supported OpenAI-compatible text streams without exposing reasoning deltas.
 use reqwest::Response;
 
 pub type OnTextDelta<'a> = dyn Fn(&str) -> Result<(), String> + Send + Sync + 'a;
@@ -104,5 +104,26 @@ mod tests {
         assert!(limited.push(b"data: {\"choices\":[{\"delta\":{\"content\":\"Partial\"},\"finish_reason\":\"length\"}]}\n\n", &emit).unwrap_err().contains("length limit"));
         assert!(TextStream::default().push(b"data: broken json\n\n", &emit).is_err());
         assert!(TextStream::default().push(b"data: {\"error\":\"failed\"}\n\n", &emit).is_err());
+    }
+
+    #[test]
+    fn gateway_metadata_and_reasoning_do_not_leak_into_visible_text() {
+        let pieces = Mutex::new(String::new());
+        let emit = |delta: &str| { pieces.lock().unwrap().push_str(delta); Ok(()) };
+        let mut stream = TextStream::default();
+        for event in [
+            r#"{"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}"#,
+            r#"{"choices":[{"index":0,"delta":{"reasoning_content":"Hidden reasoning"},"finish_reason":null}]}"#,
+            r#"{"choices":[{"index":0,"delta":{"content":"Answer [S1](#source-S1)."},"finish_reason":null}]}"#,
+            r#"{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}"#,
+            r#"{"choices":[],"usage":{"completion_tokens":12},"provider_metadata":{}}"#,
+        ] {
+            stream.push(format!("data: {event}\n\n").as_bytes(), &emit).unwrap();
+        }
+        assert!(!stream.done, "A transport that ends before DONE remains incomplete");
+        stream.push(b"data: [DONE]\n\n", &emit).unwrap();
+        assert!(stream.done);
+        assert_eq!(*pieces.lock().unwrap(), "Answer [S1](#source-S1).");
+        assert_eq!(stream.answer, *pieces.lock().unwrap());
     }
 }

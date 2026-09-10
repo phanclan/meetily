@@ -8,6 +8,8 @@ import { recordingService } from '@/services/recordingService';
 import Analytics from '@/lib/analytics';
 import { showRecordingNotification } from '@/lib/recordingNotification';
 import { toast } from 'sonner';
+import { currentRecordingFolder, prepareRecordingFolder } from '@/lib/liveMeetingFolder';
+import { loadQuickNoteDraft } from '@/lib/quickNoteDraft';
 
 interface UseRecordingStartReturn {
   handleRecordingStart: () => Promise<void>;
@@ -82,6 +84,11 @@ export function useRecordingStart(
 
   // Handle manual recording start (from button click)
   const handleRecordingStart = useCallback(async () => {
+    if (loadQuickNoteDraft().saveId) {
+      toast.error('Finish saving your draft before starting a recording.');
+      return;
+    }
+    const folderId = currentRecordingFolder();
     try {
       console.log('handleRecordingStart called - checking Parakeet model status');
 
@@ -117,6 +124,7 @@ export function useRecordingStart(
 
       // Start the actual backend recording
       console.log('Starting backend recording with meeting:', randomTitle);
+      prepareRecordingFolder(folderId);
       await recordingService.startRecordingWithDevices(
         selectedDevices?.micDevice || null,
         selectedDevices?.systemDevice || null,
@@ -135,6 +143,7 @@ export function useRecordingStart(
       await showRecordingNotification();
     } catch (error) {
       console.error('Failed to start recording:', error);
+      prepareRecordingFolder(null);
       setStatus(RecordingStatus.ERROR, error instanceof Error ? error.message : 'Failed to start recording');
       setIsRecording(false); // Reset state on error
       Analytics.trackButtonClick('start_recording_error', 'home_page');
@@ -149,6 +158,12 @@ export function useRecordingStart(
       if (typeof window !== 'undefined') {
         const shouldAutoStart = sessionStorage.getItem('autoStartRecording');
         if (shouldAutoStart === 'true' && !isRecording && !isAutoStarting) {
+          if (loadQuickNoteDraft().saveId) {
+            sessionStorage.removeItem('autoStartRecording');
+            toast.error('Finish saving your draft before starting a recording.');
+            return;
+          }
+          const folderId = currentRecordingFolder();
           console.log('Auto-starting recording from navigation...');
           setIsAutoStarting(true);
           sessionStorage.removeItem('autoStartRecording'); // Clear the flag
@@ -185,6 +200,7 @@ export function useRecordingStart(
             setStatus(RecordingStatus.STARTING, 'Initializing recording...');
 
             console.log('Auto-starting backend recording with meeting:', generatedMeetingTitle);
+            prepareRecordingFolder(folderId);
             const result = await recordingService.startRecordingWithDevices(
               selectedDevices?.micDevice || null,
               selectedDevices?.systemDevice || null,
@@ -203,6 +219,7 @@ export function useRecordingStart(
             await showRecordingNotification();
           } catch (error) {
             console.error('Failed to auto-start recording:', error);
+            prepareRecordingFolder(null);
             setStatus(RecordingStatus.ERROR, error instanceof Error ? error.message : 'Failed to auto-start recording');
             alert('Failed to start recording. Check console for details.');
             Analytics.trackButtonClick('start_recording_error', 'sidebar_auto');

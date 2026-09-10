@@ -31,10 +31,10 @@ export const DEFAULT_PARAKEET_MODEL = 'parakeet-tdt-0.6b-v3-int8';
 /**
  * Vercel AI Gateway (OpenAI-compatible) defaults for Meetnola summaries/Enhance.
  * Auth: user's Gateway API key via CustomOpenAI config — never NEXT_PUBLIC_*.
- * Model: openai/gpt-4o-mini — listed on https://ai-gateway.vercel.sh/v1/models
+ * Model: openai/gpt-5.6-luna — listed on https://ai-gateway.vercel.sh/v1/models
  */
 export const MEETNOLA_GATEWAY_ENDPOINT = 'https://ai-gateway.vercel.sh/v1';
-export const MEETNOLA_GATEWAY_MODEL = 'openai/gpt-4o-mini';
+export const MEETNOLA_GATEWAY_MODEL = 'openai/gpt-5.6-luna';
 export const MEETNOLA_SUMMARY_PROVIDER = 'custom-openai' as const;
 export const MEETNOLA_TRANSCRIPT_PROVIDER = 'parakeet' as const;
 

@@ -103,9 +103,9 @@ export default function SettingsPage() {
           {onboardingIntent === 'groq-key' && (
             <Alert className="mb-6 border-blue-200 bg-blue-50 text-blue-950">
               <AlertDescription className="space-y-2">
-                <p className="font-medium">Meetnola is ready, but Groq still needs an API key.</p>
+                <p className="font-medium">Afterword is ready, but Groq still needs an API key.</p>
                 <p className="text-sm leading-relaxed">
-                  Enter one Groq key in <strong>Transcription</strong> below. Meetnola shares that same key with <strong>Summary</strong>, so you only need to save it once.
+                  Enter one Groq key in <strong>Transcription</strong> below. Afterword shares that same key with <strong>Summary</strong>, so you only need to save it once.
                 </p>
               </AlertDescription>
             </Alert>

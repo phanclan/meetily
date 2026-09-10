@@ -7,12 +7,17 @@
 pub mod automation;
 pub mod defaults;
 pub mod chat_history;
+pub mod note_tasks;
 pub mod frontend_logging;
 pub mod live_query;
 pub mod library_search;
 pub mod library_chats;
 pub mod meeting_detection;
 pub mod notes;
+pub mod note_folders;
+pub mod previous_summary;
+pub mod trash;
+pub mod markdown_export;
 
 use tauri::{
     plugin::{Builder, TauriPlugin},
@@ -30,7 +35,15 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             live_query::cancel_live_query,
             chat_history::get_meeting_chat,
             chat_history::save_meeting_chat,
+            chat_history::get_recording_chat,
+            chat_history::save_recording_chat,
+            note_tasks::list_note_tasks,
+            note_tasks::save_meeting_notes_if_unchanged,
+            chat_history::discard_recording_chat,
             library_search::search_library_sources,
+            library_search::get_recent_library_sources,
+            library_search::search_saved_meetings,
+            library_search::get_saved_search_match,
             library_chats::get_library_chat,
             library_chats::save_library_chat,
             library_chats::get_library_chat_settings,
@@ -42,8 +55,24 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             meeting_detection::set_call_detection_enabled,
             meeting_detection::get_call_detection_enabled,
             notes::save_meeting_notes,
+            notes::create_note,
             notes::get_meeting_notes,
             notes::move_meeting_notes,
+            note_folders::list_note_folders,
+            note_folders::create_note_folder,
+            note_folders::rename_note_folder,
+            note_folders::get_note_folder_members,
+            note_folders::get_meeting_note_folders,
+            note_folders::set_meeting_note_folder,
+            trash::trash_meeting,
+            trash::restore_trashed_meeting,
+            trash::list_trashed_meetings,
+            trash::delete_trashed_meeting,
+            previous_summary::get_previous_summary,
+            previous_summary::restore_previous_summary,
+            markdown_export::get_export_folder,
+            markdown_export::choose_export_folder,
+            markdown_export::export_meeting_markdown,
         ])
         .build()
 }

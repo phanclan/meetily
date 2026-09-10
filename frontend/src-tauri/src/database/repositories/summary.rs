@@ -48,12 +48,17 @@ impl SummaryProcessesRepository {
         }
         let now = Utc::now();
 
-        sqlx::query("UPDATE summary_processes SET result = ?, updated_at = ? WHERE meeting_id = ?")
+        let updated = sqlx::query("UPDATE summary_processes SET result = ?, updated_at = ? WHERE meeting_id = ? AND result IS NOT NULL AND lower(status) NOT IN ('pending', 'processing')")
             .bind(&result_json.unwrap())
             .bind(now)
             .bind(meeting_id)
             .execute(&mut *transaction)
             .await?;
+
+        if updated.rows_affected() != 1 {
+            transaction.rollback().await?;
+            return Ok(false);
+        }
 
         sqlx::query("UPDATE meetings SET updated_at = ? WHERE id = ?")
             .bind(now)
@@ -129,7 +134,7 @@ impl SummaryProcessesRepository {
         let result_str = serde_json::to_string(&result)
             .map_err(|e| sqlx::Error::Protocol(format!("Failed to serialize result: {}", e)))?;
 
-        sqlx::query(
+        let updated = sqlx::query(
             r#"
             UPDATE summary_processes
             SET status = 'completed', result = ?, updated_at = ?, end_time = ?, chunk_count = ?, processing_time = ?, error = NULL, result_backup = NULL, result_backup_timestamp = NULL
@@ -144,6 +149,9 @@ impl SummaryProcessesRepository {
         .bind(meeting_id)
         .execute(pool)
         .await?;
+        if updated.rows_affected() != 1 {
+            return Err(sqlx::Error::RowNotFound);
+        }
         log_info!(
             "Summary completed and backup cleared for meeting_id: {}",
             meeting_id

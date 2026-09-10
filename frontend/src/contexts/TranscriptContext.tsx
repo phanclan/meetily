@@ -8,6 +8,7 @@ import { transcriptService } from '@/services/transcriptService';
 import { recordingService } from '@/services/recordingService';
 import { indexedDBService } from '@/services/indexedDBService';
 import { useRecordingTitle } from '@/hooks/useRecordingTitle';
+import { bindRecordingFolder } from '@/lib/liveMeetingFolder';
 
 interface TranscriptContextType {
   transcripts: Transcript[];
@@ -100,6 +101,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
             beginSession();
             // Generate unique meeting ID
             const meetingId = `meeting-${Date.now()}`;
+            bindRecordingFolder(meetingId);
 
             // Store in sessionStorage as fallback for markMeetingAsSaved
             sessionStorage.setItem('indexeddb_current_meeting_id', meetingId);

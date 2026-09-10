@@ -65,8 +65,8 @@ export function DownloadProgressStep() {
       title={isMeetnola ? 'Local STT + AI Gateway' : 'Use Groq Free Tier'}
       description={
         isMeetnola
-          ? 'Meetnola transcribes on-device by default. Summaries and Enhance use Vercel AI Gateway when you add a key.'
-          : 'Meetily will use Groq for summaries and transcription by default. Local models stay optional and can be added later from Settings.'
+          ? 'Afterword transcribes on-device by default. Summaries and Enhance use Vercel AI Gateway when you add a key.'
+          : 'Afterword will use Groq for summaries and transcription by default. Local models stay optional and can be added later from Settings.'
       }
       step={3}
       totalSteps={isMac ? 4 : 3}
@@ -133,7 +133,7 @@ export function DownloadProgressStep() {
                   <div className="space-y-2">
                     <h3 className="text-sm font-semibold text-gray-900">What testers need</h3>
                     <p className="text-sm text-gray-600">
-                      Create a Groq API key, then paste that same key into Meetily&apos;s transcript and
+                      Create a Groq API key, then paste that same key into Afterword&apos;s transcript and
                       summary settings. The shared key flow is already wired for Groq.
                     </p>
                   </div>
@@ -148,7 +148,7 @@ export function DownloadProgressStep() {
                   <div className="space-y-2">
                     <h3 className="text-sm font-semibold text-gray-900">Free-tier path</h3>
                     <p className="text-sm text-gray-600">
-                      Groq offers a free plan that is good enough for peer testing. Meetily does not
+                      Groq offers a free plan that is good enough for peer testing. Afterword does not
                       auto-provision a key, so each tester should use their own Groq account.
                     </p>
                     <div className="flex flex-wrap gap-3 pt-1">

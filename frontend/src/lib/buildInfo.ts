@@ -20,7 +20,7 @@ const fallbackBuildInfo = async (): Promise<BuildInfo> => {
     buildId: 'unknown',
     channel: 'unknown',
     flavor: 'meetily',
-    displayName: `Meetily v${version}`,
+    displayName: `Afterword v${version}`,
   };
 };
 

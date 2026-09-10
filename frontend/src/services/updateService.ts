@@ -98,7 +98,7 @@ export class UpdateService {
     update: Update,
     onProgress?: (progress: UpdateProgress) => void
   ): Promise<void> {
-    if (isMeetnola) throw new Error('Meetnola updates must be installed from a verified fork build');
+    if (isMeetnola) throw new Error('Afterword updates must be installed from a verified fork build');
     try {
       // Download the update
       await update.download();

@@ -19,7 +19,10 @@ pub struct ModelMetadata {
 /// Response structure from Ollama /api/show endpoint
 #[derive(Debug, Deserialize)]
 struct OllamaShowResponse {
+    #[serde(default)]
     modelfile: String,
+    #[serde(default)]
+    parameters: String,
     #[serde(default)]
     details: ModelDetails,
     #[serde(default)]
@@ -176,35 +179,14 @@ async fn fetch_model_info(
         .await
         .map_err(|e| format!("Failed to parse API response: {}", e))?;
 
-    // Try to get context size from model_info (verbose mode) first
-    let mut context_size = extract_context_from_model_info(&show_response.model_info, &show_response.details.family);
-
-    // If not found in model_info, try parsing modelfile
-    if context_size == ULTIMATE_FALLBACK {
-        context_size = parse_num_ctx_from_modelfile(&show_response.modelfile);
-    }
-
-    // If still not found, try family-based fallback
-    if context_size == ULTIMATE_FALLBACK {
-        let family = if !show_response.details.family.is_empty() {
-            &show_response.details.family
-        } else {
-            model_name
-        };
-
-        // Check if this model family has a known context size
-        if let Some((_, size)) = DEFAULT_CONTEXT_SIZES
-            .iter()
-            .find(|(fam, _)| family.to_lowercase().contains(fam))
-        {
-            tracing::info!(
-                "No num_ctx in modelfile for {}, using family-based default: {} tokens",
-                model_name,
-                size
-            );
-            context_size = *size;
-        }
-    }
+    // A model's architectural maximum does not override an explicit runtime cap.
+    let architectural = extract_context_from_model_info(&show_response.model_info, &show_response.details.family);
+    let configured = parse_num_ctx_from_modelfile(&show_response.parameters)
+        .or_else(|| parse_num_ctx_from_modelfile(&show_response.modelfile));
+    let family = if show_response.details.family.is_empty() { model_name } else { &show_response.details.family };
+    let fallback = DEFAULT_CONTEXT_SIZES.iter().find(|(name, _)| family.to_lowercase().contains(name))
+        .map(|(_, size)| *size).unwrap_or(ULTIMATE_FALLBACK);
+    let context_size = resolve_context_size(architectural, configured, fallback);
 
     Ok(ModelMetadata {
         name: model_name.to_string(),
@@ -221,11 +203,11 @@ async fn fetch_model_info(
 /// * `family` - The model family name
 ///
 /// # Returns
-/// Context size in tokens, or ULTIMATE_FALLBACK if not found
+/// Architectural context size, if the server reports a positive value
 fn extract_context_from_model_info(
     model_info: &std::collections::HashMap<String, serde_json::Value>,
     family: &str,
-) -> usize {
+) -> Option<usize> {
     // Try to find context_length key with family prefix
     // Examples: "gemma3.context_length", "llama.context_length", etc.
     let possible_keys = vec![
@@ -237,14 +219,14 @@ fn extract_context_from_model_info(
 
     for key in possible_keys {
         if let Some(value) = model_info.get(&key) {
-            if let Some(ctx) = value.as_u64() {
+            if let Some(ctx) = value.as_u64().and_then(|value| usize::try_from(value).ok()).filter(|value| *value > 0) {
                 tracing::info!("Found context size in model_info[{}]: {} tokens", key, ctx);
-                return ctx as usize;
+                return Some(ctx);
             }
         }
     }
 
-    ULTIMATE_FALLBACK
+    None
 }
 
 /// Parse num_ctx parameter from Ollama modelfile
@@ -253,23 +235,22 @@ fn extract_context_from_model_info(
 /// * `modelfile` - The modelfile string from /api/show response
 ///
 /// # Returns
-/// Context size in tokens, defaults to 4000 if not found
-fn parse_num_ctx_from_modelfile(modelfile: &str) -> usize {
-    // Regex to match: PARAMETER num_ctx <number>
+/// Explicit configured context size, if present and positive
+fn parse_num_ctx_from_modelfile(modelfile: &str) -> Option<usize> {
     static RE: Lazy<Regex> = Lazy::new(|| {
-        Regex::new(r"PARAMETER\s+num_ctx\s+(\d+)").expect("Invalid regex pattern")
+        Regex::new(r"(?im)^\s*(?:PARAMETER\s+)?num_ctx\s+(\d+)\b").expect("Invalid regex pattern")
     });
+    RE.captures(modelfile).and_then(|caps| caps.get(1))
+        .and_then(|value| value.as_str().parse::<usize>().ok()).filter(|value| *value > 0)
+}
 
-    RE.captures(modelfile)
-        .and_then(|caps| caps.get(1))
-        .and_then(|m| m.as_str().parse::<usize>().ok())
-        .unwrap_or_else(|| {
-            tracing::debug!(
-                "num_ctx not found in modelfile, using default {}",
-                ULTIMATE_FALLBACK
-            );
-            ULTIMATE_FALLBACK
-        })
+fn resolve_context_size(architectural: Option<usize>, configured: Option<usize>, fallback: usize) -> usize {
+    match (architectural, configured) {
+        (Some(maximum), Some(configured)) => maximum.min(configured),
+        (Some(maximum), None) => maximum,
+        (None, Some(configured)) => configured,
+        (None, None) => fallback,
+    }
 }
 
 /// Get fallback metadata based on model name pattern matching
@@ -316,27 +297,39 @@ mod tests {
     use super::*;
 
     #[test]
+    fn configured_context_takes_precedence_over_architectural_maximum() {
+        assert_eq!(resolve_context_size(Some(131072), Some(8192), 4000), 8192);
+        assert_eq!(resolve_context_size(Some(4096), Some(8192), 4000), 4096);
+        assert_eq!(resolve_context_size(None, Some(4000), 8192), 4000);
+        assert_eq!(resolve_context_size(None, Some(32768), 4000), 32768);
+        assert_eq!(parse_num_ctx_from_modelfile("num_ctx 8192\ntemperature 0.7"), Some(8192));
+        assert_eq!(parse_num_ctx_from_modelfile("parameter num_ctx 0"), None);
+        assert_eq!(parse_num_ctx_from_modelfile("# PARAMETER num_ctx 32768"), None);
+        assert_eq!(extract_context_from_model_info(&HashMap::from([("gemma4.context_length".into(), serde_json::json!(0))]), "gemma4"), None);
+    }
+
+    #[test]
     fn test_parse_num_ctx_standard() {
         let modelfile = "FROM /path/to/model\nPARAMETER num_ctx 8192\nPARAMETER temperature 0.7";
-        assert_eq!(parse_num_ctx_from_modelfile(modelfile), 8192);
+        assert_eq!(parse_num_ctx_from_modelfile(modelfile), Some(8192));
     }
 
     #[test]
     fn test_parse_num_ctx_with_spaces() {
         let modelfile = "PARAMETER   num_ctx   16384";
-        assert_eq!(parse_num_ctx_from_modelfile(modelfile), 16384);
+        assert_eq!(parse_num_ctx_from_modelfile(modelfile), Some(16384));
     }
 
     #[test]
     fn test_parse_num_ctx_missing() {
         let modelfile = "PARAMETER temperature 0.7\nPARAMETER top_p 0.9";
-        assert_eq!(parse_num_ctx_from_modelfile(modelfile), ULTIMATE_FALLBACK);
+        assert_eq!(parse_num_ctx_from_modelfile(modelfile), None);
     }
 
     #[test]
     fn test_parse_num_ctx_multiple_params() {
         let modelfile = "PARAMETER temperature 0.7\nPARAMETER num_ctx 32768\nPARAMETER top_k 40";
-        assert_eq!(parse_num_ctx_from_modelfile(modelfile), 32768);
+        assert_eq!(parse_num_ctx_from_modelfile(modelfile), Some(32768));
     }
 
     #[test]

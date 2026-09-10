@@ -41,7 +41,7 @@ export function SetupOverviewStep() {
       icon: <Mic className="w-5 h-5 text-emerald-600" />,
       title: 'Transcribe locally by default',
       description:
-        'Meetnola uses on-device Parakeet (or Whisper) for live transcription. Recording does not require a cloud key.',
+        'Afterword uses on-device Parakeet (or Whisper) for live transcription. Recording does not require a cloud key.',
     },
     {
       icon: <Cloud className="w-5 h-5 text-sky-600" />,
@@ -62,7 +62,7 @@ export function SetupOverviewStep() {
       icon: <Cloud className="w-5 h-5 text-sky-600" />,
       title: 'Use Groq by default',
       description:
-        'Meetily is preconfigured to use Groq for transcription and summaries on fresh installs.',
+        'Afterword is preconfigured to use Groq for transcription and summaries on fresh installs.',
     },
     {
       icon: <KeyRound className="w-5 h-5 text-emerald-600" />,
@@ -85,8 +85,8 @@ export function SetupOverviewStep() {
       title="Setup Overview"
       description={
         isMeetnola
-          ? 'Meetnola starts with local transcription and Vercel AI Gateway for summaries. Existing Groq choices are preserved on upgrade.'
-          : 'Meetily now starts Groq-first. Local transcription and summary models are optional and can be added later.'
+          ? 'Afterword starts with local transcription and Vercel AI Gateway for summaries. Existing Groq choices are preserved on upgrade.'
+          : 'Afterword now starts Groq-first. Local transcription and summary models are optional and can be added later.'
       }
       step={2}
       totalSteps={isMac ? 4 : 3}
@@ -133,7 +133,7 @@ export function SetupOverviewStep() {
               <>
                 <p className="text-sm text-sky-950">
                   Testers can use Groq&apos;s free tier. They only need to create a key and paste it
-                  into Meetily&apos;s settings once.
+                  into Afterword&apos;s settings once.
                 </p>
                 <div className="flex flex-wrap gap-3">
                   <Button

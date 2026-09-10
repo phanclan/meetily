@@ -17,15 +17,24 @@ import {
   MoreHorizontal,
   Loader2,
   Save,
+  Search,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Summary } from '@/types';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem } from '@/components/ui/dropdown-menu';
 import { MeetingAssistantDock } from '@/components/MeetingDetails/MeetingAssistantDock';
+import { FindInNote } from '@/components/MeetingDetails/FindInNote';
 import { SummaryClaimCheck } from '@/components/MeetingDetails/SummaryClaimCheck';
+import { NotesCoverageDialog } from '@/components/MeetingDetails/NotesCoverageDialog';
+import { MarkdownExportDialog } from '@/components/MeetingDetails/MarkdownExportDialog';
 import { summaryClaimQuestion } from '@/lib/summaryClaim';
 import { SearchableTranscript } from '@/components/MeetingDetails/SearchableTranscript';
+import { SearchResultSource } from '@/components/MeetingDetails/SearchResultSource';
+import type { SavedSearchTarget } from '@/hooks/useSavedSearchMatch';
+import { MeetingFoldersDialog } from '@/components/NoteFolderControls';
+import { PreviousSummaryDialog } from '@/components/MeetingDetails/PreviousSummaryDialog';
+import { createWriteQueue } from '@/lib/pendingWrites';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -80,6 +89,10 @@ function formatSavedAt(timestamp?: string) {
 
 export default function PageContent({
   meeting,
+  backHref = '/',
+  backLabel = 'Home',
+  preferWrittenNotes = false,
+  initialSearchMatch,
   summaryData,
   initialSummaryStatus,
   shouldAutoGenerate = false,
@@ -93,6 +106,10 @@ export default function PageContent({
   onLoadMore,
 }: {
   meeting: any;
+  backHref?: string;
+  backLabel?: string;
+  preferWrittenNotes?: boolean;
+  initialSearchMatch?: SavedSearchTarget;
   summaryData: Summary | null;
   initialSummaryStatus?: string;
   shouldAutoGenerate?: boolean;
@@ -106,22 +123,53 @@ export default function PageContent({
   onLoadMore?: () => void;
 }) {
   const router = useRouter();
+  const backButtonRef = useRef<HTMLButtonElement | null>(null);
   const titleRef = useRef<HTMLTextAreaElement | null>(null);
+  const findContentRef = useRef<HTMLDivElement | null>(null);
+  const actionsButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [isMarkdownExportOpen, setIsMarkdownExportOpen] = useState(false);
+  const findFromMenuRef = useRef(false);
+  const [isFindOpen, setIsFindOpen] = useState(false);
   const sourceTriggerRef = useRef<HTMLButtonElement | null>(null);
   const sourcePanelRef = useRef<HTMLDivElement | null>(null);
+  const fullSourceFocusRef = useRef(false);
   const openModelSettingsRef = useRef<(() => void) | null>(null);
   const notes = useMeetingNotes(meeting.id);
   const notesText = useMemo(() => blocksToPlainText(notes.blocks), [notes.blocks]);
   const [activeView, setActiveView] = useState<'notes' | 'summary'>('notes');
   const [isSourcesOpen, setIsSourcesOpen] = useState(false);
+  const [isFolderDialogOpen, setIsFolderDialogOpen] = useState(false);
   const [sourceView, setSourceView] = useState<'notes' | 'transcript'>('transcript');
+  const [searchMatch, setSearchMatch] = useState<SavedSearchTarget | null>(null);
+  const initialMatchKind = initialSearchMatch?.kind;
+  const initialMatchSourceId = initialSearchMatch?.sourceId;
+  const initialMatchQuery = initialSearchMatch?.query;
+  useEffect(() => {
+    if (!fullSourceFocusRef.current || searchMatch) return;
+    fullSourceFocusRef.current = false;
+    sourcePanelRef.current?.querySelector<HTMLElement>(sourceView === 'transcript'
+      ? 'input[type="search"]' : '[role="tab"][data-state="active"]')?.focus();
+  }, [searchMatch, sourceView]);
+  useEffect(() => {
+    if (!initialMatchKind || !initialMatchSourceId || !initialMatchQuery) {
+      setSearchMatch(null);
+      setIsSourcesOpen(false);
+      return;
+    }
+    setSearchMatch({ kind: initialMatchKind, sourceId: initialMatchSourceId, query: initialMatchQuery });
+    setSourceView(initialMatchKind);
+    setIsSourcesOpen(true);
+  }, [initialMatchKind, initialMatchSourceId, initialMatchQuery]);
   const openSources = (view: 'notes' | 'transcript', trigger: HTMLButtonElement) => {
     sourceTriggerRef.current = trigger;
+    setSearchMatch(null);
     setSourceView(view);
     setIsSourcesOpen(true);
   };
   const [isAiComposerOpen, setIsAiComposerOpen] = useState(false);
   const [isClearChatOpen, setIsClearChatOpen] = useState(false);
+  const [isPreviousSummaryOpen, setIsPreviousSummaryOpen] = useState(false);
+  const [isNotesCoverageOpen, setIsNotesCoverageOpen] = useState(false);
   const [chatInput, setChatInput] = useState('');
   const { modelConfig, setModelConfig } = useConfig();
   const templates = useTemplates();
@@ -182,8 +230,8 @@ export default function PageContent({
   });
 
   useEffect(() => {
-    setActiveView(summaryData ? 'summary' : 'notes');
-  }, [meeting.id, summaryData]);
+    setActiveView(summaryData && !preferWrittenNotes ? 'summary' : 'notes');
+  }, [meeting.id, summaryData, preferWrittenNotes]);
 
   useEffect(() => {
     Analytics.trackPageView('meeting_details');
@@ -239,11 +287,11 @@ export default function PageContent({
     await Promise.all([notes.flushPendingSave(true), meetingData.titleSave.flush()]);
   };
 
-  const handleGoHome = async () => {
+  const handleGoBack = async () => {
     try {
       await flushNoteChanges();
       if (meetingData.blockNoteSummaryRef.current?.isDirty && !await meetingData.saveAllChanges()) return;
-      router.push('/');
+      router.push(backHref);
     } catch {
       toast.error('Changes are not saved. Retry before leaving.');
     }
@@ -287,27 +335,60 @@ export default function PageContent({
     <div
       className="flex h-screen min-h-0 flex-col overflow-hidden bg-background text-stone-900"
     >
-      <div className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]" aria-label="Meeting document">
+      <FindInNote key={`find:${meeting.id}`} open={isFindOpen} onOpenChange={setIsFindOpen} contentRef={findContentRef} returnFocusRef={actionsButtonRef} scopeKey={`${meeting.id}:${activeView}`} />
+      <MarkdownExportDialog key={`export:${meeting.id}`} meetingId={meeting.id} open={isMarkdownExportOpen} onOpenChange={setIsMarkdownExportOpen}
+        beforeExport={async () => {
+          if (!notes.isReady || isSummaryGenerating) throw new Error('Wait for your notes and enhancement to finish loading.');
+          await flushNoteChanges();
+          await meetingData.blockNoteSummaryRef.current?.saveSummary();
+          await createWriteQueue(`summary:${meeting.id}`).flush();
+        }} />
+      <NotesCoverageDialog key={`coverage:${meeting.id}`} meetingId={meeting.id} open={isNotesCoverageOpen} onOpenChange={setIsNotesCoverageOpen}
+        readSnapshot={async () => {
+          if (!notes.isReady || isSummaryGenerating) throw new Error('Wait for your notes and enhancement to finish loading.');
+          const draft = await meetingData.blockNoteSummaryRef.current?.getMarkdown();
+          if (!draft?.trim()) throw new Error('The enhanced document is not ready. Close this review and try again.');
+          return { notes: notesText, draft };
+        }} />
+      <div data-note-scroll className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]" aria-label="Meeting document">
       <div className="document-shell !min-h-0 !max-w-3xl">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <button
             type="button"
-            onClick={() => void handleGoHome()}
+            ref={backButtonRef}
+            onClick={() => void handleGoBack()}
             className="document-back"
           >
             <ArrowLeft className="h-4 w-4" />
-            Home
+            {backLabel}
           </button>
 
           <div className="flex flex-wrap items-center justify-end gap-2">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" aria-label="Meeting actions"><MoreHorizontal /></Button>
+                <Button variant="ghost" size="icon" ref={actionsButtonRef} aria-label="Meeting actions" data-meeting-actions-id={meeting.id}><MoreHorizontal /></Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
+              <DropdownMenuContent align="end" onCloseAutoFocus={event => {
+                if (!findFromMenuRef.current) return;
+                findFromMenuRef.current = false;
+                event.preventDefault();
+                requestAnimationFrame(() => {
+                  const input = document.querySelector<HTMLInputElement>('input[aria-label="Find in note"]');
+                  input?.focus();
+                  input?.select();
+                });
+              }}>
+                <DropdownMenuItem onSelect={() => {
+                  findFromMenuRef.current = true;
+                  setIsFindOpen(true);
+                }}><Search className="mr-2 h-4 w-4" />Find in note<span className="ml-auto pl-6 text-xs text-stone-400">⌘F</span></DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => activeView === 'notes' ? handleCopyNotes() : copyOperations.handleCopySummary()}><Copy className="mr-2 h-4 w-4" />{activeView === 'notes' ? 'Copy meeting notes' : 'Copy enhanced notes'}</DropdownMenuItem>
                 {activeView === 'summary' && <DropdownMenuItem disabled={meetingData.isSaving || meetingData.isSummarySaving || !meetingData.isSummaryDirty} onSelect={() => void meetingData.saveAllChanges()}><Save className="mr-2 h-4 w-4" />Save enhanced notes</DropdownMenuItem>}
                 <DropdownMenuItem onSelect={meetingOperations.handleOpenMeetingFolder}><FolderOpen className="mr-2 h-4 w-4" />Open recording folder</DropdownMenuItem>
+                <DropdownMenuItem disabled={!notes.isReady || isSummaryGenerating} onSelect={() => setIsMarkdownExportOpen(true)}>Export Markdown</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => setIsFolderDialogOpen(true)}><FolderOpen className="mr-2 h-4 w-4" />Organize note</DropdownMenuItem>
+                <DropdownMenuItem disabled={isSummaryGenerating} onSelect={() => setIsPreviousSummaryOpen(true)}>Previous enhancement</DropdownMenuItem>
+                <DropdownMenuItem disabled={!notes.isReady || isNotesEmpty || !meetingData.aiSummary || isSummaryGenerating} onSelect={() => setIsNotesCoverageOpen(true)}>Review written-note coverage</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
             <NoteSaveStatus saving={notes.isSaving || meetingData.isSaving || meetingData.isSummarySaving || meetingData.titleSave.status === 'saving'} dirty={meetingData.isSummaryDirty} failed={notes.saveError || meetingData.summarySaveError || meetingData.titleSave.status === 'error'} onRetry={() => { if (meetingData.summarySaveError) void meetingData.saveAllChanges(); else void flushNoteChanges().catch(() => {}); }} />
@@ -373,7 +454,7 @@ export default function PageContent({
               </div>
             </div>
 
-            <div className="w-full pt-3 pb-5">
+            <div ref={findContentRef} className="w-full pt-3 pb-5">
               <div hidden={activeView !== 'summary'}>
                 {meetingData.aiSummary ? (
                   <SummaryClaimCheck key={meeting.id}
@@ -428,14 +509,14 @@ export default function PageContent({
               ref={sourcePanelRef}
               onOpenAutoFocus={event => {
                 event.preventDefault();
-                sourcePanelRef.current?.querySelector<HTMLElement>(sourceView === 'transcript'
+                sourcePanelRef.current?.querySelector<HTMLElement>(searchMatch ? '[data-search-match-heading]' : sourceView === 'transcript'
                   ? 'input[type="search"]' : '[role="tab"][data-state="active"]')?.focus();
               }}
-              onCloseAutoFocus={event => { event.preventDefault(); sourceTriggerRef.current?.focus(); }}
+              onCloseAutoFocus={event => { event.preventDefault(); (sourceTriggerRef.current ?? backButtonRef.current)?.focus(); }}
               side="bottom"
               className="h-[78vh] rounded-t-xl border-stone-200 bg-white px-0 pb-0 pt-4"
             >
-              <Tabs value={sourceView} onValueChange={value => setSourceView(value as 'notes' | 'transcript')} className="flex h-full flex-col">
+              <Tabs value={sourceView} onValueChange={value => { setSourceView(value as 'notes' | 'transcript'); setSearchMatch(null); }} className="flex h-full flex-col">
                 <SheetHeader className="border-b border-stone-200 px-6 pb-4">
                   <div className="flex flex-wrap items-start justify-between gap-4 pr-10">
                     <div>
@@ -445,7 +526,7 @@ export default function PageContent({
                       </SheetDescription>
                     </div>
                     <div className="flex items-center gap-2">
-                      {sourceView === 'transcript' && onRefetchTranscripts && (
+                      {sourceView === 'transcript' && !searchMatch && onRefetchTranscripts && (
                         <Button
                           variant="outline"
                           size="sm"
@@ -474,6 +555,9 @@ export default function PageContent({
                   </TabsList>
                 </SheetHeader>
 
+                {searchMatch ? <TabsContent value={searchMatch.kind} className="mt-0 min-h-0 flex-1 overflow-y-auto px-6 py-5">
+                  <SearchResultSource meetingId={meeting.id} target={searchMatch} onShowAll={() => { fullSourceFocusRef.current = true; setSearchMatch(null); }} />
+                </TabsContent> : <>
                 <TabsContent value="notes" forceMount hidden={sourceView !== 'notes'} className="mt-0 min-h-0 flex-1 overflow-y-auto px-6 py-5">
                   <div className="mx-auto max-w-4xl">
                     {!notes.isReady ? <p role="status" className="text-sm text-stone-500">{notes.loadError ? 'Could not load written notes.' : 'Loading written notes…'} {notes.loadError && <button type="button" onClick={notes.retryLoad} className="underline">Retry loading notes</button>}</p>
@@ -500,12 +584,20 @@ export default function PageContent({
                     )}
                   </div>
                 </TabsContent>
+                </>}
               </Tabs>
             </SheetContent>
           </Sheet>
         </div>
       </div>
       </div>
+      <MeetingFoldersDialog meetingId={meeting.id} open={isFolderDialogOpen} onOpenChange={setIsFolderDialogOpen} />
+      <PreviousSummaryDialog key={meeting.id} meetingId={meeting.id} open={isPreviousSummaryOpen} onOpenChange={setIsPreviousSummaryOpen}
+        beforeRead={async () => {
+          await meetingData.blockNoteSummaryRef.current?.saveSummary();
+          await createWriteQueue(`summary:${meeting.id}`).flush();
+        }}
+        onRestored={result => { meetingData.setAiSummary(result); setActiveView('summary'); toast.success('Previous enhancement restored'); }} />
       <Dialog open={isClearChatOpen} onOpenChange={setIsClearChatOpen}>
         <DialogContent onCloseAutoFocus={event => { event.preventDefault(); document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Ask about this meeting"]')?.focus(); }}>
           <DialogHeader>

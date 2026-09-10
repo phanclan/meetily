@@ -110,7 +110,7 @@ export function useSummaryGeneration({
     }
   }, []);
 
-  const updateSummary = useCallback(async (pollingResult: any, isRegeneration = false) => {
+  const updateSummary = useCallback(async (pollingResult: any, isRegeneration: boolean, isCurrent: () => boolean) => {
     console.log('Summary status:', pollingResult);
 
     // Handle cancellation
@@ -123,6 +123,7 @@ export function useSummaryGeneration({
           meetingId: meeting.id
         }) as any;
 
+        if (!isCurrent()) return;
         if (existingSummary?.data) {
           console.log('Restored previous summary after cancellation');
           setAiSummary(existingSummary.data);
@@ -131,6 +132,7 @@ export function useSummaryGeneration({
           setSummaryStatus('idle');
         }
       } catch (error) {
+        if (!isCurrent()) return;
         console.error('Failed to reload summary after cancellation:', error);
         setSummaryStatus('idle');
       }
@@ -155,6 +157,7 @@ export function useSummaryGeneration({
             meetingId: meeting.id
           }) as any;
 
+          if (!isCurrent()) return;
           if (existingSummary?.data) {
             console.log('Restored previous summary after regeneration failure');
             setAiSummary(existingSummary.data);
@@ -177,6 +180,7 @@ export function useSummaryGeneration({
             return;
           }
         } catch (error) {
+          if (!isCurrent()) return;
           console.error('Failed to reload summary after error:', error);
         }
       }
@@ -316,7 +320,7 @@ export function useSummaryGeneration({
         true
       );
 
-      if (meetingName && onMeetingUpdated) {
+      if (isCurrent() && meetingName && onMeetingUpdated) {
         await onMeetingUpdated();
       }
     }
@@ -326,10 +330,12 @@ export function useSummaryGeneration({
   const summaryUpdateRef = useRef(updateSummary);
   summaryUpdateRef.current = updateSummary;
   const observeGeneration = useCallback((request: NonNullable<typeof generationStart.current>, isRegeneration: boolean, processId = meeting.id) => {
+    // Recheck after restore reads too: navigation can happen while they are pending.
+    const isCurrent = () => generationStart.current === request && currentMeeting.current.id === meeting.id;
     startSummaryPolling(meeting.id, processId, pollingResult => {
-      if (generationStart.current !== request) return;
-      return summaryUpdateRef.current(pollingResult, isRegeneration).finally(() => {
-        if (generationStart.current === request &&
+      if (!isCurrent()) return;
+      return summaryUpdateRef.current(pollingResult, isRegeneration, isCurrent).finally(() => {
+        if (isCurrent() &&
           ['completed', 'cancelled', 'error', 'failed'].includes(pollingResult.status)) {
           generationBusy.current = false;
         }

@@ -115,7 +115,7 @@ export function PermissionsStep() {
   return (
     <OnboardingContainer
       title="Grant Permissions"
-      description="Meetnola needs access to your microphone and system audio to record meetings"
+      description="Afterword needs access to your microphone and system audio to record meetings"
       step={4}
       hideProgress={true}
       showNavigation={allPermissionsGranted}

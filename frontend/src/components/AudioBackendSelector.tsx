@@ -84,14 +84,14 @@ export function AudioBackendSelector({
 
       if (granted) {
         toast.success('Audio Capture check completed', {
-          description: 'If macOS did not show a prompt, verify Meetnola in System Settings -> Privacy & Security -> Audio Capture.'
+          description: 'If macOS did not show a prompt, verify Afterword in System Settings -> Privacy & Security -> Audio Capture.'
         });
         return;
       }
 
       await invoke('request_screen_recording_permission_command');
       toast.error('Audio Capture permission still needs approval', {
-        description: 'System Settings was opened. Enable Meetnola under Privacy & Security -> Audio Capture, then restart the app.'
+        description: 'System Settings was opened. Enable Afterword under Privacy & Security -> Audio Capture, then restart the app.'
       });
     } catch (err) {
       console.error('Failed to request audio capture permission:', err);

@@ -513,7 +513,7 @@ export default function RootLayout({
                                   <div className="flex min-h-screen items-center justify-center bg-background text-stone-500">
                                     <div className="flex flex-col items-center gap-3">
                                       <div className="h-8 w-8 animate-spin rounded-full border-2 border-stone-300 border-t-stone-700" />
-                                      <p className="text-sm font-medium text-stone-700">Loading Meetnola...</p>
+                                      <p className="text-sm font-medium text-stone-700">Loading Afterword...</p>
                                     </div>
                                   </div>
                                 ) : showOnboarding ? (

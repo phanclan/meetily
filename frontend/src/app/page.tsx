@@ -9,6 +9,8 @@ import { useConfig } from '@/contexts/ConfigContext';
 import { HomeDashboard } from '@/app/_components/HomeDashboard';
 import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
+import { TrashDialog } from '@/components/TrashDialog';
+import { meetnolaInvoke } from '@/meetnola/ipc';
 import { SettingsModals } from './_components/SettingsModal';
 import { useModalState, type ModalType } from '@/hooks/useModalState';
 import { useTranscriptRecovery } from '@/hooks/useTranscriptRecovery';
@@ -21,13 +23,14 @@ import { createDraftNotePath, createQuickNotePath } from '@/lib/quickNoteRoute';
 
 export default function Home() {
   const [showRecoveryDialog, setShowRecoveryDialog] = useState(false);
+  const [showTrash, setShowTrash] = useState(false);
 
   const { transcriptModelConfig, selectedDevices, modelConfig, betaFeatures } = useConfig();
   const recordingState = useRecordingState();
   const { status } = recordingState;
 
   const { hasMicrophone, hasSystemAudio, isChecking: isCheckingPermissions } = usePermissionCheck();
-  const { refetchMeetings, meetings } = useSidebar();
+  const { refetchMeetings, refreshNoteFolders, meetings } = useSidebar();
   const { modals, messages, hideModal } = useModalState(transcriptModelConfig);
   const { openImportDialog } = useImportDialog();
 
@@ -48,12 +51,12 @@ export default function Home() {
 
   const handleDeleteMeeting = async (meetingId: string) => {
     try {
-      await invoke('api_delete_meeting', { meetingId });
+      await meetnolaInvoke('trash_meeting', { meetingId });
       await refetchMeetings();
-      Analytics.trackMeetingDeleted(meetingId);
-      toast.success('Meeting deleted');
+      refreshNoteFolders();
+      toast.success('Note moved to Trash', { action: { label: 'Open Trash', onClick: () => setShowTrash(true) } });
     } catch (error) {
-      toast.error('Failed to delete meeting', {
+      toast.error('Could not move note to Trash', {
         description: error instanceof Error ? error.message : String(error),
       });
     }
@@ -213,15 +216,25 @@ export default function Home() {
         modelConfig={modelConfig}
         selectedDevices={selectedDevices}
         recoverableMeetings={recoverableMeetings}
-        onOpenMeeting={(meetingId) => router.push(`/meeting-details?id=${meetingId}`)}
+        onOpenMeeting={(meetingId, searchQuery, match, folderId) => {
+          const params = new URLSearchParams({ id: meetingId, ...(searchQuery ? { search: searchQuery } : {}) });
+          if (folderId) params.set('folder', folderId);
+          if (searchQuery && match?.sourceId && (match.kind === 'notes' || match.kind === 'transcript')) {
+            params.set('match', match.kind);
+            params.set('sourceId', match.sourceId);
+          }
+          router.push(`/meeting-details?${params}`);
+        }}
         onOpenRecovery={() => setShowRecoveryDialog(true)}
         onImportAudio={() => openImportDialog()}
         importEnabled={betaFeatures.importAndRetranscribe}
-        onStartRecording={() => router.push(createQuickNotePath())}
-        onOpenDraft={() => router.push(createDraftNotePath())}
+        onStartRecording={(folderId) => router.push(createQuickNotePath(folderId))}
+        onOpenDraft={(folderId) => router.push(createDraftNotePath(folderId))}
         onDeleteMeeting={handleDeleteMeeting}
+        onOpenTrash={() => setShowTrash(true)}
         isRecordingDisabled={false}
       />
+      <TrashDialog open={showTrash} onOpenChange={setShowTrash} onChanged={() => { void refetchMeetings(); refreshNoteFolders(); }} />
     </motion.div>
   );
 }

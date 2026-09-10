@@ -13,7 +13,8 @@ import { applyPinnedSummaryLanguageToMeeting } from '@/lib/summary-language-pref
 import { toast } from 'sonner';
 import { readLiveMeetingNotes, clearLiveMeetingNotes } from '@/lib/liveMeetingNotes';
 import { blocksToPlainText } from '@/lib/meetingNotes';
-import { saveMeetingNotes } from '@/meetnola/ipc';
+import { saveMeetingNotes, meetnolaInvoke } from '@/meetnola/ipc';
+import { clearLiveMeetingFolder, saveLiveMeetingFolder } from '@/lib/liveMeetingFolder';
 
 interface AudioRecoveryStatus {
   status: string; // "success" | "partial" | "failed" | "none"
@@ -196,6 +197,8 @@ export function useTranscriptRecovery(): UseTranscriptRecoveryReturn {
         });
       }
 
+      await saveLiveMeetingFolder(meetingId, savedMeetingId);
+
       try {
         await applyPinnedSummaryLanguageToMeeting(savedMeetingId);
       } catch (error) {
@@ -213,6 +216,7 @@ export function useTranscriptRecovery(): UseTranscriptRecoveryReturn {
       // 7. Mark as saved in IndexedDB
       await indexedDBService.markMeetingSaved(meetingId);
       clearLiveMeetingNotes(meetingId);
+      clearLiveMeetingFolder(meetingId);
 
 
       // 8. Clean up checkpoint files
@@ -246,6 +250,7 @@ export function useTranscriptRecovery(): UseTranscriptRecoveryReturn {
    */
   const deleteRecoverableMeeting = useCallback(async (meetingId: string): Promise<void> => {
     try {
+      await meetnolaInvoke('discard_recording_chat', { recordingId: meetingId });
       await indexedDBService.deleteMeeting(meetingId);
       setRecoverableMeetings(prev => prev.filter(m => m.meetingId !== meetingId));
     } catch (error) {

@@ -239,3 +239,7 @@
   .assistant-markdown th, .assistant-markdown td { @apply border border-stone-200 px-3 py-2 text-left; }
   .assistant-markdown blockquote { @apply my-2 border-l-2 border-stone-300 pl-3 text-stone-600; }
 }
+
+/* Search paints editor text without inserting marks into saved BlockNote data. */
+::highlight(note-find-all) { background-color: #fef08a; color: #292524; }
+::highlight(note-find-current) { background-color: #fb923c; color: #1c1917; }

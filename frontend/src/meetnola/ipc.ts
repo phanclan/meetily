@@ -36,6 +36,7 @@ export function liveQuery(args: {
   userMessage: string
   transcriptContext: string
   history?: MeetingExchange[]
+  notesReview?: { notes: string; draft: string }
 }, onText?: (text: string) => void): Promise<string> {
   const onDelta = new Channel<string>()
   onDelta.onmessage = onText ?? (() => {})

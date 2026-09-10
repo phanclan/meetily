@@ -1049,7 +1049,7 @@ pub async fn open_meeting_folder<R: Runtime>(
 
     // Get meeting with folder_path
     let meeting: Option<MeetingModel> = sqlx::query_as(
-        "SELECT id, title, created_at, updated_at, folder_path FROM meetings WHERE id = ?",
+        "SELECT id, title, created_at, updated_at, folder_path FROM meetings WHERE id = ? AND NOT EXISTS(SELECT 1 FROM meeting_trash WHERE meeting_id = meetings.id)",
     )
     .bind(&meeting_id)
     .fetch_optional(pool)
@@ -1325,7 +1325,7 @@ pub async fn api_test_custom_openai_connection<R: Runtime>(
     let url = format!("{}/chat/completions", endpoint.trim_end_matches('/'));
 
     // Create a minimal test request
-    let test_request = serde_json::json!({
+    let mut test_request = serde_json::json!({
         "model": model,
         "messages": [
             {
@@ -1333,8 +1333,9 @@ pub async fn api_test_custom_openai_connection<R: Runtime>(
                 "content": "Hi"
             }
         ],
-        "max_tokens": 5
+        "max_tokens": 512
     });
+    crate::summary::llm_client::apply_gateway_luna_profile(&mut test_request, Some(&endpoint));
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
@@ -1356,51 +1357,13 @@ pub async fn api_test_custom_openai_connection<R: Runtime>(
             let status = response.status();
             let response_text = response.text().await.unwrap_or_default();
 
-            if status.is_success() {
-                // Parse response as JSON to verify it's a valid OpenAI-compatible response
-                match serde_json::from_str::<serde_json::Value>(&response_text) {
-                    Ok(json) => {
-                        // Verify the response has the expected OpenAI structure
-                        if let Some(choices) = json.get("choices") {
-                            if let Some(choices_array) = choices.as_array() {
-                                if !choices_array.is_empty() {
-                                    // Verify the first choice has the required message structure
-                                    if let Some(first_choice) = choices_array.get(0) {
-                                        // Check if message.content field exists (can be empty string)
-                                        let has_message_structure = first_choice
-                                            .get("message")
-                                            .and_then(|m| {
-                                                m.get("content")
-                                                .or_else(|| m.get("reasoning_content"))
-                                            })
-                                            .is_some();
-
-                                        if has_message_structure {
-                                            log_info!("✅ Custom OpenAI connection test successful - response validated");
-                                            return Ok(serde_json::json!({
-                                                "status": "success",
-                                                "message": "Connection successful and response validated",
-                                                "http_status": status.as_u16()
-                                            }));
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // Response was 200 but doesn't match OpenAI format
-                        log_warn!("⚠️ Endpoint returned 200 but response doesn't match OpenAI format: {}", response_text);
-                        Err("Endpoint is reachable but doesn't appear to be OpenAI-compatible. Response is missing 'choices' array or 'message.content' / 'message.reasoning_content' field.".to_string())
-                    }
-                    Err(e) => {
-                        log_warn!("⚠️ Endpoint returned 200 but response is not valid JSON: {}", e);
-                        Err(format!("Endpoint is reachable but returned invalid JSON: {}. Response: {}", e, response_text))
-                    }
-                }
-            } else {
-                log_warn!("⚠️ Custom OpenAI connection test failed with status {}: {}", status, response_text);
-                Err(format!("Connection failed with status {}: {}", status, response_text))
-            }
+            validate_custom_connection_response(status.as_u16(), &response_text)?;
+            log_info!("Custom OpenAI connection test returned a complete response");
+            Ok(serde_json::json!({
+                "status": "success",
+                "message": "Connection successful; model returned a complete response",
+                "http_status": status.as_u16()
+            }))
         }
         Err(e) => {
             log_error!("❌ Custom OpenAI connection test failed: {}", e);
@@ -1412,5 +1375,60 @@ pub async fn api_test_custom_openai_connection<R: Runtime>(
                 Err(format!("Connection failed: {}", e))
             }
         }
+    }
+}
+
+
+// Use the same completion rules as enhancement and chat. A reachable server or
+// reasoning-only response does not prove this model can answer a meeting question.
+fn validate_custom_connection_response(status: u16, body: &str) -> Result<(), String> {
+    if !(200..300).contains(&status) {
+        // Provider bodies can echo request headers. Never forward them to UI logs.
+        let message = match status {
+            401 => "The API key was rejected. Check the key and endpoint.",
+            402 => "The provider requires credits or billing to be enabled.",
+            403 => "This key does not have permission to use the selected model.",
+            404 => "The endpoint or selected model was not found.",
+            429 => "The provider rate limit was reached. Try again shortly.",
+            500..=599 => "The provider is temporarily unavailable. Try again shortly.",
+            _ => "The provider rejected the request. Check the endpoint and model settings.",
+        };
+        return Err(format!("Connection failed (HTTP {status}). {message}"));
+    }
+    let response = serde_json::from_str::<crate::summary::llm_client::ChatResponse>(body)
+        .map_err(|_| "The endpoint returned an invalid chat response. Check that it supports OpenAI Chat Completions.".to_string())?;
+    response.complete_text().map(|_| ())
+}
+
+#[cfg(test)]
+mod custom_connection_tests {
+    use super::validate_custom_connection_response;
+
+    #[test]
+    fn accepts_complete_text_but_rejects_empty_truncated_and_reasoning_only_replies() {
+        for body in [
+            r#"{"choices":[{"message":{"content":"Hello"},"finish_reason":"stop"}]}"#,
+            r#"{"choices":[{"message":{"content":"Legacy complete response"}}]}"#,
+        ] { assert!(validate_custom_connection_response(200, body).is_ok()); }
+        for body in [
+            r#"{"choices":[{"message":{"content":"Partial"},"finish_reason":"length"}]}"#,
+            r#"{"choices":[{"message":{"content":"   "},"finish_reason":"stop"}]}"#,
+            r#"{"choices":[{"message":{"content":null,"reasoning_content":"Thinking"}}]}"#,
+            r#"{"choices":[{"message":{"reasoning_content":"Thinking"}}]}"#,
+            r#"{"choices":[{"message":{"content":"Filtered"},"finish_reason":"content_filter"}]}"#,
+            r#"{"choices":[]}"#,
+            "<html>Upstream failure</html>",
+        ] { assert!(validate_custom_connection_response(200, body).is_err(), "Accepted incomplete response"); }
+    }
+
+    #[test]
+    fn provider_failures_remain_actionable_without_echoing_credentials_or_body() {
+        for (status, expected) in [(401,"key"),(402,"credits"),(403,"permission"),(404,"not found"),(429,"rate limit"),(503,"unavailable"),(400,"settings")] {
+            let error = validate_custom_connection_response(status, "synthetic-secret-do-not-echo").unwrap_err();
+            assert!(error.contains(expected));
+            assert!(error.contains(&status.to_string()));
+            assert!(!error.contains("synthetic-secret"));
+        }
+        assert!(!validate_custom_connection_response(200, "synthetic-secret-do-not-echo").unwrap_err().contains("synthetic-secret"));
     }
 }

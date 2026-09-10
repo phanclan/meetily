@@ -9,7 +9,7 @@ pub struct MeetingsRepository;
 impl MeetingsRepository {
     pub async fn get_meetings(pool: &SqlitePool) -> Result<Vec<MeetingModel>, sqlx::Error> {
         let meetings =
-            sqlx::query_as::<_, MeetingModel>("SELECT * FROM meetings ORDER BY created_at DESC")
+            sqlx::query_as::<_, MeetingModel>("SELECT * FROM meetings WHERE NOT EXISTS(SELECT 1 FROM meeting_trash WHERE meeting_id = meetings.id) ORDER BY created_at DESC")
                 .fetch_all(pool)
                 .await?;
         Ok(meetings)
@@ -62,7 +62,7 @@ impl MeetingsRepository {
 
         // Get meeting details
         let meeting: Option<MeetingModel> =
-            sqlx::query_as("SELECT id, title, created_at, updated_at, folder_path FROM meetings WHERE id = ?")
+            sqlx::query_as("SELECT id, title, created_at, updated_at, folder_path FROM meetings WHERE id = ? AND NOT EXISTS(SELECT 1 FROM meeting_trash WHERE meeting_id = meetings.id)")
                 .bind(meeting_id)
                 .fetch_optional(&mut *transaction)
                 .await?;
@@ -120,7 +120,7 @@ impl MeetingsRepository {
         }
 
         let meeting: Option<MeetingModel> =
-            sqlx::query_as("SELECT id, title, created_at, updated_at, folder_path FROM meetings WHERE id = ?")
+            sqlx::query_as("SELECT id, title, created_at, updated_at, folder_path FROM meetings WHERE id = ? AND NOT EXISTS(SELECT 1 FROM meeting_trash WHERE meeting_id = meetings.id)")
                 .bind(meeting_id)
                 .fetch_optional(pool)
                 .await?;
@@ -253,7 +253,7 @@ async fn delete_meeting_with_transaction(
     meeting_id: &str,
 ) -> Result<bool, SqlxError> {
     // Check if meeting exists
-    let meeting_exists: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM meetings WHERE id = ?")
+    let meeting_exists: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM meetings WHERE id = ? AND EXISTS(SELECT 1 FROM meeting_trash WHERE meeting_id = meetings.id)")
         .bind(meeting_id)
         .fetch_optional(&mut *transaction)
         .await?;

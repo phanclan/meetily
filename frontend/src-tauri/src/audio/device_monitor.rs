@@ -150,9 +150,8 @@ impl AudioDeviceMonitor {
     /// Stop monitoring
     pub async fn stop_monitoring(&mut self) {
         info!("Stopping device monitor");
-        self.stop_signal.notify_one();
-
         if let Some(handle) = self.monitor_handle.take() {
+            self.stop_signal.notify_one();
             let _ = handle.await;
         }
 
@@ -161,12 +160,26 @@ impl AudioDeviceMonitor {
 
     /// Main monitoring loop
     async fn monitor_loop(
-        mut monitored_devices: Vec<MonitoredDevice>,
+        monitored_devices: Vec<MonitoredDevice>,
         event_sender: mpsc::UnboundedSender<DeviceEvent>,
         stop_signal: Arc<tokio::sync::Notify>,
     ) {
+        Self::monitor_loop_with_enumerator(
+            monitored_devices, event_sender, stop_signal, list_audio_devices,
+        ).await;
+    }
+
+    async fn monitor_loop_with_enumerator<F, Fut>(
+        mut monitored_devices: Vec<MonitoredDevice>,
+        event_sender: mpsc::UnboundedSender<DeviceEvent>,
+        stop_signal: Arc<tokio::sync::Notify>,
+        mut enumerate: F,
+    ) where
+        F: FnMut() -> Fut,
+        Fut: std::future::Future<Output = Result<Vec<AudioDevice>>>,
+    {
         let mut last_device_list = Vec::new();
-        let check_interval = Duration::from_secs(2); // Poll every 2 seconds
+        let mut check_interval = Duration::from_secs(2);
 
         loop {
             // Check for stop signal with timeout
@@ -181,7 +194,14 @@ impl AudioDeviceMonitor {
             }
 
             // Get current device list
-            let current_devices = match list_audio_devices().await {
+            // Stop does not need a device inventory. An already-running native
+            // probe may finish on its blocking thread, but cannot emit late events.
+            let result = tokio::select! {
+                biased;
+                _ = stop_signal.notified() => break,
+                result = enumerate() => result,
+            };
+            let current_devices = match result {
                 Ok(devices) => devices,
                 Err(e) => {
                     error!("Failed to list audio devices: {}", e);
@@ -248,6 +268,7 @@ impl AudioDeviceMonitor {
             if next_interval != check_interval {
                 debug!("Adjusting monitor interval to {:?}", next_interval);
             }
+            check_interval = next_interval;
         }
     }
 }
@@ -293,5 +314,83 @@ mod tests {
 
         // Stop should be safe even if not started
         monitor.stop_monitoring().await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn polling_slows_when_present_and_accelerates_when_missing() {
+        use super::super::devices::DeviceType;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let present = Arc::new(AtomicBool::new(true));
+        let enumerated_present = present.clone();
+        let (events, mut received_events) = mpsc::unbounded_channel();
+        let (polls, mut received_polls) = mpsc::unbounded_channel();
+        let stop = Arc::new(tokio::sync::Notify::new());
+        let task = tokio::spawn(AudioDeviceMonitor::monitor_loop_with_enumerator(
+            vec![MonitoredDevice::new("Test mic".into(), DeviceMonitorType::Microphone)],
+            events,
+            stop.clone(),
+            move || {
+                polls.send(()).unwrap();
+                let devices = if enumerated_present.load(Ordering::SeqCst) {
+                    vec![AudioDevice::new("Test mic".into(), DeviceType::Input)]
+                } else {
+                    Vec::new()
+                };
+                std::future::ready(Ok(devices))
+            },
+        ));
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_secs(2)).await;
+        tokio::task::yield_now().await;
+        assert!(received_polls.try_recv().is_ok());
+        assert!(matches!(received_events.try_recv(), Ok(DeviceEvent::DeviceListChanged)));
+        tokio::time::advance(Duration::from_secs(4)).await;
+        tokio::task::yield_now().await;
+        assert!(received_polls.try_recv().is_err(), "healthy devices must not be polled every two seconds");
+        tokio::time::advance(Duration::from_secs(1)).await;
+        tokio::task::yield_now().await;
+        assert!(received_polls.try_recv().is_ok());
+        present.store(false, Ordering::SeqCst);
+        tokio::time::advance(Duration::from_secs(5)).await;
+        tokio::task::yield_now().await;
+        assert!(received_polls.try_recv().is_ok());
+        assert!(matches!(received_events.try_recv(), Ok(DeviceEvent::DeviceListChanged)));
+        assert!(received_events.try_recv().is_err(), "one missed poll must not report disconnection");
+        tokio::time::advance(Duration::from_secs(2)).await;
+        tokio::task::yield_now().await;
+        assert!(received_polls.try_recv().is_ok());
+        assert!(matches!(received_events.try_recv(), Ok(DeviceEvent::DeviceDisconnected { .. })));
+        stop.notify_one();
+        task.await.unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stop_during_device_discovery_does_not_wait_or_emit_events() {
+        let (events, mut received_events) = mpsc::unbounded_channel();
+        let (polls, mut received_polls) = mpsc::unbounded_channel();
+        let stop = Arc::new(tokio::sync::Notify::new());
+        let task = tokio::spawn(AudioDeviceMonitor::monitor_loop_with_enumerator(
+            vec![MonitoredDevice::new("Test mic".into(), DeviceMonitorType::Microphone)],
+            events,
+            stop.clone(),
+            move || {
+                polls.send(()).unwrap();
+                std::future::pending::<Result<Vec<AudioDevice>>>()
+            },
+        ));
+        received_polls.recv().await.unwrap();
+        stop.notify_one();
+        tokio::time::timeout(Duration::from_secs(1), task).await.unwrap().unwrap();
+        assert!(received_events.try_recv().is_err());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stopping_an_idle_monitor_does_not_cancel_its_next_start() {
+        let (mut monitor, _) = AudioDeviceMonitor::new();
+        monitor.stop_monitoring().await;
+        assert!(tokio::time::timeout(
+            Duration::from_millis(1), monitor.stop_signal.notified(),
+        ).await.is_err());
     }
 }

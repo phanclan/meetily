@@ -5,12 +5,17 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { FileAudio, FileText, MessageCircle, Mic, MoreHorizontal, NotebookPen, RefreshCw, Search, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
-import type { CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { useSidebar, type CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
 import type { TranscriptModelProps } from '@/components/TranscriptSettings';
 import type { ModelConfig } from '@/services/configService';
 import type { MeetingMetadata } from '@/services/indexedDBService';
 import { loadQuickNoteDraft } from '@/lib/quickNoteDraft';
 import { groupMeetingsByDay } from '@/lib/meetingTimeline';
+import { MeetingSearchResults } from '@/components/MeetingSearchResults';
+import type { SavedMeetingMatch } from '@/hooks/useSavedMeetingSearch';
+import { useFolderRead } from '@/hooks/useNoteFolders';
+import { NoteFolderDialog, MeetingFoldersDialog } from '@/components/NoteFolderControls';
 
 interface HomeDashboardProps {
   meetings: CurrentMeeting[];
@@ -24,13 +29,14 @@ interface HomeDashboardProps {
     systemDevice: string | null;
   };
   recoverableMeetings: MeetingMetadata[];
-  onOpenMeeting: (meetingId: string) => void;
+  onOpenMeeting: (meetingId: string, searchQuery?: string, match?: SavedMeetingMatch, folderId?: string) => void;
   onOpenRecovery: () => void;
   onImportAudio: () => void;
   importEnabled: boolean;
-  onStartRecording: () => void;
-  onOpenDraft: () => void;
+  onStartRecording: (folderId?: string) => void;
+  onOpenDraft: (folderId?: string) => void;
   onDeleteMeeting: (meetingId: string) => Promise<void>;
+  onOpenTrash: () => void;
   isRecordingDisabled: boolean;
 }
 
@@ -64,18 +70,28 @@ export function HomeDashboard({
   onStartRecording,
   onOpenDraft,
   onDeleteMeeting,
+  onOpenTrash,
   isRecordingDisabled,
 }: HomeDashboardProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { noteFolders, folderRevision } = useSidebar();
+  const folderId = searchParams.get('folder') || '';
+  const folder = noteFolders.data?.find(item => item.id === folderId);
+  const folderMembers = useFolderRead<string[]>('get_note_folder_members', { folderId }, Boolean(folderId), folderRevision);
+  const memberIds = useMemo(() => new Set(folderMembers.data ?? []), [folderMembers.data]);
+  const [folderDialog, setFolderDialog] = useState<'new' | 'rename' | null>(null);
+  const folderFormTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const [organizeMeetingId, setOrganizeMeetingId] = useState<string | null>(null);
   const query = searchParams.get('q')?.trim() || '';
   const [search, setSearch] = useState(query);
   useEffect(() => { setSearch(query); }, [query]);
   const filter = search.trim();
-  const showAll = searchParams.get('view') === 'all' || Boolean(filter);
+  const showAll = searchParams.get('view') === 'all' || Boolean(filter) || Boolean(folderId);
   const [quickNoteTitle, setQuickNoteTitle] = useState('New note');
   const [quickNoteDraft, setQuickNoteDraft] = useState('');
   const [quickNoteUpdatedAt, setQuickNoteUpdatedAt] = useState<number | null>(null);
+  const [quickNoteSavePending, setQuickNoteSavePending] = useState(false);
 
   useEffect(() => {
     const draft = loadQuickNoteDraft();
@@ -83,11 +99,12 @@ export function HomeDashboard({
     setQuickNoteTitle(draft.title);
     setQuickNoteDraft(draft.content);
     setQuickNoteUpdatedAt(draft.updatedAt);
+    setQuickNoteSavePending(Boolean(draft.saveId));
   }, []);
 
   const quickNotePreview = useMemo(() => {
     const normalized = quickNoteDraft.trim().replace(/\s+/g, ' ');
-    if (!normalized) return 'Capture loose ideas, follow-ups, and prep notes without starting a recording.';
+    if (!normalized) return 'Continue writing your note.';
     return normalized.slice(0, 220);
   }, [quickNoteDraft]);
 
@@ -105,26 +122,19 @@ export function HomeDashboard({
     }
   };
 
-  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const hasDraft = Boolean(quickNoteDraft.trim() || quickNoteSavePending ||
+    (quickNoteTitle.trim() && quickNoteTitle !== 'New note'));
+  const openingOrganizerRef = useRef(false);
+  const movingToTrashRef = useRef(false);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
 
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setOpenMenuId(null);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  const matchingMeetings = meetings.filter(meeting => meeting.title.toLocaleLowerCase().includes(filter.toLocaleLowerCase()));
-  const recentMeetings = showAll ? matchingMeetings : meetings.slice(0, 8);
+  const visibleMeetings = folderId ? meetings.filter(meeting => memberIds.has(meeting.id)) : meetings;
+  const recentMeetings = showAll ? visibleMeetings : visibleMeetings.slice(0, 8);
   const meetingGroups = groupMeetingsByDay(recentMeetings);
   const recoveryCount = recoverableMeetings.length;
 
   const openQuickNote = () => {
-    onOpenDraft();
+    onOpenDraft(folderId || undefined);
   };
 
   const todayLabel = new Date().toLocaleDateString('en-US', {
@@ -138,17 +148,17 @@ export function HomeDashboard({
         {/* Header */}
         <div className="flex flex-wrap items-center justify-between gap-3 pb-5">
           <div>
-            <h1 className="font-serif text-3xl tracking-tight text-stone-900">Your notes</h1>
+            <h1 className="break-words font-serif text-3xl tracking-tight text-stone-900 [overflow-wrap:anywhere]">{folderId ? folder?.name || 'Folder' : 'Your notes'}</h1>
             <p className="mt-0.5 text-xs text-stone-500">{todayLabel}</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" className="rounded-full shadow-none" onClick={openQuickNote}>
               <NotebookPen className="h-3.5 w-3.5" />
-              New note
+              {hasDraft ? 'Resume draft' : 'New note'}
             </Button>
             <Button
               className="h-9 rounded-full bg-stone-900 px-4 text-sm font-medium text-white hover:bg-stone-800"
-              onClick={onStartRecording}
+              onClick={() => onStartRecording(folderId || undefined)}
               disabled={isRecordingDisabled}
             >
               <Mic className="h-3.5 w-3.5" />
@@ -161,36 +171,64 @@ export function HomeDashboard({
           <MessageCircle className="h-4 w-4" /><span>Ask your notes</span><span className="ml-auto hidden text-xs sm:inline">Across meetings</span>
         </button>
 
+        {hasDraft && (
+          <section aria-label="Unfinished draft" className="mb-3 flex min-w-0 items-center gap-3 rounded-xl border border-stone-200 bg-stone-50 px-4 py-3">
+            <button type="button" onClick={openQuickNote} className="min-w-0 flex-1 text-left">
+              <span className="text-xs font-medium text-stone-500">{quickNoteSavePending ? 'Finish saving your draft' : 'Continue where you left off'}</span>
+              <p className="mt-1 truncate text-sm font-medium text-stone-800">{quickNoteTitle === 'New note' ? 'Untitled draft' : quickNoteTitle}</p>
+              <p className="mt-1 line-clamp-2 break-words text-xs leading-relaxed text-stone-500 [overflow-wrap:anywhere]">{quickNotePreview}</p>
+              <span className="mt-2 block text-xs text-stone-500">{formatRelativeTime(quickNoteUpdatedAt)}</span>
+            </button>
+            {quickNoteDraft.trim() && <Button variant="ghost" size="sm" aria-label="Copy draft" onClick={copyQuickNote}>Copy</Button>}
+          </section>
+        )}
+
         {/* Meeting timeline and supporting details */}
         <div className="mt-3 flex flex-col gap-8">
 
           {/* Recent meetings — primary list */}
           <div className="w-full">
-            <div className="mb-4 flex items-center justify-between gap-3">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div className="flex gap-1" aria-label="Meeting list view">
+                <button type="button" className="rounded-full px-3 py-1.5 text-sm text-stone-500 hover:bg-stone-100" onClick={() => router.push(`/follow-ups${folderId ? `?folder=${encodeURIComponent(folderId)}` : ''}`)}>Follow-ups</button>
                 <button type="button" aria-pressed={!showAll} className="rounded-full px-3 py-1.5 text-sm text-stone-500 hover:bg-stone-100 aria-pressed:bg-stone-100 aria-pressed:text-stone-900" onClick={() => { setSearch(''); router.push('/'); }}>Recent</button>
-                <button type="button" aria-pressed={showAll} className="rounded-full px-3 py-1.5 text-sm text-stone-500 hover:bg-stone-100 aria-pressed:bg-stone-100 aria-pressed:text-stone-900" onClick={() => router.push(`/?${new URLSearchParams({ view: 'all', ...(filter ? { q: filter } : {}) })}`)}>All notes</button>
+                <button type="button" aria-pressed={showAll && !folderId} className="rounded-full px-3 py-1.5 text-sm text-stone-500 hover:bg-stone-100 aria-pressed:bg-stone-100 aria-pressed:text-stone-900" onClick={() => router.push(`/?${new URLSearchParams({ view: 'all', ...(filter ? { q: filter } : {}) })}`)}>All notes</button>
               </div>
-              {meetings.length > 0 && (
-                <span role="status" className="text-xs text-stone-500">{filter ? `${matchingMeetings.length} of ${meetings.length}` : meetings.length} notes</span>
+              <div className="flex items-center gap-2"><Button data-trash-trigger variant="ghost" size="sm" onClick={onOpenTrash}><Trash2 />Trash</Button>
+              {!filter && visibleMeetings.length > 0 && (
+                <span role="status" className="text-xs text-stone-500">{visibleMeetings.length} {visibleMeetings.length === 1 ? 'note' : 'notes'}</span>
               )}
+              </div>
             </div>
 
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              <select aria-label="Filter by folder" value={folderId} onChange={event => router.push(`/?${new URLSearchParams({ view: 'all', ...(event.target.value ? { folder: event.target.value } : {}), ...(filter ? { q: filter } : {}) })}`)} className="min-w-0 max-w-full rounded-md border border-stone-200 bg-white px-3 py-2 text-sm text-stone-700">
+                <option value="">All folders</option>
+                {folderId && !folder && <option value={folderId}>Selected folder</option>}
+                {noteFolders.data?.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </select>
+              <Button variant="ghost" size="sm" onClick={event => { folderFormTriggerRef.current = event.currentTarget; setFolderDialog('new'); }}>New folder</Button>
+              {folder && <Button variant="ghost" size="sm" onClick={event => { folderFormTriggerRef.current = event.currentTarget; setFolderDialog('rename'); }}>Rename folder</Button>}
+            </div>
+            {noteFolders.error && <p role="alert" className="mb-3 text-sm text-stone-600">Could not load folders. <button onClick={noteFolders.retry} className="underline">Retry folders</button></p>}
             <div className="mb-6">
               <form role="search" className="flex min-w-0 items-center gap-2 rounded-xl bg-stone-100/70 px-3 focus-within:ring-1 focus-within:ring-stone-400" onSubmit={event => {
                   event.preventDefault();
                   const params = new URLSearchParams({ view: 'all' });
+                  if (folderId) params.set('folder', folderId);
                   if (filter) params.set('q', filter);
                   router.replace(`/?${params.toString()}`);
                 }}>
                   <Search aria-hidden="true" className="h-4 w-4 text-stone-400" />
-                  <input name="q" type="search" aria-label="Search meeting titles" value={search} onChange={event => setSearch(event.target.value)} placeholder="Find a note by title…" className="min-w-0 flex-1 bg-transparent py-3 text-sm outline-none" />
-                  {search && <button type="button" aria-label="Clear title search" className="rounded-full p-1.5 text-stone-500 hover:bg-stone-200" onClick={() => { setSearch(''); router.replace(showAll ? '/?view=all' : '/'); }}><X className="h-4 w-4" /></button>}
+                  <input ref={searchInputRef} name="q" type="search" aria-label="Search saved notes" value={search} onChange={event => setSearch(event.target.value)} placeholder="Search titles, written notes, and transcripts…" className="min-w-0 flex-1 bg-transparent py-3 text-sm outline-none" />
+                  {search && <button type="button" aria-label="Clear search" className="rounded-full p-1.5 text-stone-500 hover:bg-stone-200" onClick={() => { setSearch(''); router.replace(folderId ? `/?${new URLSearchParams({ view: 'all', folder: folderId })}` : showAll ? '/?view=all' : '/'); }}><X className="h-4 w-4" /></button>}
               </form>
             </div>
 
-            {recentMeetings.length > 0 ? (
-              <div ref={menuRef}>
+            {folderId && folderMembers.error ? <p role="alert" className="py-6 text-sm text-stone-600">Could not load this folder. <button type="button" onClick={folderMembers.retry} className="underline">Retry folder</button></p>
+              : folderId && folderMembers.loading && !folderMembers.data ? <p role="status" className="py-6 text-sm text-stone-500">Loading folder notes…</p>
+              : filter ? <MeetingSearchResults key={`${folderId}:${folderRevision}`} query={filter} folderId={folderId || null} onOpenMeeting={(meetingId, match) => onOpenMeeting(meetingId, filter, match, folderId || undefined)} /> : recentMeetings.length > 0 ? (
+              <div>
                 {meetingGroups.map(group => <section key={group.key} className="mb-6" aria-label={group.label}>
                   <h2 className="mb-2 text-xs font-medium text-stone-500">{group.label}</h2>
                 {group.meetings.map((meeting) => (
@@ -200,7 +238,7 @@ export function HomeDashboard({
                   >
                     <button
                       type="button"
-                      onClick={() => onOpenMeeting(meeting.id)}
+                      onClick={() => onOpenMeeting(meeting.id, undefined, undefined, folderId || undefined)}
                       className="flex flex-1 items-center gap-3 py-3 text-left min-w-0"
                     >
                       <FileText className="h-8 w-8 shrink-0 rounded-md bg-stone-100 p-2 text-stone-500" />
@@ -211,81 +249,49 @@ export function HomeDashboard({
                     </button>
 
                     {/* ... menu */}
-                    <div className="relative shrink-0">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
                       <button
                         type="button"
                         aria-label={`Actions for ${meeting.title}`}
-                        onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === meeting.id ? null : meeting.id); }}
-                        className="flex h-6 w-6 items-center justify-center rounded-md text-stone-500 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-stone-200 hover:text-stone-700"
+                        data-meeting-actions-id={meeting.id}
+                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-stone-500 transition-opacity sm:opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 hover:bg-stone-200 hover:text-stone-700"
                       >
                         <MoreHorizontal className="h-3.5 w-3.5" />
                       </button>
-
-                      {openMenuId === meeting.id && (
-                        <div className="absolute right-0 top-8 z-20 w-36 rounded-xl border border-stone-200 bg-white py-1 shadow-lg">
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              setOpenMenuId(null);
-                              await onDeleteMeeting(meeting.id);
-                            }}
-                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                            Delete
-                          </button>
-                        </div>
-                      )}
-                    </div>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" onCloseAutoFocus={event => {
+                        if (openingOrganizerRef.current) {
+                          event.preventDefault();
+                          openingOrganizerRef.current = false;
+                        } else if (movingToTrashRef.current) {
+                          event.preventDefault();
+                          movingToTrashRef.current = false;
+                          searchInputRef.current?.focus();
+                        }
+                      }}>
+                        <DropdownMenuItem onSelect={() => { openingOrganizerRef.current = true; setOrganizeMeetingId(meeting.id); }}>Organize note</DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => { movingToTrashRef.current = true; void onDeleteMeeting(meeting.id); }} className="text-red-600 focus:bg-red-50 focus:text-red-700">
+                          <Trash2 aria-hidden="true" />Move to Trash
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
                 ))}
                 </section>)}
               </div>
             ) : (
               <div className="rounded-xl border border-dashed border-stone-200 bg-white/60 px-5 py-10 text-center">
-                <p className="text-sm text-stone-500">{filter ? 'No matching notes' : 'No notes yet'}</p>
-                {filter ? <button type="button" onClick={() => { setSearch(''); router.replace('/?view=all'); }} className="mt-2 text-sm underline">Clear search</button> : <p className="mt-1 text-xs text-stone-500">Create a note or start a recording to see it here.</p>}
+                <p className="text-sm text-stone-500">{folderId ? 'No notes in this folder yet' : 'No notes yet'}</p>
+                <p className="mt-1 text-xs text-stone-500">{folderId ? 'Open a saved note and choose Organize note to add it here.' : 'Create a note or start a recording to see it here.'}</p>
               </div>
             )}
           </div>
 
-          {/* Draft and system details */}
+          <NoteFolderDialog open={Boolean(folderDialog)} onOpenChange={open => { if (!open) setFolderDialog(null); }} folder={folderDialog === 'rename' ? folder : undefined} returnFocusRef={folderFormTriggerRef} onCreated={created => router.push(`/?${new URLSearchParams({ view: 'all', folder: created.id })}`)} />
+          {organizeMeetingId && <MeetingFoldersDialog meetingId={organizeMeetingId} open onOpenChange={open => { if (!open) setOrganizeMeetingId(null); }} />}
+          {/* System details */}
           <div className="w-full space-y-5 border-t border-stone-100 pt-4">
-
-            {/* Quick note */}
-            <div>
-              <div className="mb-2.5 flex items-center justify-between">
-                <p className="text-xs font-semibold uppercase tracking-widest text-stone-500">Draft</p>
-                <button
-                  type="button"
-                  onClick={openQuickNote}
-                  className="text-xs text-stone-500 hover:text-stone-700 transition-colors"
-                >
-                  Open →
-                </button>
-              </div>
-              <div
-                role="button"
-                tabIndex={0}
-                onClick={openQuickNote}
-                onKeyDown={(e) => e.key === 'Enter' && openQuickNote()}
-                className="w-full cursor-pointer rounded-md bg-stone-100 px-3.5 py-3 text-left transition-colors hover:border-stone-200 hover:bg-stone-100/70"
-              >
-                <p className="line-clamp-3 text-xs leading-[1.6] text-stone-600">{quickNotePreview}</p>
-                <div className="mt-2.5 flex items-center justify-between">
-                  <span className="text-xs text-stone-500">{formatRelativeTime(quickNoteUpdatedAt)}</span>
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); copyQuickNote(); }}
-                    className="text-xs text-stone-500 hover:text-stone-700 transition-colors"
-                  >
-                    Copy
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <hr className="border-stone-100" />
 
             {/* System details stay available without competing with the meeting list. */}
             <details open={recoveryCount > 0 || (!isCheckingPermissions && !hasMicrophone)}>
