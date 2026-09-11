@@ -13,6 +13,11 @@ use super::recording_state::{AudioChunk, AudioError, RecordingState, DeviceType}
 use super::audio_processing::{audio_to_mono, LoudnessNormalizer, NoiseSuppressionProcessor, HighPassFilter};
 use super::vad::{ContinuousVadProcessor};
 
+/// Longest in-flight speech segment on the live path before it is transcribed without
+/// waiting for VAD to detect the end of the utterance. Continuous speech still reaches
+/// the transcript roughly every this many milliseconds.
+const MAX_LIVE_UTTERANCE_MS: u32 = 8000;
+
 /// Ring buffer for synchronized audio mixing
 /// Accumulates samples from mic and system streams until we have aligned windows
 struct AudioMixerRingBuffer {
@@ -729,7 +734,9 @@ impl AudioPipeline {
         let vad_processor = match ContinuousVadProcessor::new(sample_rate, redemption_time) {
             Ok(processor) => {
                 info!("VAD-driven pipeline: VAD segments will be sent directly to Whisper (no time-based accumulation)");
-                processor
+                // Live path only: a speaker who never pauses long enough for SpeechEnd would
+                // otherwise see no transcript at all until they stop talking.
+                processor.with_max_utterance_ms(MAX_LIVE_UTTERANCE_MS)
             }
             Err(e) => {
                 error!("Failed to create VAD processor: {}", e);

@@ -86,13 +86,17 @@ fn toggle_recording_handler<R: Runtime>(app: &AppHandle<R>) {
 
             // Handle result
             match stop_result {
-                Ok(_) => {
-                    log::info!("Tray toggle: Recording stopped successfully");
+                Ok(result) => {
+                    log::info!("Tray toggle: Recording stopped ({})", result.status);
 
                     // Trigger frontend post-processing via event (works from any page)
-                    // (SQLite save, navigation, analytics)
-                    if let Err(e) = app_clone.emit("recording-stop-complete", true) {
+                    // (SQLite save, navigation, analytics). The payload carries the real
+                    // stop status so a partial stop is not treated as a clean finish.
+                    if let Err(e) = app_clone.emit("recording-stop-complete", result.is_complete()) {
                         log::error!("Tray toggle: Failed to emit recording-stop-complete event: {}", e);
+                    }
+                    if let Err(e) = app_clone.emit("recording-stop-result", &result) {
+                        log::error!("Tray toggle: Failed to emit recording-stop-result event: {}", e);
                     }
                 }
                 Err(e) => {
@@ -182,13 +186,17 @@ fn stop_recording_handler<R: Runtime>(app: &AppHandle<R>) {
 
         // Handle result
         match stop_result {
-            Ok(_) => {
-                log::info!("Tray: Recording stopped successfully");
+            Ok(result) => {
+                log::info!("Tray: Recording stopped ({})", result.status);
 
                 // Trigger frontend post-processing via event (works from any page)
-                // (SQLite save, navigation, analytics)
-                if let Err(e) = app_clone.emit("recording-stop-complete", true) {
+                // (SQLite save, navigation, analytics). The payload carries the real
+                // stop status so a partial stop is not treated as a clean finish.
+                if let Err(e) = app_clone.emit("recording-stop-complete", result.is_complete()) {
                     log::error!("Tray: Failed to emit recording-stop-complete event: {}", e);
+                }
+                if let Err(e) = app_clone.emit("recording-stop-result", &result) {
+                    log::error!("Tray: Failed to emit recording-stop-result event: {}", e);
                 }
             }
             Err(e) => {

@@ -17,10 +17,48 @@ static SEQUENCE_COUNTER: AtomicU64 = AtomicU64::new(0);
 // Speech detection flag - reset per recording session
 static SPEECH_DETECTED_EMITTED: AtomicBool = AtomicBool::new(false);
 
+/// How long a worker waits for the transcription model to finish loading before
+/// treating a chunk as undeliverable. The model is normally loaded before capture
+/// starts, so this only covers a slow first load.
+const MODEL_LOAD_WAIT_MS: u64 = 15_000;
+const MODEL_LOAD_POLL_MS: u64 = 100;
+
 /// Reset the speech detected flag for a new recording session
 pub fn reset_speech_detected_flag() {
     SPEECH_DETECTED_EMITTED.store(false, Ordering::SeqCst);
     info!("🔍 SPEECH_DETECTED_EMITTED reset to: {}", SPEECH_DETECTED_EMITTED.load(Ordering::SeqCst));
+}
+
+/// Reset the transcript sequence counter for a new recording session.
+/// The frontend re-orders transcript updates by sequence id and restarts its own
+/// counter at 0 on every listener mount, so ids must restart per session too.
+pub fn reset_sequence_counter() {
+    SEQUENCE_COUNTER.store(0, Ordering::SeqCst);
+    info!("🔢 SEQUENCE_COUNTER reset to 0 for new recording session");
+}
+
+/// Wait for the transcription model to become available, up to `MODEL_LOAD_WAIT_MS`.
+/// Returns true if the model is loaded, false if it never became available.
+async fn wait_for_model_loaded(engine: &TranscriptionEngine, worker_id: usize) -> bool {
+    if engine.is_model_loaded().await {
+        return true;
+    }
+
+    warn!(
+        "⏳ Worker {}: model not loaded yet, waiting up to {}ms before dropping audio",
+        worker_id, MODEL_LOAD_WAIT_MS
+    );
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(MODEL_LOAD_WAIT_MS);
+    while std::time::Instant::now() < deadline {
+        tokio::time::sleep(tokio::time::Duration::from_millis(MODEL_LOAD_POLL_MS)).await;
+        if engine.is_model_loaded().await {
+            info!("✅ Worker {}: model became available, resuming transcription", worker_id);
+            return true;
+        }
+    }
+
+    false
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -68,9 +106,13 @@ pub fn start_transcription_task<R: Runtime>(
         let (work_sender, work_receiver) = tokio::sync::mpsc::unbounded_channel::<AudioChunk>();
         let work_receiver = Arc::new(tokio::sync::Mutex::new(work_receiver));
 
-        // Track completion: AtomicU64 for chunks queued, AtomicU64 for chunks completed
+        // Track completion: AtomicU64 for chunks queued, AtomicU64 for chunks completed.
+        // `chunks_dropped` counts audio that could NOT be transcribed. Dropped chunks are
+        // deliberately kept out of `chunks_completed` so the shutdown accounting cannot
+        // report success for audio that was thrown away.
         let chunks_queued = Arc::new(AtomicU64::new(0));
         let chunks_completed = Arc::new(AtomicU64::new(0));
+        let chunks_dropped = Arc::new(AtomicU64::new(0));
         let input_finished = Arc::new(AtomicBool::new(false));
 
         info!("📊 Starting {} transcription worker{} (serial mode for ordered emission)", NUM_WORKERS, if NUM_WORKERS == 1 { "" } else { "s" });
@@ -86,6 +128,7 @@ pub fn start_transcription_task<R: Runtime>(
             let app_clone = app.clone();
             let work_receiver_clone = work_receiver.clone();
             let chunks_completed_clone = chunks_completed.clone();
+            let chunks_dropped_clone = chunks_dropped.clone();
             let input_finished_clone = input_finished.clone();
             let chunks_queued_clone = chunks_queued.clone();
 
@@ -107,7 +150,7 @@ pub fn start_transcription_task<R: Runtime>(
                         worker_id, engine_name, current_model
                     );
                 } else {
-                    warn!("⚠️ Worker {} pre-validation: {} model not loaded - chunks may be skipped", worker_id, engine_name);
+                    warn!("⚠️ Worker {} pre-validation: {} model not loaded - will wait for it before transcribing", worker_id, engine_name);
                 }
 
                 loop {
@@ -132,11 +175,19 @@ pub fn start_transcription_task<R: Runtime>(
                                 );
                             }
 
-                            // Check if model is still loaded before processing
-                            if !engine_clone.is_model_loaded().await {
-                                warn!("⚠️ Worker {}: Model unloaded, but continuing to preserve chunk {}", worker_id, chunk.chunk_id);
-                                // Still count as completed even if we can't process
-                                chunks_completed_clone.fetch_add(1, Ordering::SeqCst);
+                            // Check if the model is available before processing. Wait briefly
+                            // for a slow first load instead of silently discarding audio.
+                            if !wait_for_model_loaded(&engine_clone, worker_id).await {
+                                error!(
+                                    "❌ Worker {}: model still not loaded after {}ms - audio chunk {} could not be transcribed",
+                                    worker_id, MODEL_LOAD_WAIT_MS, chunk.chunk_id
+                                );
+                                chunks_dropped_clone.fetch_add(1, Ordering::SeqCst);
+                                let _ = app_clone.emit("transcription-error", serde_json::json!({
+                                    "error": "Speech recognition model is not loaded",
+                                    "userMessage": "Some audio could not be transcribed because the speech recognition model was not loaded.",
+                                    "actionable": true
+                                }));
                                 continue;
                             }
 
@@ -245,8 +296,13 @@ pub fn start_transcription_task<R: Runtime>(
                                             continue;
                                         }
                                         TranscriptionError::ModelNotLoaded => {
-                                            warn!("Worker {}: Model unloaded during transcription", worker_id);
-                                            chunks_completed_clone.fetch_add(1, Ordering::SeqCst);
+                                            error!("Worker {}: model unloaded during transcription - chunk audio was lost", worker_id);
+                                            chunks_dropped_clone.fetch_add(1, Ordering::SeqCst);
+                                            let _ = app_clone.emit("transcription-error", serde_json::json!({
+                                                "error": "Speech recognition model was unloaded during transcription",
+                                                "userMessage": "Some audio could not be transcribed because the speech recognition model was unloaded.",
+                                                "actionable": true
+                                            }));
                                             continue;
                                         }
                                         _ => {
@@ -291,9 +347,11 @@ pub fn start_transcription_task<R: Runtime>(
                         None => {
                             // No more chunks available
                             if input_finished_clone.load(Ordering::SeqCst) {
-                                // Double-check that all queued chunks are actually completed
+                                // Double-check that every queued chunk was either transcribed
+                                // or explicitly accounted for as dropped.
                                 let final_queued = chunks_queued_clone.load(Ordering::SeqCst);
-                                let final_completed = chunks_completed_clone.load(Ordering::SeqCst);
+                                let final_completed = chunks_completed_clone.load(Ordering::SeqCst)
+                                    + chunks_dropped_clone.load(Ordering::SeqCst);
 
                                 if final_completed >= final_queued {
                                     info!(
@@ -365,11 +423,32 @@ pub fn start_transcription_task<R: Runtime>(
         loop {
             let final_queued = chunks_queued.load(Ordering::SeqCst);
             let final_completed = chunks_completed.load(Ordering::SeqCst);
+            let final_dropped = chunks_dropped.load(Ordering::SeqCst);
 
             if final_queued == final_completed {
                 info!(
                     "🎉 ALL {} chunks processed successfully - ZERO chunks lost!",
                     final_completed
+                );
+                break;
+            } else if final_dropped > 0 && final_completed + final_dropped >= final_queued {
+                // Every chunk is accounted for, but some audio was never transcribed.
+                // Report it instead of letting the counters imply success.
+                error!(
+                    "❌ {} of {} audio chunks could not be transcribed (model unavailable)",
+                    final_dropped, final_queued
+                );
+                let _ = app.emit(
+                    "transcript-chunk-loss-detected",
+                    serde_json::json!({
+                        "chunks_queued": final_queued,
+                        "chunks_completed": final_completed,
+                        "chunks_lost": final_dropped,
+                        "message": format!(
+                            "{} audio segment(s) could not be transcribed because the speech recognition model was unavailable",
+                            final_dropped
+                        )
+                    }),
                 );
                 break;
             } else if verification_attempts < MAX_VERIFICATION_ATTEMPTS {
@@ -399,7 +478,7 @@ pub fn start_transcription_task<R: Runtime>(
             }
         }
 
-        info!("✅ Parallel transcription task completed - all workers finished, ready for model unload");
+        info!("✅ Parallel transcription task completed - all workers finished, model stays loaded for the next recording");
     })
 }
 

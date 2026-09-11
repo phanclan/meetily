@@ -500,10 +500,11 @@ MEETILY_AUTOMATION=1 RUST_LOG=debug ./clean_run.sh 2>&1 | tee /tmp/meetily-dev.l
 - Use `--no-clean` only when iterating quickly and you have NOT changed `layout.tsx` or other Next.js files. After any layout change, delete `.next/` first or run without `--no-clean`.
 
 **Logging Phase 1 (implemented)** — frontend console output now appears in the terminal:
-- All `console.log/warn/error` calls in React components are forwarded to Rust via `append_frontend_log` (queue-based, non-dropping)
+- All `console.log/warn/error` calls in React components are forwarded to Rust via `append_frontend_log` (buffered, flushed every 250ms)
 - These appear in terminal as `INFO app_lib::frontend_logging [frontend] <message>`
 - DB-layer transcript config reads/writes log at `info` level — look for `[settings]` prefix
 - `frontend-runtime.log` is also written to `~/Library/Application Support/com.meetily.ai/logs/`
+- **The console bridge is development-only.** It costs one IPC round-trip per log line, and the transcript path logs several times per segment. In a packaged (production) build it is off unless a tester opts in from DevTools: `localStorage.setItem('meetily:console-bridge', '1')` then reload. Uncaught errors and unhandled rejections are always logged, bridge or not.
 
 ### Meetnola Tester Build (Preferred for macOS audio / peer testing)
 

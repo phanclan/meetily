@@ -26,6 +26,12 @@ pub struct ContinuousVadProcessor {
     speech_start_sample: usize,
     // State tracking for smart logging
     last_logged_state: bool,
+    /// Maximum in-flight utterance length (16kHz samples) before a segment is
+    /// force-emitted without waiting for SpeechEnd. `None` disables the cap.
+    max_utterance_samples: Option<usize>,
+    /// True when the current utterance has already had audio force-emitted, so the
+    /// eventual SpeechEnd must only emit the remainder (never the full utterance).
+    forced_emit_in_progress: bool,
 }
 
 impl ContinuousVadProcessor {
@@ -79,7 +85,26 @@ impl ContinuousVadProcessor {
             speech_start_sample: 0,
             // Initialize state tracking
             last_logged_state: false,
+            max_utterance_samples: None,
+            forced_emit_in_progress: false,
         })
+    }
+
+    /// Cap the in-flight utterance length for live (streaming) use.
+    ///
+    /// Without a cap, a speaker who never pauses long enough for SpeechEnd produces a
+    /// single unbounded segment, so nothing reaches the transcript until they stop
+    /// talking. With a cap, the accumulated speech is emitted every `max_ms` and the
+    /// utterance continues in the next segment.
+    ///
+    /// Batch/file retranscription intentionally leaves this unset so segmentation there
+    /// is still driven purely by VAD transitions.
+    pub fn with_max_utterance_ms(mut self, max_ms: u32) -> Self {
+        // processed_samples / current_speech always count 16kHz samples (post-resampling)
+        let samples = (max_ms as usize * 16000) / 1000;
+        info!("VAD: live utterance cap set to {}ms ({} samples)", max_ms, samples);
+        self.max_utterance_samples = Some(samples);
+        self
     }
 
     /// Process incoming audio samples and return any complete speech segments
@@ -199,6 +224,7 @@ impl ContinuousVadProcessor {
             self.speech_segments.push_back(segment);
             self.current_speech.clear();
             self.in_speech = false;
+            self.forced_emit_in_progress = false;
         }
 
         // Extract all remaining segments
@@ -226,6 +252,10 @@ impl ContinuousVadProcessor {
             debug!("VAD transitions at sample {}: {} transitions", self.processed_samples, transitions.len());
         }
 
+        // True once SpeechStart has seeded `current_speech` from the VAD's own buffer on this
+        // chunk. That seed already contains `chunk`, so the accumulate step below must skip it.
+        let mut seeded_current_speech = false;
+
         // Handle VAD transitions
         for transition in transitions {
             match transition {
@@ -236,9 +266,25 @@ impl ContinuousVadProcessor {
                         self.last_logged_state = true;
                     }
                     self.in_speech = true;
-                    // Use 16000 (VAD processing rate) since processed_samples counts 16kHz samples
-                    self.speech_start_sample = self.processed_samples + (timestamp_ms * 16000 / 1000);
-                    self.current_speech.clear();
+                    // `timestamp_ms` is already a stream-absolute position: Silero derives it
+                    // from its own processed duration (minus pre-speech padding), and the same
+                    // value comes back as `start_timestamp_ms` on SpeechEnd. Adding our
+                    // `processed_samples` on top double-counted the stream position, so
+                    // cap-forced segments ended up with start > end. Convert ms -> 16kHz samples
+                    // only; `processed_samples` counts the same 16kHz stream.
+                    self.speech_start_sample = (timestamp_ms * 16000) / 1000;
+                    // Silero only reports SpeechStart after `min_speech_time` has elapsed, and it
+                    // backdates the utterance by `pre_speech_pad` on top of that. Its buffer
+                    // therefore already holds ~600ms of audio that precedes this transition. Seed
+                    // `current_speech` with it so a force-emitted (capped) segment carries the
+                    // opening words instead of starting ~600ms late. On the normal SpeechEnd path
+                    // this is unused - Silero's own `samples` win there.
+                    let preroll = self.session.get_current_speech().to_vec();
+                    debug!("VAD: Seeded utterance with {} pre-roll samples ({:.0}ms)",
+                           preroll.len(), preroll.len() as f64 / 16.0);
+                    self.current_speech = preroll;
+                    seeded_current_speech = true;
+                    self.forced_emit_in_progress = false;
                 }
                 VadTransition::SpeechEnd { start_timestamp_ms, end_timestamp_ms, samples } => {
                     // Only log if we were previously in speech state
@@ -248,38 +294,78 @@ impl ContinuousVadProcessor {
                     }
                     self.in_speech = false;
 
-                    // Use samples from VAD transition if available, otherwise use accumulated samples
-                    let speech_samples = if !samples.is_empty() {
-                        samples
+                    // Use samples from VAD transition if available, otherwise use accumulated
+                    // samples. When part of this utterance was already force-emitted, the VAD's
+                    // samples cover the whole utterance, so only the remainder may be sent.
+                    let (speech_samples, segment_start_ms) = if self.forced_emit_in_progress {
+                        let start_ms = (self.speech_start_sample as f64 / 16000.0) * 1000.0;
+                        (std::mem::take(&mut self.current_speech), start_ms)
+                    } else if !samples.is_empty() {
+                        (samples, start_timestamp_ms as f64)
                     } else {
-                        self.current_speech.clone()
+                        (self.current_speech.clone(), start_timestamp_ms as f64)
                     };
 
                     if !speech_samples.is_empty() {
                         let segment = SpeechSegment {
                             samples: speech_samples,
-                            start_timestamp_ms: start_timestamp_ms as f64,
+                            start_timestamp_ms: segment_start_ms,
                             end_timestamp_ms: end_timestamp_ms as f64,
                             confidence: 0.9, // VAD confidence
                         };
 
                         info!("VAD: Completed speech segment: {:.1}ms duration, {} samples",
-                              end_timestamp_ms - start_timestamp_ms, segment.samples.len());
+                              segment.end_timestamp_ms - segment.start_timestamp_ms, segment.samples.len());
 
                         self.speech_segments.push_back(segment);
                     }
 
                     self.current_speech.clear();
+                    self.forced_emit_in_progress = false;
                 }
             }
         }
 
-        // Accumulate speech if we're currently in a speech state
-        if self.in_speech {
+        // Accumulate speech if we're currently in a speech state. When SpeechStart seeded
+        // `current_speech` on this chunk the seed already covers `chunk`, so appending again
+        // would duplicate it.
+        if self.in_speech && !seeded_current_speech {
             self.current_speech.extend_from_slice(chunk);
         }
 
         self.processed_samples += chunk.len();
+
+        // Force-emit the in-flight utterance once it exceeds the live cap. Without this,
+        // continuous speech produces no transcript at all until the speaker pauses.
+        //
+        // Invariant: `current_speech` spans exactly [speech_start_sample, processed_samples),
+        // because SpeechStart seeds it from the VAD buffer at `speech_start_sample` and every
+        // later chunk is appended. So the emitted duration always matches the emitted audio.
+        if let Some(max_samples) = self.max_utterance_samples {
+            if self.in_speech && self.current_speech.len() >= max_samples {
+                let start_ms = (self.speech_start_sample as f64 / 16000.0) * 1000.0;
+                let end_ms = (self.processed_samples as f64 / 16000.0) * 1000.0;
+
+                let samples = std::mem::take(&mut self.current_speech);
+                info!(
+                    "VAD: Utterance cap reached - emitting partial segment: {:.1}ms duration, {} samples",
+                    end_ms - start_ms,
+                    samples.len()
+                );
+
+                self.speech_segments.push_back(SpeechSegment {
+                    samples,
+                    start_timestamp_ms: start_ms,
+                    end_timestamp_ms: end_ms,
+                    confidence: 0.8, // Estimated confidence for a cap-forced segment
+                });
+
+                // The utterance continues; the next segment starts here.
+                self.speech_start_sample = self.processed_samples;
+                self.forced_emit_in_progress = true;
+            }
+        }
+
         Ok(())
     }
 }
@@ -555,6 +641,192 @@ mod tests {
 
         // Should find speech segments
         assert!(all_segments.len() >= 1, "Expected at least 1 speech segment");
+    }
+
+    /// Minimal PCM16 WAV reader so the cap test can run against real speech without
+    /// pulling in an audio-decoding dependency. Walks RIFF chunks (jfk.wav carries a
+    /// LIST/INFO chunk before `data`) and asserts the format this module requires.
+    fn read_wav_pcm16_mono_16k(path: &std::path::Path) -> Vec<f32> {
+        let bytes = std::fs::read(path)
+            .unwrap_or_else(|e| panic!("failed to read {}: {}", path.display(), e));
+        assert!(bytes.len() > 44, "{} is too small to be a WAV file", path.display());
+        assert_eq!(&bytes[0..4], b"RIFF", "{} is not a RIFF file", path.display());
+        assert_eq!(&bytes[8..12], b"WAVE", "{} is not a WAVE file", path.display());
+
+        let u16_at = |i: usize| u16::from_le_bytes([bytes[i], bytes[i + 1]]);
+        let u32_at = |i: usize| {
+            u32::from_le_bytes([bytes[i], bytes[i + 1], bytes[i + 2], bytes[i + 3]]) as usize
+        };
+
+        let mut pos = 12;
+        let mut data: Option<(usize, usize)> = None;
+        let mut fmt_checked = false;
+
+        while pos + 8 <= bytes.len() {
+            let id = &bytes[pos..pos + 4];
+            let size = u32_at(pos + 4);
+            let body = pos + 8;
+
+            if id == b"fmt " {
+                assert_eq!(u16_at(body), 1, "expected uncompressed PCM in {}", path.display());
+                assert_eq!(u16_at(body + 2), 1, "expected mono audio in {}", path.display());
+                assert_eq!(u32_at(body + 4), 16000, "expected 16kHz audio in {}", path.display());
+                assert_eq!(u16_at(body + 14), 16, "expected 16-bit samples in {}", path.display());
+                fmt_checked = true;
+            } else if id == b"data" {
+                data = Some((body, size.min(bytes.len() - body)));
+                break;
+            }
+
+            // RIFF chunks are word-aligned.
+            pos = body + size + (size % 2);
+        }
+
+        assert!(fmt_checked, "no fmt chunk found in {}", path.display());
+        let (offset, size) = data.unwrap_or_else(|| panic!("no data chunk in {}", path.display()));
+
+        bytes[offset..offset + size]
+            .chunks_exact(2)
+            .map(|pair| i16::from_le_bytes([pair[0], pair[1]]) as f32 / 32768.0)
+            .collect()
+    }
+
+    /// Real 16kHz mono speech (~11s of JFK's inaugural address) shipped in the repo.
+    fn jfk_speech() -> Vec<f32> {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../backend/whisper.cpp/samples/jfk.wav");
+        read_wav_pcm16_mono_16k(&path)
+    }
+
+    fn run_vad(processor: &mut ContinuousVadProcessor, audio: &[f32]) -> Vec<SpeechSegment> {
+        let mut segments = processor.process_audio(audio).expect("VAD processing failed");
+        segments.extend(processor.flush().expect("VAD flush failed"));
+        segments
+    }
+
+    fn total_samples(segments: &[SpeechSegment]) -> usize {
+        segments.iter().map(|segment| segment.samples.len()).sum()
+    }
+
+    #[test]
+    fn test_live_utterance_cap_emits_during_long_speech() {
+        // Real speech, not a synthetic tone: Silero does not classify a steady tone as
+        // sustained speech, so a synthetic fixture never lets the cap fire at all.
+        // Three back-to-back copies of jfk.wav gives ~33s containing utterances longer
+        // than the cap used here.
+        const CAP_MS: u32 = 1500;
+        const LIVE_REDEMPTION_MS: u32 = 400; // matches AudioPipelineManager's live setting
+
+        let clip = jfk_speech();
+        assert!(
+            clip.len() > 16000 * 5,
+            "jfk.wav fixture looks wrong: {} samples",
+            clip.len()
+        );
+        let audio: Vec<f32> = clip.iter().chain(&clip).chain(&clip).copied().collect();
+
+        let mut uncapped_processor =
+            ContinuousVadProcessor::new(16000, LIVE_REDEMPTION_MS).expect("processor");
+        let uncapped = run_vad(&mut uncapped_processor, &audio);
+
+        let mut capped_processor = ContinuousVadProcessor::new(16000, LIVE_REDEMPTION_MS)
+            .expect("processor")
+            .with_max_utterance_ms(CAP_MS);
+        let capped = run_vad(&mut capped_processor, &audio);
+
+        println!(
+            "uncapped: {} segments / {} samples, capped: {} segments / {} samples",
+            uncapped.len(),
+            total_samples(&uncapped),
+            capped.len(),
+            total_samples(&capped)
+        );
+
+        // 1. The cap must actually fire, repeatedly, while speech is still ongoing.
+        // Force-emitted segments carry confidence 0.8 and a duration bounded by the cap
+        // (the check runs once per 30ms chunk, so allow one chunk of overshoot).
+        let forced: Vec<&SpeechSegment> = capped
+            .iter()
+            .filter(|segment| {
+                let duration = segment.end_timestamp_ms - segment.start_timestamp_ms;
+                segment.confidence == 0.8
+                    && duration >= CAP_MS as f64
+                    && duration < CAP_MS as f64 + 30.0
+            })
+            .collect();
+        assert!(
+            forced.len() >= 3,
+            "Expected the cap to force-emit several mid-utterance segments, got {} (of {} total)",
+            forced.len(),
+            capped.len()
+        );
+        assert!(
+            capped.len() > uncapped.len(),
+            "Capping should split long utterances into more segments ({} vs {})",
+            capped.len(),
+            uncapped.len()
+        );
+
+        // 2. No segment may claim a start after its end. Before the fix, SpeechStart added
+        // the stream position to Silero's already-absolute timestamp, so every cap-forced
+        // segment after the first reported start > end.
+        for (i, segment) in uncapped.iter().chain(capped.iter()).enumerate() {
+            assert!(
+                segment.start_timestamp_ms <= segment.end_timestamp_ms,
+                "segment {} has start {:.0}ms after end {:.0}ms",
+                i,
+                segment.start_timestamp_ms,
+                segment.end_timestamp_ms
+            );
+        }
+
+        // 3. No onset loss. A force-emitted segment must carry every sample between the
+        // start and end it reports. Before the fix, `current_speech` only began filling at
+        // the SpeechStart transition, which Silero raises ~600ms into the utterance, so the
+        // opening words were dropped. Tolerance is one millisecond (16 samples) to absorb
+        // the ms-granularity of Silero's timestamps.
+        for (i, segment) in capped.iter().filter(|s| s.confidence == 0.8).enumerate() {
+            let expected =
+                (segment.end_timestamp_ms - segment.start_timestamp_ms) * 16000.0 / 1000.0;
+            assert!(
+                (segment.samples.len() as f64 - expected).abs() <= 16.0,
+                "force-emitted segment {} carries {} samples but reports {:.0} ({:.0}ms); \
+                 missing audio at the utterance onset",
+                i,
+                segment.samples.len(),
+                expected,
+                segment.end_timestamp_ms - segment.start_timestamp_ms
+            );
+        }
+
+        // 4. Capping must not lose audio overall. Tolerance is 8000 samples (0.5s) across
+        // the whole 33s fixture: generous enough for VAD padding differences at segment
+        // boundaries, but well under the ~9280 samples (~580ms) a single regressed onset
+        // would cost, so one dropped onset still fails this assertion.
+        const LOSS_TOLERANCE_SAMPLES: i64 = 8_000;
+        let delta = total_samples(&capped) as i64 - total_samples(&uncapped) as i64;
+        assert!(
+            delta >= -LOSS_TOLERANCE_SAMPLES,
+            "Capping dropped {} samples ({:.2}s) of speech versus the uncapped run",
+            -delta,
+            -delta as f64 / 16000.0
+        );
+
+        // 5. Every segment must carry audio.
+        assert!(
+            capped.iter().all(|segment| !segment.samples.is_empty()),
+            "Every capped segment must carry audio"
+        );
+    }
+
+    #[test]
+    fn test_batch_path_leaves_utterance_cap_disabled() {
+        // Retranscription segmentation must stay driven purely by VAD transitions.
+        let processor = ContinuousVadProcessor::new(16000, 2000).expect("processor");
+        assert!(
+            processor.max_utterance_samples.is_none(),
+            "The utterance cap must be opt-in; batch processing relies on it staying off"
+        );
     }
 
     #[test]

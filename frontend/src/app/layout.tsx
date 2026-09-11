@@ -46,6 +46,28 @@ type RecordingStopResultPayload = {
   message: string
 }
 
+// Console → Rust log bridge tuning. Logs are buffered and flushed on this interval
+// instead of each console call awaiting its own IPC round-trip.
+const CONSOLE_BRIDGE_FLUSH_MS = 250
+const CONSOLE_BRIDGE_MAX_PENDING = 1000
+const CONSOLE_BRIDGE_OPT_IN_KEY = 'meetily:console-bridge'
+
+/**
+ * The bridge is a debugging tool. It runs in development builds, and in any build where
+ * a tester has explicitly opted in via localStorage.
+ */
+function isConsoleBridgeEnabled(): boolean {
+  if (process.env.NODE_ENV !== 'production') {
+    return true
+  }
+
+  try {
+    return window.localStorage.getItem(CONSOLE_BRIDGE_OPT_IN_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
 const sourceSans3 = Source_Sans_3({
   subsets: ['latin'],
   weight: ['400', '500', '600', '700'],
@@ -283,14 +305,22 @@ export default function RootLayout({
 
   // Pipe all console.log/warn/error to the Rust log file so frontend events
   // appear alongside Rust logs without requiring DevTools.
+  //
+  // This is a debugging aid, not a production feature: every forwarded call costs a
+  // JSON serialization plus a Tauri IPC round-trip, and the hot transcript path logs
+  // several times per segment. It is therefore off in production builds unless a
+  // tester explicitly opts in with `localStorage['meetily:console-bridge'] = '1'`.
   useEffect(() => {
+    if (!isConsoleBridgeEnabled()) {
+      return
+    }
+
     const orig = {
       log: console.log.bind(console),
       warn: console.warn.bind(console),
       error: console.error.bind(console),
     }
     let disposed = false
-    let flushChain = Promise.resolve()
 
     const serializeArg = (arg: unknown): string => {
       if (typeof arg === 'string') {
@@ -330,24 +360,55 @@ export default function RootLayout({
       }
     }
 
-    const fwd = (level: 'info' | 'warn' | 'error', args: unknown[]) => {
-      const message = args
-        .map(serializeArg)
-        .join(' ')
+    // Buffer entries and flush on an interval. Forwarding each call individually
+    // through a serial promise chain made every console.* call wait on the previous
+    // IPC round-trip, which is ruinous on the transcript path.
+    let pending: Array<{ level: 'info' | 'warn' | 'error'; message: string }> = []
+    let dropped = 0
+    let flushing = false
 
-      flushChain = flushChain
-        .catch(() => {})
-        .then(async () => {
+    const flush = async () => {
+      if (flushing || pending.length === 0) {
+        return
+      }
+
+      flushing = true
+      const batch = pending
+      pending = []
+
+      if (dropped > 0) {
+        batch.unshift({ level: 'warn', message: `[console-bridge] dropped ${dropped} log line(s) - buffer overflow` })
+        dropped = 0
+      }
+
+      try {
+        // Sequential so the log file keeps the order the app produced.
+        for (const entry of batch) {
           if (disposed) {
             return
           }
+          await appendFrontendLogIpc({ level: entry.level, message: entry.message, metadata: null })
+        }
+      } catch {
+        // Ignore bridge failures to avoid recursive logging loops.
+      } finally {
+        flushing = false
+      }
+    }
 
-          try {
-            await appendFrontendLogIpc({ level, message, metadata: null })
-          } catch {
-            // Ignore bridge failures to avoid recursive logging loops.
-          }
-        })
+    const flushTimer = setInterval(() => { void flush() }, CONSOLE_BRIDGE_FLUSH_MS)
+
+    const fwd = (level: 'info' | 'warn' | 'error', args: unknown[]) => {
+      if (disposed) {
+        return
+      }
+
+      if (pending.length >= CONSOLE_BRIDGE_MAX_PENDING) {
+        dropped += 1
+        return
+      }
+
+      pending.push({ level, message: args.map(serializeArg).join(' ') })
     }
 
     console.log   = (...args) => { orig.log(...args);   fwd('info',  args) }
@@ -355,10 +416,12 @@ export default function RootLayout({
     console.error = (...args) => { orig.error(...args); fwd('error', args) }
 
     return () => {
-      disposed = true
       console.log   = orig.log
       console.warn  = orig.warn
       console.error = orig.error
+      clearInterval(flushTimer)
+      // Let whatever is already buffered reach the log file before tearing down.
+      void flush().finally(() => { disposed = true })
     }
   }, []) // install once, cleanup on unmount
 
