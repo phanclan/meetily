@@ -35,7 +35,7 @@ import { CallDetectionBanner } from '@/components/CallDetectionBanner'
 import { loadCallDetectionPreference } from '@/lib/callDetectionSettings'
 import { safelyUnlisten } from '@/lib/tauriEvents'
 import { BuildIdentityBadge } from '@/components/BuildIdentityBadge'
-import { createQuickNotePath } from '@/lib/quickNoteRoute'
+import { createRecordingPath, isNoteWorkspaceRoute } from '@/lib/quickNoteRoute'
 import { flushPendingWrites } from '@/lib/pendingWrites'
 import { createQuitHandler } from '@/lib/appQuit'
 
@@ -550,7 +550,7 @@ export default function RootLayout({
     window.location.reload()
   }
 
-  const isFocusedWorkspaceRoute = pathname === '/quick-note'
+  const isFocusedWorkspaceRoute = isNoteWorkspaceRoute(pathname)
   const isStartupChecking = startupPhase === 'checking'
 
   return (
@@ -585,7 +585,7 @@ export default function RootLayout({
                                   <div className="flex flex-col">
                                     {!isFocusedWorkspaceRoute && (
                                       <CallDetectionBanner
-                                        onStartRecording={() => router.push(createQuickNotePath())}
+                                        onStartRecording={() => router.push(createRecordingPath())}
                                       />
                                     )}
                                     <div className="flex flex-1">

@@ -474,7 +474,7 @@ This handoff captures the latest product, packaging, routing, UI, and macOS test
 
 These now intentionally go through the same route and should no longer be treated as separate features:
 
-- Home `New note`
+- Home `Start recording`
 - Sidebar `Start Recording`
 - Call-detection banner entry
 
@@ -484,8 +484,12 @@ Shared routing helper:
 
 Expected behavior:
 
-- New sessions route into `/quick-note`
+- New sessions route into `/recording`, which owns start/stop; reloading it attaches
+  to the session still running natively instead of reverting to a draft
+- Draft notes (Home `New note`) stay on `/quick-note`, which never captures audio
+- Both routes render `frontend/src/app/_components/NoteWorkspace.tsx`
 - There should not be a separate “sidebar recording page” behavior anymore
+- The `?fresh=<ts>` sessionStorage start token is gone; recording intent lives in the path
 
 ## Saved-note / saved-meeting UX model
 
@@ -499,7 +503,7 @@ The product is moving toward a Granola-style hierarchy:
 Primary files:
 
 - Quick note saved view:
-  - `frontend/src/app/quick-note/page.tsx`
+  - `frontend/src/app/_components/NoteWorkspace.tsx` (rendered by `/quick-note` and `/recording`)
 - Saved meeting details view:
   - `frontend/src/app/meeting-details/page-content.tsx`
 - CTA:

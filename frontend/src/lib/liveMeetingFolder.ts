@@ -1,12 +1,14 @@
 import { loadQuickNoteDraft } from '@/lib/quickNoteDraft';
+import { folderFromSearch, isNoteWorkspaceRoute } from '@/lib/quickNoteRoute';
 
 const pendingKey = 'meetnola.recording.note-folder';
 const key = (id: string) => `meetnola.live-folder.${id}`;
 
 export function currentRecordingFolder(): string | null {
-  return typeof window !== 'undefined' && window.location.pathname === '/quick-note'
-    ? loadQuickNoteDraft().folderId
-    : null;
+  if (typeof window === 'undefined' || !isNoteWorkspaceRoute(window.location.pathname)) return null;
+  // The route carries the folder a recording was started from; the draft is the fallback
+  // for a session started before that folder reached storage.
+  return folderFromSearch(window.location.search) || loadQuickNoteDraft().folderId;
 }
 
 export function prepareRecordingFolder(folderId: string | null) {

@@ -4,9 +4,8 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
-import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { useTranscriptSearch, type TranscriptSearchResult } from '@/hooks/useTranscriptSearch';
-import { createRecordingWorkspacePath } from '@/lib/quickNoteRoute';
+import { createRecordingPath } from '@/lib/quickNoteRoute';
 import { useSummaryPolling } from '@/hooks/useSummaryPolling';
 import { useFolderRead, type NoteFolder } from '@/hooks/useNoteFolders';
 
@@ -79,9 +78,6 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const refreshNoteFolders = React.useCallback(() => setFolderRevision(value => value + 1), []);
   const { activeSummaryPolls, startSummaryPolling, stopSummaryPolling } = useSummaryPolling();
 
-  // Use recording state from RecordingStateContext (single source of truth)
-  const { isRecording } = useRecordingState();
-
   const pathname = usePathname();
   const router = useRouter();
 
@@ -153,9 +149,10 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
     setSidebarItems(baseItems);
   }, [meetings]);
 
-  // Function to handle recording toggle from sidebar
+  // Function to handle recording toggle from sidebar.
+  // The recording route starts a session, or reopens the one already running.
   const handleRecordingToggle = () => {
-    router.push(createRecordingWorkspacePath(isRecording));
+    router.push(createRecordingPath());
   };
 
   return (

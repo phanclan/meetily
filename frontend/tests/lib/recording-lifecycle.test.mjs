@@ -153,36 +153,17 @@ test('notes-only and mixed follow-up context reaches the native assistant with s
   assert.equal(buildMeetingContext('  ', '\n'), '');
 });
 
-test('draft navigation does not request a fresh recording while explicit recording entry does', () => {
+test('the draft surface and the recording workspace are separate routes', () => {
   const route = loader()('@/lib/quickNoteRoute');
   assert.equal(route.createDraftNotePath(), '/quick-note');
-  assert.match(route.createQuickNotePath(), /^\/quick-note\?fresh=\d+$/);
-  assert.equal(route.createRecordingWorkspacePath(true), '/quick-note');
-  assert.match(route.createRecordingWorkspacePath(false), /fresh=/);
-});
-
-test('recording start links are consumed once across reloads and older history entries', () => {
-  const sessionStorage = storage();
-  const open = () => loader({}, { window: { sessionStorage } })('@/lib/quickNoteRoute');
-  const first = open();
-  assert.equal(first.consumeQuickNoteStartToken('100'), true);
-  assert.equal(first.consumeQuickNoteStartToken('100'), false);
-  const reloaded = open();
-  assert.equal(reloaded.consumeQuickNoteStartToken('100'), false);
-  assert.equal(reloaded.consumeQuickNoteStartToken('101'), true);
-  assert.equal(open().consumeQuickNoteStartToken('100'), false);
-  for (const invalid of ['0', '-1', 'Infinity', '9007199254740992', 'not-a-start']) {
-    assert.equal(reloaded.consumeQuickNoteStartToken(invalid), false);
-  }
-  const clockMovedBack = loader({}, { window: { sessionStorage }, Date: { now: () => 50 } })('@/lib/quickNoteRoute');
-  assert.equal(clockMovedBack.createQuickNotePath(), '/quick-note?fresh=102');
-  assert.equal(clockMovedBack.consumeQuickNoteStartToken('102'), true);
-});
-
-test('recording start fails closed when its replay guard cannot persist', () => {
-  const sessionStorage = { getItem: () => null, setItem: () => { throw new Error('Storage unavailable'); } };
-  const route = loader({}, { window: { sessionStorage } })('@/lib/quickNoteRoute');
-  assert.throws(() => route.consumeQuickNoteStartToken('100'), /Storage unavailable/);
+  assert.equal(route.createRecordingPath(), '/recording');
+  assert.equal(route.createRecordingPath('folder-a'), '/recording?folder=folder-a');
+  // Recording intent lives in the path, so reloading it cannot fall back to a draft.
+  assert.ok(!route.createRecordingPath().includes('fresh='));
+  assert.equal(route.createSavedRecordingPath('meeting-1'), '/recording?saved=meeting-1');
+  assert.equal(route.createSavedRecordingPath('meeting-1', 'folder-a'), '/recording?saved=meeting-1&folder=folder-a');
+  for (const workspace of ['/quick-note', '/recording']) assert.equal(route.isNoteWorkspaceRoute(workspace), true);
+  for (const other of ['/', '/meeting-details', '/recording/extra']) assert.equal(route.isNoteWorkspaceRoute(other), false);
 });
 
 test('folder entry is encoded and an existing draft keeps its original folder', () => {
@@ -190,7 +171,7 @@ test('folder entry is encoded and an existing draft keeps its original folder', 
   const load = loader({}, { localStorage, window: { sessionStorage: storage() } });
   const route = load('@/lib/quickNoteRoute');
   assert.equal(route.createDraftNotePath('folder & a'), '/quick-note?folder=folder%20%26%20a');
-  assert.match(route.createQuickNotePath('folder & a'), /fresh=\d+&folder=folder%20%26%20a$/);
+  assert.equal(route.createRecordingPath('folder & a'), '/recording?folder=folder%20%26%20a');
   const drafts = load('@/lib/quickNoteDraft');
   const initial = drafts.loadQuickNoteDraftForFolder('folder-a');
   assert.equal(initial.folderId, 'folder-a');
@@ -317,7 +298,8 @@ for (const fail of [false, true]) {
   test(`recording start ${fail ? 'failure clears' : 'captures'} folder context across asynchronous setup`, async () => {
     const localStorage = storage();
     const sessionStorage = storage();
-    const window = { location: { pathname: '/quick-note' } };
+    // The recording route carries the folder the session was started from.
+    const window = { location: { pathname: '/recording', search: '?folder=folder-a' } };
     let folders;
     const load = loader({
       react: quietReact,
@@ -339,7 +321,7 @@ for (const fail of [false, true]) {
       sonner: { toast: { info: noop, error: noop } },
     }, { localStorage, sessionStorage, window });
     folders = load('@/lib/liveMeetingFolder');
-    load('@/lib/quickNoteDraft').saveQuickNoteDraft('Synthetic draft', 'Text', 'folder-a');
+    load('@/lib/quickNoteDraft').saveQuickNoteDraft('Synthetic draft', 'Text', null);
     const start = load('@/hooks/useRecordingStart').useRecordingStart(false, noop).handleRecordingStart();
     if (fail) {
       await assert.rejects(start, /Synthetic start failure/);
@@ -3031,4 +3013,85 @@ test('follow-up lists ignore late folder results and prevent duplicate writes', 
   requests[2].resolve({ tasks: [], hasMore: false }); await pending;
   state = runner.render(false, 'B'); assert.equal(state.tasks.length, 0); assert.equal(state.saving, false);
   runner.unmount();
+});
+
+// Start requests arrive as a Tauri event, so Strict Mode, HMR and route changes can
+// deliver one request to more than one live listener. These cover that duplication.
+const recordingStatus = loader({
+  react: { ...quietReact, createContext: () => ({}) },
+  '@/services/recordingService': { recordingService: {} },
+})(path.join(root, 'src/contexts/RecordingStateContext.tsx')).RecordingStatus;
+
+function startRequestFixture(start) {
+  const handlers = [], statuses = [], titles = [], meetingActive = [], toasts = [], starts = [];
+  const state = { isRecording: false, isPaused: false, isActive: false, status: recordingStatus.IDLE };
+  const setStatus = (status, message) => { statuses.push(status); state.status = status; state.statusMessage = message; };
+  const runner = hookRunner(path.join(root, 'src/contexts/RecordingStartProvider.tsx'), 'RecordingStartProvider', {
+    '@tauri-apps/api/event': { listen: async (name, handler) => { handlers.push(handler); return noop; } },
+    '@tauri-apps/api/core': { invoke: async () => {} },
+    '@/lib/tauriEvents': { safelyUnlisten: noop },
+    sonner: { toast: { error: (message, options) => toasts.push([message, options?.description]), info: noop } },
+    '@/contexts/RecordingStateContext': { RecordingStatus: recordingStatus, useRecordingState: () => ({ ...state, setStatus }) },
+    '@/contexts/TranscriptContext': { useTranscripts: () => ({ clearTranscripts: noop, setMeetingTitle: title => titles.push(title) }) },
+    '@/components/Sidebar/SidebarProvider': { useSidebar: () => ({ setIsMeetingActive: value => meetingActive.push(value) }) },
+    '@/contexts/ConfigContext': { useConfig: () => ({
+      selectedDevices: { micDevice: 'Synthetic mic', systemDevice: 'Synthetic system' },
+      transcriptModelConfig: { provider: 'whisper' },
+    }) },
+    '@/services/recordingService': { recordingService: { startRecordingWithDevices: (...args) => { starts.push(args); return start(starts.length); } } },
+    '@/lib/recordingNotification': { showRecordingNotification: async () => {} },
+    '@/lib/analytics': { __esModule: true, default: { trackButtonClick: noop } },
+  }, { localStorage: storage(), sessionStorage: storage(), window: { location: { pathname: '/recording' }, sessionStorage: storage(), addEventListener: noop, removeEventListener: noop } });
+  return {
+    runner, handlers, statuses, titles, meetingActive, toasts, starts, state,
+    render: (onboarding = false) => runner.render({ children: null, isOnboardingVisible: onboarding }),
+    request: () => handlers.forEach(handler => handler({ payload: { source: 'recording_route' } })),
+  };
+}
+const settle = () => new Promise(setImmediate);
+
+test('a duplicated start request reaches native capture once and never restarts a live session', async () => {
+  let release;
+  const f = startRequestFixture(() => new Promise(resolve => { release = resolve; }));
+  f.render();
+  f.handlers.push(f.handlers[0]); // The re-subscribed listener that outlives its replacement.
+  f.request(); await settle();
+  assert.equal(f.starts.length, 1);
+  assert.deepEqual(f.statuses, [recordingStatus.STARTING]);
+  release(); await settle();
+  Object.assign(f.state, { isRecording: true, isActive: true, status: recordingStatus.RECORDING });
+  f.render();
+  f.request(); await settle();
+  assert.equal(f.starts.length, 1, 'A live session is attached to, never restarted');
+  assert.deepEqual(f.toasts, []);
+  assert.deepEqual(f.titles, [f.starts[0][2]]);
+  f.runner.unmount();
+});
+
+test('a start refused because capture is already live attaches instead of reporting an error', async () => {
+  const f = startRequestFixture(() => Promise.reject(new Error('Recording already in progress')));
+  f.render();
+  f.request(); await settle();
+  assert.deepEqual(f.statuses, [recordingStatus.STARTING], 'Live capture must not be reported as a failed start');
+  assert.deepEqual(f.toasts, []);
+  assert.deepEqual(f.meetingActive, [true]);
+  assert.deepEqual(f.titles, [], 'The running session keeps the title it started with');
+  f.runner.unmount();
+});
+
+test('a genuinely failed start surfaces the error and releases the next request', async () => {
+  const f = startRequestFixture(attempt => attempt === 1
+    ? Promise.reject(new Error('No microphone available'))
+    : Promise.resolve());
+  f.render();
+  f.request(); await settle();
+  assert.equal(f.statuses.at(-1), recordingStatus.ERROR);
+  assert.equal(f.toasts.length, 1);
+  assert.equal(f.toasts[0][0], 'Failed to start recording');
+  assert.match(f.toasts[0][1], /No microphone available/);
+  f.render();
+  f.request(); await settle();
+  assert.equal(f.starts.length, 2, 'A failed start must not block the retry');
+  assert.equal(f.statuses.at(-1), recordingStatus.STARTING);
+  f.runner.unmount();
 });

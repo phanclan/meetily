@@ -402,6 +402,12 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
             const session = await recordingService.getMeetingSession();
             return session?.title || await recordingService.getRecordingMeetingName();
           });
+
+          // `recording-started` is what normally hands out the live meeting id, and a
+          // reload never sees it. Restoring it after the title lands lets the workspace
+          // reattach its notes to the running session instead of editing a draft.
+          const storedMeetingId = sessionStorage.getItem('indexeddb_current_meeting_id');
+          if (storedMeetingId) setCurrentMeetingId(prev => prev ?? storedMeetingId);
         } catch (error) {
           console.error('[Reload Sync] Failed to sync from backend:', error);
         }

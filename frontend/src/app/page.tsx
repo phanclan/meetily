@@ -19,7 +19,7 @@ import { indexedDBService } from '@/services/indexedDBService';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 import { useImportDialog } from '@/contexts/ImportDialogContext';
-import { createDraftNotePath, createQuickNotePath } from '@/lib/quickNoteRoute';
+import { createDraftNotePath, createRecordingPath } from '@/lib/quickNoteRoute';
 
 export default function Home() {
   const [showRecoveryDialog, setShowRecoveryDialog] = useState(false);
@@ -149,12 +149,8 @@ export default function Home() {
           sessionStorage.removeItem('recovery_dialog_shown');
         }
 
-        // Auto-navigate after a short delay
-        if (result.meetingId) {
-          setTimeout(() => {
-            router.push(`/meeting-details?id=${result.meetingId}`);
-          }, 2000);
-        }
+        // Navigation is the toast's "View Meeting" action only. The timed auto-navigate
+        // that used to run alongside it yanked the user off whatever they opened next.
       }
     } catch (error) {
       toast.error('Failed to recover meeting', {
@@ -174,7 +170,7 @@ export default function Home() {
     }
   };
 
-  // Redirect to /quick-note if recording is somehow active when landing on /
+  // The recording workspace owns any live session, so hand it back the route.
   useEffect(() => {
     const showLiveWorkspace =
       recordingState.isRecording ||
@@ -183,7 +179,7 @@ export default function Home() {
       status === RecordingStatus.PROCESSING_TRANSCRIPTS ||
       status === RecordingStatus.SAVING;
     if (showLiveWorkspace) {
-      router.replace('/quick-note');
+      router.replace(createRecordingPath());
     }
   }, [recordingState.isRecording, status, router]);
 
@@ -228,7 +224,7 @@ export default function Home() {
         onOpenRecovery={() => setShowRecoveryDialog(true)}
         onImportAudio={() => openImportDialog()}
         importEnabled={betaFeatures.importAndRetranscribe}
-        onStartRecording={(folderId) => router.push(createQuickNotePath(folderId))}
+        onStartRecording={(folderId) => router.push(createRecordingPath(folderId))}
         onOpenDraft={(folderId) => router.push(createDraftNotePath(folderId))}
         onDeleteMeeting={handleDeleteMeeting}
         onOpenTrash={() => setShowTrash(true)}

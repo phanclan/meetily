@@ -17,6 +17,17 @@ interface RecordingStartProviderProps {
 }
 
 /**
+ * One start request may reach more than one live listener: React Strict Mode,
+ * HMR, and route changes all re-subscribe, and the old subscription outlives the
+ * new one for a tick. The guard therefore lives at module scope so it survives
+ * both listener teardown and a provider remount; the handler claims it
+ * synchronously, before its first await, so a second delivery cannot slip past.
+ */
+let startRequestInFlight = false;
+
+const noop = () => {};
+
+/**
  * Handles global recording start requests so tray, sidebar, and banners all
  * share the same start flow without relying on route navigation or sessionStorage.
  */
@@ -25,18 +36,22 @@ export function RecordingStartProvider({
   isOnboardingVisible,
 }: RecordingStartProviderProps) {
   const recordingState = useRecordingState();
-  const startRequestInFlightRef = useRef(false);
-  const noop = () => {};
   const { handleRecordingStart } = useRecordingStart(
     recordingState.isRecording,
     noop,
   );
 
+  // The listener is registered once, so everything it reads comes from here.
+  const latest = useRef({ handleRecordingStart, isOnboardingVisible, recordingState });
+  latest.current = { handleRecordingStart, isOnboardingVisible, recordingState };
+
+  // A live or starting session keeps the claim; anything else releases it so a
+  // later, genuine request is never blocked by a start that has already settled.
   useEffect(() => {
-    if (recordingState.status !== RecordingStatus.STARTING) {
-      startRequestInFlightRef.current = false;
-    }
-  }, [recordingState.status]);
+    if (recordingState.isRecording) return;
+    if (recordingState.status === RecordingStatus.STARTING) return;
+    startRequestInFlight = false;
+  }, [recordingState.isRecording, recordingState.status]);
 
   useEffect(() => {
     let unlistenFn: (() => void) | undefined;
@@ -46,7 +61,9 @@ export function RecordingStartProvider({
       try {
         unlistenFn = await listen<RecordingStartRequestPayload>(
           'request-recording-start',
-          async (event) => {
+          async () => {
+            const { handleRecordingStart, isOnboardingVisible, recordingState } = latest.current;
+
             if (isOnboardingVisible) {
               toast.error('Please complete setup first', {
                 description:
@@ -56,14 +73,14 @@ export function RecordingStartProvider({
             }
 
             if (
-              startRequestInFlightRef.current ||
+              startRequestInFlight ||
               recordingState.isRecording ||
               recordingState.status === RecordingStatus.STARTING
             ) {
               return;
             }
 
-            startRequestInFlightRef.current = true;
+            startRequestInFlight = true;
 
             try {
               await handleRecordingStart();
@@ -71,7 +88,17 @@ export function RecordingStartProvider({
               const message = error instanceof Error ? error.message : String(error);
               toast.error('Failed to start recording', { description: message });
             } finally {
-              startRequestInFlightRef.current = false;
+              // Release only when no session took ownership. A start that reached
+              // native capture keeps the claim until the session ends, which is
+              // what stops a queued duplicate from restarting it.
+              const { isRecording, status } = latest.current.recordingState;
+              if (
+                !isRecording &&
+                status !== RecordingStatus.STARTING &&
+                status !== RecordingStatus.RECORDING
+              ) {
+                startRequestInFlight = false;
+              }
             }
           },
         );
@@ -90,12 +117,7 @@ export function RecordingStartProvider({
       cancelled = true;
       safelyUnlisten(unlistenFn, 'recording-start-provider');
     };
-  }, [
-    handleRecordingStart,
-    isOnboardingVisible,
-    recordingState.isRecording,
-    recordingState.status,
-  ]);
+  }, []);
 
   return <>{children}</>;
 }

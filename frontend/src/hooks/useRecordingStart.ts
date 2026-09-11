@@ -11,6 +11,17 @@ import { toast } from 'sonner';
 import { currentRecordingFolder, prepareRecordingFolder } from '@/lib/liveMeetingFolder';
 import { loadQuickNoteDraft } from '@/lib/quickNoteDraft';
 
+/**
+ * Native capture refuses a second start while one is live. A duplicate request
+ * (React Strict Mode, HMR, or two entry points racing on the /recording route)
+ * therefore means the session we wanted is already running: attach to it instead
+ * of reporting a failure that would strand the UI without a Stop control.
+ */
+export function isAlreadyRecordingError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes('Recording already in progress');
+}
+
 interface UseRecordingStartReturn {
   handleRecordingStart: () => Promise<void>;
   isAutoStarting: boolean;
@@ -117,7 +128,6 @@ export function useRecordingStart(
       console.log('Parakeet ready - setting up meeting title and state');
 
       const randomTitle = generateMeetingTitle();
-      setMeetingTitle(randomTitle);
 
       // Set STARTING status before initiating backend recording
       setStatus(RecordingStatus.STARTING, 'Initializing recording...');
@@ -134,6 +144,8 @@ export function useRecordingStart(
 
       // Update state after successful backend start
       // Note: RECORDING status will be set by RecordingStateContext event listener
+      // The title is adopted only once the session it names actually exists.
+      setMeetingTitle(randomTitle);
       console.log('Setting isRecordingState to true');
       setIsRecording(true); // This will also update the sidebar via the useEffect
       setIsMeetingActive(true);
@@ -142,6 +154,14 @@ export function useRecordingStart(
       // Show recording notification if enabled
       await showRecordingNotification();
     } catch (error) {
+      if (isAlreadyRecordingError(error)) {
+        // Capture is live from an earlier request: adopt it, keep its folder and
+        // title, and let RecordingStateContext move the status to RECORDING.
+        console.warn('Recording already in progress - attaching to the live session');
+        setIsRecording(true);
+        setIsMeetingActive(true);
+        return;
+      }
       console.error('Failed to start recording:', error);
       prepareRecordingFolder(null);
       setStatus(RecordingStatus.ERROR, error instanceof Error ? error.message : 'Failed to start recording');
@@ -218,6 +238,12 @@ export function useRecordingStart(
             // Show recording notification if enabled
             await showRecordingNotification();
           } catch (error) {
+            if (isAlreadyRecordingError(error)) {
+              console.warn('Recording already in progress - attaching to the live session');
+              setIsRecording(true);
+              setIsMeetingActive(true);
+              return;
+            }
             console.error('Failed to auto-start recording:', error);
             prepareRecordingFolder(null);
             setStatus(RecordingStatus.ERROR, error instanceof Error ? error.message : 'Failed to auto-start recording');
@@ -305,6 +331,12 @@ export function useRecordingStart(
         // Show recording notification if enabled
         await showRecordingNotification();
       } catch (error) {
+        if (isAlreadyRecordingError(error)) {
+          console.warn('Recording already in progress - attaching to the live session');
+          setIsRecording(true);
+          setIsMeetingActive(true);
+          return;
+        }
         console.error('Failed to start recording from sidebar:', error);
         setStatus(RecordingStatus.ERROR, error instanceof Error ? error.message : 'Failed to start recording from sidebar');
         alert('Failed to start recording. Check console for details.');

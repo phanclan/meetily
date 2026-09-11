@@ -1,35 +1,45 @@
-'use client';
+/**
+ * Route helpers for the two note surfaces.
+ *
+ * `/quick-note` is the draft surface: it never captures audio.
+ * `/recording` is the live recording workspace: entering it starts a session, or
+ * attaches to the one already running. Because the intent lives in the path
+ * instead of a one-shot token, a reload keeps the workspace live.
+ */
 
-const START_TOKEN_KEY = 'meetnola:consumed-recording-start';
+export const DRAFT_NOTE_ROUTE = '/quick-note';
+export const RECORDING_ROUTE = '/recording';
 
-function consumedStartToken(): number {
-  if (typeof window === 'undefined') return 0;
-  const stored = window.sessionStorage.getItem(START_TOKEN_KEY);
-  const value = stored === null ? 0 : Number(stored);
-  if (!Number.isSafeInteger(value) || value < 0) throw new Error('Could not read recording start state. Start recording from the app controls.');
-  return value;
-}
-
-/** A route is a one-time user intent, not a standing instruction to capture audio. */
-export function consumeQuickNoteStartToken(token: string): boolean {
-  if (typeof window === 'undefined' || !/^\d+$/.test(token)) return false;
-  const value = Number(token);
-  if (!Number.isSafeInteger(value) || value <= 0 || value <= consumedStartToken()) return false;
-  // Commit before requesting capture. A reload must not replay a failed or pending start.
-  window.sessionStorage.setItem(START_TOKEN_KEY, token);
-  return true;
-}
-
-export function createQuickNotePath(folderId?: string | null) {
-  // Keep explicit new intents usable even after the system clock moves backward.
-  const token = Math.max(Date.now(), consumedStartToken() + 1);
-  return `/quick-note?fresh=${token}${folderId ? `&folder=${encodeURIComponent(folderId)}` : ''}`;
+function withParams(route: string, params: Array<[string, string | null | undefined]>) {
+  const search = params
+    .filter(([, value]) => Boolean(value))
+    .map(([key, value]) => `${key}=${encodeURIComponent(value as string)}`)
+    .join('&');
+  return search ? `${route}?${search}` : route;
 }
 
 export function createDraftNotePath(folderId?: string | null) {
-  return `/quick-note${folderId ? `?folder=${encodeURIComponent(folderId)}` : ''}`;
+  return withParams(DRAFT_NOTE_ROUTE, [['folder', folderId]]);
 }
 
-export function createRecordingWorkspacePath(isRecording: boolean) {
-  return isRecording ? '/quick-note' : createQuickNotePath();
+export function createRecordingPath(folderId?: string | null) {
+  return withParams(RECORDING_ROUTE, [['folder', folderId]]);
+}
+
+/**
+ * The recording workspace after its session was saved. Keeping the meeting in the
+ * URL means a reload reopens the saved note instead of starting a new recording.
+ */
+export function createSavedRecordingPath(meetingId: string, folderId?: string | null) {
+  return withParams(RECORDING_ROUTE, [['saved', meetingId], ['folder', folderId]]);
+}
+
+/** The folder a workspace route was opened with, read straight from the URL. */
+export function folderFromSearch(search: string | null | undefined) {
+  const match = /[?&]folder=([^&]*)/.exec(search || '');
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+export function isNoteWorkspaceRoute(pathname: string) {
+  return pathname === DRAFT_NOTE_ROUTE || pathname === RECORDING_ROUTE;
 }
