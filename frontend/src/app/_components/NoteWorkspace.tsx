@@ -201,6 +201,8 @@ export function NoteWorkspace({ mode }: { mode: NoteWorkspaceMode }) {
   const [chatInput, setChatInput] = useState('');
   const [isStoppingSession, setIsStoppingSession] = useState(false);
   const [savedMeetingId, setSavedMeetingId] = useState<string | null>(null);
+  const resumeBaselineCountRef = useRef(0);
+  const appendTargetMeetingIdRef = useRef<string | null>(null);
   const [chatRecordingId, setChatRecordingId] = useState<string | null>(null);
   const [savedTranscriptCount, setSavedTranscriptCount] = useState(0);
   const [isTranscriptOpen, setIsTranscriptOpen] = useState(false);
@@ -696,10 +698,15 @@ export function NoteWorkspace({ mode }: { mode: NoteWorkspaceMode }) {
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const savePath = `${dataDir}/recording-${timestamp}.wav`;
       const stopResult = await recordingService.stopRecording(savePath);
+      const appendToMeetingId = appendTargetMeetingIdRef.current || undefined;
       const meetingId = await handleRecordingStop(stopResult.status === 'complete', {
         autoNavigate: false,
         showToast: false,
+        appendToMeetingId,
+        resumeBaselineCount: appendToMeetingId ? resumeBaselineCountRef.current : undefined,
         onSaved: async (nextMeetingId) => {
+          appendTargetMeetingIdRef.current = null;
+          resumeBaselineCountRef.current = 0;
           setSavedMeetingId(nextMeetingId);
           setSavedTranscriptCount(transcriptsRef.current.length);
           setIsTranscriptOpen(false);
@@ -750,6 +757,10 @@ export function NoteWorkspace({ mode }: { mode: NoteWorkspaceMode }) {
     }
 
     // Switching identity resets the view without erasing the previous meeting.
+    appendTargetMeetingIdRef.current = null;
+    resumeBaselineCountRef.current = 0;
+    sessionStorage.removeItem('resume_meeting_id');
+    sessionStorage.removeItem('resume_baseline_count');
     setChatRecordingId(null);
     setChatInput('');
     setDraftContent(currentText);
@@ -771,6 +782,37 @@ export function NoteWorkspace({ mode }: { mode: NoteWorkspaceMode }) {
       sessionRequestedRef.current = false;
       console.error('Failed to start new recording:', error);
       toast.error('Failed to start new recording');
+    }
+  };
+
+  const handleResumeRecording = async () => {
+    if (!savedMeetingId || recordingState.isRecording || isStoppingSession) return;
+    try {
+      await flushPendingSave(false);
+      await titleSave.flush();
+    } catch {
+      return;
+    }
+
+    appendTargetMeetingIdRef.current = savedMeetingId;
+    resumeBaselineCountRef.current = transcriptsRef.current.length;
+    sessionStorage.setItem('resume_meeting_id', savedMeetingId);
+    sessionStorage.setItem('resume_baseline_count', String(resumeBaselineCountRef.current));
+
+    // Stay on the saved note identity; only reopen the live capture.
+    setIsTranscriptOpen(true);
+    sessionRequestedRef.current = true;
+    attachedToRunningSessionRef.current = false;
+
+    try {
+      await invoke('request_recording_start', { source: 'recording_resume' });
+    } catch (error) {
+      sessionRequestedRef.current = false;
+      appendTargetMeetingIdRef.current = null;
+      sessionStorage.removeItem('resume_meeting_id');
+      sessionStorage.removeItem('resume_baseline_count');
+      console.error('Failed to resume recording:', error);
+      toast.error('Failed to resume recording');
     }
   };
 
@@ -893,6 +935,7 @@ export function NoteWorkspace({ mode }: { mode: NoteWorkspaceMode }) {
               <DropdownMenuContent align="end">
                 <DropdownMenuItem onSelect={handleCopyNote}>Copy note</DropdownMenuItem>
                 {!isPostRecording && <DropdownMenuItem disabled={isDraftLocked} onSelect={handleClearNote}>Clear note</DropdownMenuItem>}
+                {isPostRecording && <DropdownMenuItem onSelect={() => void handleStartRecording()}><Mic className="mr-2 h-4 w-4" />New recording</DropdownMenuItem>}
               </DropdownMenuContent>
             </DropdownMenu>
             {recordingState.isRecording && (
@@ -920,14 +963,14 @@ export function NoteWorkspace({ mode }: { mode: NoteWorkspaceMode }) {
                 {isSavingToLibrary ? 'Saving…' : isDraftLocked ? 'Retry save' : 'Save note'}
               </Button>
             )}
-            {!isLiveSessionVisible && (
+            {!isLiveSessionVisible && !isPostRecording && (
               <Button
                 className="rounded-md bg-stone-900 text-white hover:bg-stone-800"
                 onClick={handleStartRecording}
                 disabled={isDraftLocked}
               >
                 <Mic className="h-4 w-4" />
-                {isPostRecording ? 'New recording' : 'Start recording'}
+                Start recording
               </Button>
             )}
           </div>
@@ -1118,6 +1161,19 @@ export function NoteWorkspace({ mode }: { mode: NoteWorkspaceMode }) {
         )}
       </div>
       </div>
+      {isPostRecording && !recordingState.isRecording && (
+        <div className="pointer-events-none fixed bottom-6 left-6 z-30">
+          <Button
+            type="button"
+            className="pointer-events-auto rounded-full bg-white text-stone-900 shadow-lg ring-1 ring-stone-200 hover:bg-stone-50"
+            onClick={() => void handleResumeRecording()}
+            disabled={isStoppingSession}
+          >
+            <Mic className="h-4 w-4 text-red-500" />
+            Resume
+          </Button>
+        </div>
+      )}
       {(isLiveSessionVisible || isPostRecording) && <MeetingAssistantDock
         expanded={isAiComposerOpen} onExpandedChange={setIsAiComposerOpen}
         messages={messages} loading={isChatLoading} input={chatInput} onInputChange={setChatInput}

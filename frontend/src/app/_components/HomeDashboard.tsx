@@ -11,11 +11,12 @@ import type { TranscriptModelProps } from '@/components/TranscriptSettings';
 import type { ModelConfig } from '@/services/configService';
 import type { MeetingMetadata } from '@/services/indexedDBService';
 import { loadQuickNoteDraft } from '@/lib/quickNoteDraft';
-import { groupMeetingsByDay } from '@/lib/meetingTimeline';
+import { groupMeetingsByTimeRange } from '@/lib/meetingTimeline';
 import { MeetingSearchResults } from '@/components/MeetingSearchResults';
 import type { SavedMeetingMatch } from '@/hooks/useSavedMeetingSearch';
 import { useFolderRead } from '@/hooks/useNoteFolders';
 import { NoteFolderDialog, MeetingFoldersDialog } from '@/components/NoteFolderControls';
+import { MeetingFolderPicker } from '@/components/MeetingFolderPicker';
 
 interface HomeDashboardProps {
   meetings: CurrentMeeting[];
@@ -74,6 +75,10 @@ export function HomeDashboard({
   isRecordingDisabled,
 }: HomeDashboardProps) {
   const router = useRouter();
+
+  useEffect(() => {
+    router.prefetch('/recording');
+  }, [router]);
   const searchParams = useSearchParams();
   const { noteFolders, folderRevision } = useSidebar();
   const folderId = searchParams.get('folder') || '';
@@ -130,7 +135,7 @@ export function HomeDashboard({
 
   const visibleMeetings = folderId ? meetings.filter(meeting => memberIds.has(meeting.id)) : meetings;
   const recentMeetings = showAll ? visibleMeetings : visibleMeetings.slice(0, 8);
-  const meetingGroups = groupMeetingsByDay(recentMeetings);
+  const meetingGroups = groupMeetingsByTimeRange(recentMeetings);
   const recoveryCount = recoverableMeetings.length;
 
   const openQuickNote = () => {
@@ -143,31 +148,33 @@ export function HomeDashboard({
 
   return (
     <div className="flex-1 overflow-y-auto bg-background">
-      <div className="mx-auto flex w-full max-w-3xl flex-col px-5 py-6 md:px-8">
+      <div className="mx-auto flex w-full max-w-3xl flex-col px-5 py-4 md:px-8">
 
         {/* Header */}
-        <div className="flex flex-wrap items-center justify-between gap-3 pb-5">
+        <div className="flex flex-wrap items-center justify-between gap-2 pb-3">
           <div>
             <h1 className="break-words font-serif text-3xl tracking-tight text-stone-900 [overflow-wrap:anywhere]">{folderId ? folder?.name || 'Folder' : 'Your notes'}</h1>
             <p className="mt-0.5 text-xs text-stone-500">{todayLabel}</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" className="rounded-full shadow-none" onClick={openQuickNote}>
-              <NotebookPen className="h-3.5 w-3.5" />
-              {hasDraft ? 'Resume draft' : 'New note'}
-            </Button>
+            {hasDraft && (
+              <Button variant="outline" className="rounded-full shadow-none" onClick={openQuickNote}>
+                <NotebookPen className="h-3.5 w-3.5" />
+                Resume draft
+              </Button>
+            )}
             <Button
               className="h-9 rounded-full bg-stone-900 px-4 text-sm font-medium text-white hover:bg-stone-800"
               onClick={() => onStartRecording(folderId || undefined)}
               disabled={isRecordingDisabled}
             >
               <Mic className="h-3.5 w-3.5" />
-              Start recording
+              New note
             </Button>
           </div>
         </div>
 
-        <button type="button" onClick={() => router.push('/ask')} className="mb-3 flex w-full items-center gap-3 rounded-full border border-stone-200 px-4 py-3 text-left text-sm text-stone-500 shadow-sm hover:bg-stone-50 focus-visible:outline-stone-400">
+        <button type="button" onClick={() => router.push('/ask')} className="mb-2 flex w-full items-center gap-2 rounded-full border border-stone-200 px-3 py-2 text-left text-sm text-stone-500 shadow-sm hover:bg-stone-50 focus-visible:outline-stone-400">
           <MessageCircle className="h-4 w-4" /><span>Ask your notes</span><span className="ml-auto hidden text-xs sm:inline">Across meetings</span>
         </button>
 
@@ -184,11 +191,11 @@ export function HomeDashboard({
         )}
 
         {/* Meeting timeline and supporting details */}
-        <div className="mt-3 flex flex-col gap-8">
+        <div className="mt-2 flex flex-col gap-4">
 
           {/* Recent meetings — primary list */}
           <div className="w-full">
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
               <div className="flex gap-1" aria-label="Meeting list view">
                 <button type="button" className="rounded-full px-3 py-1.5 text-sm text-stone-500 hover:bg-stone-100" onClick={() => router.push(`/follow-ups${folderId ? `?folder=${encodeURIComponent(folderId)}` : ''}`)}>Follow-ups</button>
                 <button type="button" aria-pressed={!showAll} className="rounded-full px-3 py-1.5 text-sm text-stone-500 hover:bg-stone-100 aria-pressed:bg-stone-100 aria-pressed:text-stone-900" onClick={() => { setSearch(''); router.push('/'); }}>Recent</button>
@@ -201,52 +208,52 @@ export function HomeDashboard({
               </div>
             </div>
 
-            <div className="mb-4 flex flex-wrap items-center gap-2">
-              <select aria-label="Filter by folder" value={folderId} onChange={event => router.push(`/?${new URLSearchParams({ view: 'all', ...(event.target.value ? { folder: event.target.value } : {}), ...(filter ? { q: filter } : {}) })}`)} className="min-w-0 max-w-full rounded-md border border-stone-200 bg-white px-3 py-2 text-sm text-stone-700">
+            <div className="mb-3 flex min-w-0 flex-wrap items-center gap-2">
+              <select aria-label="Filter by folder" value={folderId} onChange={event => router.push(`/?${new URLSearchParams({ view: 'all', ...(event.target.value ? { folder: event.target.value } : {}), ...(filter ? { q: filter } : {}) })}`)} className="h-9 max-w-[11rem] shrink-0 rounded-md border border-stone-200 bg-white px-2.5 text-sm text-stone-700 sm:max-w-[14rem]">
                 <option value="">All folders</option>
                 {folderId && !folder && <option value={folderId}>Selected folder</option>}
                 {noteFolders.data?.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
               </select>
-              <Button variant="ghost" size="sm" onClick={event => { folderFormTriggerRef.current = event.currentTarget; setFolderDialog('new'); }}>New folder</Button>
-              {folder && <Button variant="ghost" size="sm" onClick={event => { folderFormTriggerRef.current = event.currentTarget; setFolderDialog('rename'); }}>Rename folder</Button>}
-            </div>
-            {noteFolders.error && <p role="alert" className="mb-3 text-sm text-stone-600">Could not load folders. <button onClick={noteFolders.retry} className="underline">Retry folders</button></p>}
-            <div className="mb-6">
-              <form role="search" className="flex min-w-0 items-center gap-2 rounded-xl bg-stone-100/70 px-3 focus-within:ring-1 focus-within:ring-stone-400" onSubmit={event => {
+              <Button variant="ghost" size="sm" className="shrink-0" onClick={event => { folderFormTriggerRef.current = event.currentTarget; setFolderDialog('new'); }}>New folder</Button>
+              {folder && <Button variant="ghost" size="sm" className="shrink-0" onClick={event => { folderFormTriggerRef.current = event.currentTarget; setFolderDialog('rename'); }}>Rename</Button>}
+              <form role="search" className="flex min-w-0 flex-1 items-center gap-2 rounded-md bg-stone-100/70 px-2.5 focus-within:ring-1 focus-within:ring-stone-400" onSubmit={event => {
                   event.preventDefault();
                   const params = new URLSearchParams({ view: 'all' });
                   if (folderId) params.set('folder', folderId);
                   if (filter) params.set('q', filter);
                   router.replace(`/?${params.toString()}`);
                 }}>
-                  <Search aria-hidden="true" className="h-4 w-4 text-stone-400" />
-                  <input ref={searchInputRef} name="q" type="search" aria-label="Search saved notes" value={search} onChange={event => setSearch(event.target.value)} placeholder="Search titles, written notes, and transcripts…" className="min-w-0 flex-1 bg-transparent py-3 text-sm outline-none" />
-                  {search && <button type="button" aria-label="Clear search" className="rounded-full p-1.5 text-stone-500 hover:bg-stone-200" onClick={() => { setSearch(''); router.replace(folderId ? `/?${new URLSearchParams({ view: 'all', folder: folderId })}` : showAll ? '/?view=all' : '/'); }}><X className="h-4 w-4" /></button>}
+                  <Search aria-hidden="true" className="h-4 w-4 shrink-0 text-stone-400" />
+                  <input ref={searchInputRef} name="q" type="search" aria-label="Search saved notes" value={search} onChange={event => setSearch(event.target.value)} placeholder="Search notes…" className="min-w-0 flex-1 bg-transparent py-2 text-sm outline-none" />
+                  {search && <button type="button" aria-label="Clear search" className="rounded-full p-1 text-stone-500 hover:bg-stone-200" onClick={() => { setSearch(''); router.replace(folderId ? `/?${new URLSearchParams({ view: 'all', folder: folderId })}` : showAll ? '/?view=all' : '/'); }}><X className="h-4 w-4" /></button>}
               </form>
             </div>
+            {noteFolders.error && <p role="alert" className="mb-2 text-sm text-stone-600">Could not load folders. <button onClick={noteFolders.retry} className="underline">Retry folders</button></p>}
 
             {folderId && folderMembers.error ? <p role="alert" className="py-6 text-sm text-stone-600">Could not load this folder. <button type="button" onClick={folderMembers.retry} className="underline">Retry folder</button></p>
               : folderId && folderMembers.loading && !folderMembers.data ? <p role="status" className="py-6 text-sm text-stone-500">Loading folder notes…</p>
               : filter ? <MeetingSearchResults key={`${folderId}:${folderRevision}`} query={filter} folderId={folderId || null} onOpenMeeting={(meetingId, match) => onOpenMeeting(meetingId, filter, match, folderId || undefined)} /> : recentMeetings.length > 0 ? (
               <div>
-                {meetingGroups.map(group => <section key={group.key} className="mb-6" aria-label={group.label}>
-                  <h2 className="mb-2 text-xs font-medium text-stone-500">{group.label}</h2>
+                {meetingGroups.map(group => <section key={group.key} className="mb-3" aria-label={group.label}>
+                  <h2 className="mb-1 text-xs font-medium text-stone-500">{group.label}</h2>
                 {group.meetings.map((meeting) => (
                   <div
                     key={meeting.id}
-                    className="group relative flex items-center gap-3 -mx-2 px-2 rounded-lg hover:bg-stone-100/50 transition-colors"
+                    className="group relative -mx-2 flex items-center gap-2 rounded-md px-2 hover:bg-stone-100/50 transition-colors"
                   >
                     <button
                       type="button"
                       onClick={() => onOpenMeeting(meeting.id, undefined, undefined, folderId || undefined)}
-                      className="flex flex-1 items-center gap-3 py-3 text-left min-w-0"
+                      className="flex min-w-0 flex-1 items-center gap-2 py-1.5 text-left"
                     >
-                      <FileText className="h-8 w-8 shrink-0 rounded-md bg-stone-100 p-2 text-stone-500" />
+                      <FileText className="h-6 w-6 shrink-0 rounded-md bg-stone-100 p-1.5 text-stone-500" />
                       <div className="min-w-0 flex-1">
                         <p title={meeting.title} className="truncate text-sm font-medium text-stone-800">{meeting.title}</p>
                       </div>
                       <span className="shrink-0 text-xs tabular-nums text-stone-500">{meeting.created_at && Number.isFinite(new Date(meeting.created_at).getTime()) ? new Date(meeting.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : 'Saved locally'}</span>
                     </button>
+
+                    <MeetingFolderPicker meetingId={meeting.id} variant="ghost" className="shrink-0" />
 
                     {/* ... menu */}
                     <DropdownMenu>
@@ -270,7 +277,7 @@ export function HomeDashboard({
                           searchInputRef.current?.focus();
                         }
                       }}>
-                        <DropdownMenuItem onSelect={() => { openingOrganizerRef.current = true; setOrganizeMeetingId(meeting.id); }}>Organize note</DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => { openingOrganizerRef.current = true; setOrganizeMeetingId(meeting.id); }}>Manage folders…</DropdownMenuItem>
                         <DropdownMenuItem onSelect={() => { movingToTrashRef.current = true; void onDeleteMeeting(meeting.id); }} className="text-red-600 focus:bg-red-50 focus:text-red-700">
                           <Trash2 aria-hidden="true" />Move to Trash
                         </DropdownMenuItem>
@@ -283,7 +290,7 @@ export function HomeDashboard({
             ) : (
               <div className="rounded-xl border border-dashed border-stone-200 bg-white/60 px-5 py-10 text-center">
                 <p className="text-sm text-stone-500">{folderId ? 'No notes in this folder yet' : 'No notes yet'}</p>
-                <p className="mt-1 text-xs text-stone-500">{folderId ? 'Open a saved note and choose Organize note to add it here.' : 'Create a note or start a recording to see it here.'}</p>
+                <p className="mt-1 text-xs text-stone-500">{folderId ? 'Use Add to folder on a note, or open it and choose a folder.' : 'Click New note to start recording.'}</p>
               </div>
             )}
           </div>

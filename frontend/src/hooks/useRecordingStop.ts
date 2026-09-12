@@ -53,6 +53,10 @@ async function waitForTranscriptsToSettle(getCount: () => number): Promise<numbe
 interface RecordingStopOptions {
   autoNavigate?: boolean;
   showToast?: boolean;
+  /** When set, append new segments to this meeting instead of creating a new one. */
+  appendToMeetingId?: string;
+  /** Index into the live transcript buffer where this resume session began. */
+  resumeBaselineCount?: number;
   onSaved?: (meetingId: string) => Promise<void> | void;
 }
 
@@ -291,17 +295,32 @@ export function useRecordingStop(
 
         try {
           const liveId = currentMeetingId || sessionStorage.getItem('indexeddb_current_meeting_id');
-          const responseData = await storageService.saveMeeting(
-            meetingTitle || savedMeetingName || 'New Meeting',
-            freshTranscripts,
-            folderPath,
-            liveId,
-          );
+          const appendToMeetingId = options.appendToMeetingId || sessionStorage.getItem('resume_meeting_id') || undefined;
+          const baseline = typeof options.resumeBaselineCount === 'number'
+            ? options.resumeBaselineCount
+            : Number(sessionStorage.getItem('resume_baseline_count') || '0');
+          const transcriptsToPersist = appendToMeetingId
+            ? freshTranscripts.slice(Math.max(0, baseline))
+            : freshTranscripts;
 
-          const meetingId = responseData.meeting_id;
-          if (!meetingId) {
-            console.error('No meeting_id in response:', responseData);
-            throw new Error('No meeting ID received from save operation');
+          let meetingId: string;
+          if (appendToMeetingId) {
+            await storageService.appendMeetingTranscripts(appendToMeetingId, transcriptsToPersist);
+            meetingId = appendToMeetingId;
+            sessionStorage.removeItem('resume_meeting_id');
+            sessionStorage.removeItem('resume_baseline_count');
+          } else {
+            const responseData = await storageService.saveMeeting(
+              meetingTitle || savedMeetingName || 'New Meeting',
+              transcriptsToPersist,
+              folderPath,
+              liveId,
+            );
+            meetingId = responseData.meeting_id;
+            if (!meetingId) {
+              console.error('No meeting_id in response:', responseData);
+              throw new Error('No meeting ID received from save operation');
+            }
           }
 
           const liveNotes = liveId ? readLiveMeetingNotes(liveId) : null;

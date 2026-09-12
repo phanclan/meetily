@@ -55,6 +55,16 @@ export class StorageService {
    * @param meetingId - ID of the meeting to fetch
    * @returns Promise with meeting details
    */
+  async appendMeetingTranscripts(
+    meetingId: string,
+    transcripts: Transcript[],
+  ): Promise<{ meeting_id: string; appended: number }> {
+    return invoke('api_append_transcript', {
+      meetingId,
+      transcripts,
+    });
+  }
+
   async getMeeting(meetingId: string): Promise<Meeting> {
     return invoke<Meeting>('api_get_meeting', { meetingId });
   }

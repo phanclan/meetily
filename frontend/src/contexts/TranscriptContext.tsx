@@ -114,13 +114,17 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
         // Listen for recording-started event
         unlistenRecordingStarted = await recordingService.onRecordingStarted(async () => {
           try {
-            // Reset only for a new native session, never when reopening its workspace.
-            setTranscripts([]);
+            const resumeMeetingId = sessionStorage.getItem('resume_meeting_id');
+            // Resume keeps prior segments in the buffer; a brand-new session starts empty.
+            if (!resumeMeetingId) {
+              setTranscripts([]);
+            }
             // The main listener now outlives a single meeting, so its sequence buffer has
             // to be cleared here instead of by a remount.
             resetTranscriptBufferRef.current?.();
             beginSession();
-            // Generate unique meeting ID
+            // Generate unique meeting ID (live capture id). Resume still gets a fresh live id
+            // for IndexedDB recovery; SQLite append targets resume_meeting_id on stop.
             const meetingId = `meeting-${Date.now()}`;
             bindRecordingFolder(meetingId);
 

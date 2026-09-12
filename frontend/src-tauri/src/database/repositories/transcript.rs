@@ -90,6 +90,65 @@ impl TranscriptsRepository {
         Ok(meeting_id)
     }
 
+
+    /// Append transcript segments to an existing meeting (resume recording).
+    pub async fn append_transcripts(
+        pool: &SqlitePool,
+        meeting_id: &str,
+        transcripts: &[TranscriptSegment],
+    ) -> Result<usize, SqlxError> {
+        if transcripts.is_empty() {
+            return Ok(0);
+        }
+
+        let exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM meetings WHERE id = ?) AND NOT EXISTS(SELECT 1 FROM meeting_trash WHERE meeting_id = ?)",
+        )
+        .bind(meeting_id)
+        .bind(meeting_id)
+        .fetch_one(pool)
+        .await?;
+
+        if !exists {
+            return Err(SqlxError::RowNotFound);
+        }
+
+        let mut conn = pool.acquire().await?;
+        let mut transaction = conn.begin().await?;
+        let now = Utc::now();
+
+        sqlx::query("UPDATE meetings SET updated_at = ? WHERE id = ?")
+            .bind(now)
+            .bind(meeting_id)
+            .execute(&mut *transaction)
+            .await?;
+
+        for segment in transcripts {
+            let transcript_id = format!("transcript-{}", Uuid::new_v4());
+            sqlx::query(
+                "INSERT INTO transcripts (id, meeting_id, transcript, timestamp, audio_start_time, audio_end_time, duration)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind(&transcript_id)
+            .bind(meeting_id)
+            .bind(&segment.text)
+            .bind(&segment.timestamp)
+            .bind(segment.audio_start_time)
+            .bind(segment.audio_end_time)
+            .bind(segment.duration)
+            .execute(&mut *transaction)
+            .await?;
+        }
+
+        transaction.commit().await?;
+        info!(
+            "Appended {} transcript segments to meeting {}",
+            transcripts.len(),
+            meeting_id
+        );
+        Ok(transcripts.len())
+    }
+
     /// Searches for a query string within the transcripts.
     /// It returns a list of matching transcripts with context.
     pub async fn search_transcripts(

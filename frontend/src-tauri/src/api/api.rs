@@ -1036,6 +1036,37 @@ pub async fn api_save_transcript<R: Runtime>(
     }
 }
 
+#[tauri::command]
+pub async fn api_append_transcript(
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+    transcripts: Vec<serde_json::Value>,
+) -> Result<serde_json::Value, String> {
+    log_info!(
+        "api_append_transcript called for meeting: {}, transcripts: {}",
+        meeting_id,
+        transcripts.len()
+    );
+
+    let transcripts_to_save: Vec<TranscriptSegment> = transcripts
+        .into_iter()
+        .map(serde_json::from_value)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("Invalid transcript data format: {}", e))?;
+
+    let pool = state.db_manager.pool();
+    match TranscriptsRepository::append_transcripts(pool, &meeting_id, &transcripts_to_save).await {
+        Ok(count) => Ok(serde_json::json!({
+            "status": "success",
+            "message": "Transcript segments appended",
+            "meeting_id": meeting_id,
+            "appended": count
+        })),
+        Err(sqlx::Error::RowNotFound) => Err(format!("Meeting not found: {}", meeting_id)),
+        Err(e) => Err(format!("Failed to append transcript: {}", e)),
+    }
+}
+
 /// Opens the meeting's recording folder in the system file explorer
 #[tauri::command]
 pub async fn open_meeting_folder<R: Runtime>(

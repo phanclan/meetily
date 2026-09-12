@@ -65,7 +65,7 @@ use log::{error as log_error, info as log_info};
 use notifications::commands::NotificationManagerState;
 use std::time::Duration;
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, LogicalSize, Manager, Runtime, Size, WebviewWindow, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, Position, Runtime, Size, WebviewWindow, WindowEvent};
 use tauri_plugin_store::StoreExt;
 use tokio::sync::RwLock;
 
@@ -84,8 +84,14 @@ struct RecordingArgs {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct PersistedWindowState {
+    /// Physical pixel size from `inner_size` (not logical points).
     width: f64,
     height: f64,
+    /// Optional outer position in physical pixels.
+    #[serde(default)]
+    x: Option<f64>,
+    #[serde(default)]
+    y: Option<f64>,
     maximized: bool,
 }
 
@@ -137,9 +143,14 @@ fn persist_main_window_state<R: Runtime>(window: &WebviewWindow<R>) -> Result<()
         return Ok(());
     }
 
+    // Prefer outer position so the frame returns to the same screen placement.
+    let position = window.outer_position().ok();
+
     let state = PersistedWindowState {
         width: size.width as f64,
         height: size.height as f64,
+        x: position.map(|p| p.x as f64),
+        y: position.map(|p| p.y as f64),
         maximized: window.is_maximized().unwrap_or(false),
     };
 
@@ -164,8 +175,22 @@ fn restore_main_window_state<R: Runtime>(window: &WebviewWindow<R>) {
     };
 
     if !state.maximized {
-        if let Err(e) = window.set_size(Size::Logical(LogicalSize::new(state.width, state.height))) {
+        // Size was captured with `inner_size` (physical pixels). Restoring as
+        // logical points made Retina windows jump to ~2x on every relaunch.
+        if let Err(e) = window.set_size(Size::Physical(PhysicalSize::new(
+            state.width.round().max(1.0) as u32,
+            state.height.round().max(1.0) as u32,
+        ))) {
             log::warn!("Failed to restore main window size: {}", e);
+        }
+
+        if let (Some(x), Some(y)) = (state.x, state.y) {
+            if let Err(e) = window.set_position(Position::Physical(PhysicalPosition::new(
+                x.round() as i32,
+                y.round() as i32,
+            ))) {
+                log::warn!("Failed to restore main window position: {}", e);
+            }
         }
     }
 
@@ -844,6 +869,7 @@ pub fn run() {
             api::api_get_meeting_transcripts,
             api::api_save_meeting_title,
             api::api_save_transcript,
+            api::api_append_transcript,
             api::open_meeting_folder,
             api::test_backend_connection,
             api::debug_backend_connection,

@@ -45,14 +45,14 @@ export function NoteFolderSidebar() {
   const router = useRouter(), params = useSearchParams();
   const [creating, setCreating] = useState(false);
   const createTriggerRef = useRef<HTMLButtonElement | null>(null);
-  return <section aria-label="Note folders" className="mb-3 shrink-0 px-2">
-    <div className="flex items-center justify-between px-2"><h2 className="text-xs font-medium text-stone-500">Folders</h2><button ref={createTriggerRef} type="button" onClick={() => setCreating(true)} aria-label="New folder" className="rounded p-1.5 text-stone-500 hover:bg-stone-100"><Plus className="h-3.5 w-3.5" /></button></div>
+  return <section aria-label="Note folders" className="mb-2 shrink-0 px-2">
+    <div className="flex items-center justify-between px-2 py-0.5"><h2 className="text-[11px] font-medium uppercase tracking-wider text-stone-400">Folders</h2><button ref={createTriggerRef} type="button" onClick={() => setCreating(true)} aria-label="New folder" className="rounded p-1.5 text-stone-500 hover:bg-stone-100"><Plus className="h-3.5 w-3.5" /></button></div>
     {noteFolders.loading && !noteFolders.data && <p role="status" className="px-2 py-1 text-xs text-stone-500">Loading folders…</p>}
     {noteFolders.error && <p role="alert" className="px-2 py-1 text-xs text-stone-500">Could not load folders. <button type="button" onClick={noteFolders.retry} className="underline">Retry folders</button></p>}
     <div className="max-h-48 overflow-y-auto">{noteFolders.data?.map(folder => <button key={folder.id} type="button" title={folder.name}
       aria-current={params.get('folder') === folder.id ? 'page' : undefined}
       onClick={() => router.push(`/?${new URLSearchParams({ view: 'all', folder: folder.id })}`)}
-      className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm text-stone-700 hover:bg-stone-100 aria-[current=page]:bg-stone-100">
+      className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-sm text-stone-700 hover:bg-stone-100 aria-[current=page]:bg-stone-100">
       <Folder className="h-4 w-4 shrink-0 text-stone-500" /><span className="min-w-0 flex-1 truncate">{folder.name}</span><span className="text-xs tabular-nums text-stone-400">{folder.noteCount}</span>
     </button>)}</div>
     <NoteFolderDialog open={creating} onOpenChange={setCreating} returnFocusRef={createTriggerRef} onCreated={folder => router.push(`/?${new URLSearchParams({ view: 'all', folder: folder.id })}`)} />

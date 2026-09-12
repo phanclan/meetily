@@ -34,6 +34,7 @@ import { SearchableTranscript } from '@/components/MeetingDetails/SearchableTran
 import { SearchResultSource } from '@/components/MeetingDetails/SearchResultSource';
 import type { SavedSearchTarget } from '@/hooks/useSavedSearchMatch';
 import { MeetingFoldersDialog } from '@/components/NoteFolderControls';
+import { MeetingFolderPicker } from '@/components/MeetingFolderPicker';
 import { PreviousSummaryDialog } from '@/components/MeetingDetails/PreviousSummaryDialog';
 import { createWriteQueue } from '@/lib/pendingWrites';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
@@ -380,6 +381,7 @@ export default function PageContent({
           </button>
 
           <div className="flex flex-wrap items-center justify-end gap-2">
+            <MeetingFolderPicker meetingId={meeting.id} variant="chip" eagerMembership className="shrink-0" />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon" ref={actionsButtonRef} aria-label="Meeting actions" data-meeting-actions-id={meeting.id}><MoreHorizontal /></Button>
@@ -402,7 +404,7 @@ export default function PageContent({
                 {activeView === 'summary' && <DropdownMenuItem disabled={meetingData.isSaving || meetingData.isSummarySaving || !meetingData.isSummaryDirty} onSelect={() => void meetingData.saveAllChanges()}><Save className="mr-2 h-4 w-4" />Save enhanced notes</DropdownMenuItem>}
                 <DropdownMenuItem onSelect={meetingOperations.handleOpenMeetingFolder}><FolderOpen className="mr-2 h-4 w-4" />Open recording folder</DropdownMenuItem>
                 <DropdownMenuItem disabled={!notes.isReady || isSummaryGenerating} onSelect={() => setIsMarkdownExportOpen(true)}>Export Markdown</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => setIsFolderDialogOpen(true)}><FolderOpen className="mr-2 h-4 w-4" />Organize note</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => setIsFolderDialogOpen(true)}><FolderOpen className="mr-2 h-4 w-4" />Manage folders…</DropdownMenuItem>
                 <DropdownMenuItem disabled={isSummaryGenerating} onSelect={() => setIsPreviousSummaryOpen(true)}>Previous enhancement</DropdownMenuItem>
                 <DropdownMenuItem disabled={!notes.isReady || isNotesEmpty || !meetingData.aiSummary || isSummaryGenerating} onSelect={() => setIsNotesCoverageOpen(true)}>Review written-note coverage</DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => void handleMoveToTrash()} className="text-red-600 focus:bg-red-50 focus:text-red-700"><Trash2 className="mr-2 h-4 w-4" />Move to Trash</DropdownMenuItem>

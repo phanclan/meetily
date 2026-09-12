@@ -11,6 +11,7 @@ import { ModelConfig } from '@/components/ModelSettingsModal';
 import { SettingTabs } from '../SettingTabs';
 import { TranscriptModelProps } from '@/components/TranscriptSettings';
 import Analytics from '@/lib/analytics';
+import { groupMeetingsByTimeRange } from '@/lib/meetingTimeline';
 import { invoke } from '@tauri-apps/api/core';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
@@ -74,6 +75,7 @@ const Sidebar: React.FC = () => {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['meetings']));
   const [meetingsExpanded, setMeetingsExpanded] = useState(true);
   const [showAllMeetings, setShowAllMeetings] = useState(false);
+  const [collapsedDateKeys, setCollapsedDateKeys] = useState<Set<string>>(new Set());
   const MEETINGS_PREVIEW_COUNT = 10;
   const [searchQuery, setSearchQuery] = useState<string>('');
   const searchContainerRef = useRef<HTMLDivElement>(null);
@@ -345,6 +347,24 @@ const Sidebar: React.FC = () => {
     [meetingItems, showAllMeetings]
   );
 
+  const meetingDateGroups = useMemo(() => {
+    const byId = new Map(meetings.map(meeting => [meeting.id, meeting]));
+    const dated = visibleMeetings.map(item => ({
+      ...item,
+      created_at: byId.get(item.id)?.created_at ?? byId.get(item.id)?.updated_at,
+    }));
+    return groupMeetingsByTimeRange(dated);
+  }, [visibleMeetings, meetings]);
+
+  const toggleDateGroup = (key: string) => {
+    setCollapsedDateKeys(previous => {
+      const next = new Set(previous);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
   const handleDelete = async (itemId: string) => {
     console.log('Deleting item:', itemId);
     const payload = {
@@ -514,13 +534,13 @@ const Sidebar: React.FC = () => {
     return (
       <div key={item.id}>
         <div
-          className={`flex items-center pr-2 my-0.5 rounded-lg text-sm group transition-colors ${
+          className={`flex items-center pr-1 rounded-md text-sm group transition-colors ${
             isActive ? 'bg-stone-200 text-stone-900 font-medium' :
             hasTranscriptMatch ? 'bg-yellow-50 hover:bg-yellow-100' : 'hover:bg-gray-100 text-gray-700'
           }`}
         >
           <button
-            className="flex items-center flex-1 min-w-0 px-3 py-2 rounded-lg text-left"
+            className="flex items-center flex-1 min-w-0 px-2 py-1 rounded-md text-left"
             aria-current={isActive ? 'page' : undefined}
             onClick={() => {
               setCurrentMeeting({ id: item.id, title: item.title });
@@ -565,7 +585,7 @@ const Sidebar: React.FC = () => {
       }`}
     >
         {/* Header: Logo + toggle button */}
-        <div className="flex items-center justify-between px-3 py-3 flex-shrink-0">
+        <div className="flex items-center justify-between px-2 py-2 flex-shrink-0">
           {!isCollapsed && <Logo isCollapsed={false} />}
           <button
             onClick={toggleCollapse}
@@ -623,7 +643,7 @@ const Sidebar: React.FC = () => {
                 onClick={() => router.push('/')}
                 aria-label="Home"
                 aria-current={isHomePage ? 'page' : undefined}
-                className={`flex items-center gap-3 px-3 py-2 rounded-lg w-full text-sm transition-colors ${
+                className={`flex items-center gap-2 px-2 py-1.5 rounded-md w-full text-sm transition-colors ${
                   isHomePage ? 'bg-gray-100 font-medium text-gray-900' : 'hover:bg-gray-100 text-gray-700'
                 }`}
               >
@@ -639,7 +659,7 @@ const Sidebar: React.FC = () => {
               <button
                 onClick={handleRecordingToggle}
                 aria-label={isRecording ? 'Open recording' : 'Start recording'}
-                className={`flex items-center gap-3 px-3 py-2 rounded-lg w-full text-sm transition-colors ${
+                className={`flex items-center gap-2 px-2 py-1.5 rounded-md w-full text-sm transition-colors ${
                   isRecording
                     ? 'text-red-500 bg-red-50 hover:bg-red-100'
                     : 'text-gray-700 hover:bg-red-50 hover:text-red-600'
@@ -660,7 +680,7 @@ const Sidebar: React.FC = () => {
           <Tooltip>
             <TooltipTrigger asChild>
               <button type="button" onClick={() => router.push('/ask')} aria-label="Ask your notes" aria-current={pathname === '/ask' ? 'page' : undefined}
-                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm ${pathname === '/ask' ? 'bg-gray-100 font-medium text-gray-900' : 'text-gray-700 hover:bg-gray-100'}`}>
+                className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm ${pathname === '/ask' ? 'bg-gray-100 font-medium text-gray-900' : 'text-gray-700 hover:bg-gray-100'}`}>
                 <MessageCircle className="h-4 w-4 shrink-0" />{!isCollapsed && <span>Ask your notes</span>}
               </button>
             </TooltipTrigger>
@@ -669,7 +689,7 @@ const Sidebar: React.FC = () => {
         </div>
 
         {/* Meetings section */}
-        <div className="flex-1 flex flex-col min-h-0 mt-3 overflow-hidden">
+        <div className="flex-1 flex flex-col min-h-0 mt-2 overflow-hidden">
           {isCollapsed ? (
             // Collapsed: single Meetings icon, clicking expands sidebar + ensures meetings list is open
             <div className="px-2">
@@ -683,7 +703,7 @@ const Sidebar: React.FC = () => {
                     }}
                     aria-label="Show meetings"
                     aria-expanded={false}
-                    className="flex items-center gap-3 px-3 py-2 rounded-lg w-full text-sm hover:bg-gray-100 text-gray-500 transition-colors"
+                    className="flex items-center gap-2 px-2 py-1.5 rounded-md w-full text-sm hover:bg-gray-100 text-gray-500 transition-colors"
                   >
                     <FolderOpen className="w-4 h-4 flex-shrink-0" />
                   </button>
@@ -714,11 +734,30 @@ const Sidebar: React.FC = () => {
                 {searchQuery && !isSearching && searchResults.length >= 100 && (
                   <p className="px-3 pb-2 text-xs text-stone-500" role="status">Showing 100 matching meetings. Refine your search for more.</p>
                 )}
-                <div id="sidebar-meetings" hidden={!meetingsExpanded} className="flex-1 overflow-y-auto custom-scrollbar min-h-0 px-2">
-                  {visibleMeetings.map(child => renderItem(child, 0))}
+                <div id="sidebar-meetings" hidden={!meetingsExpanded} className="flex-1 overflow-y-auto custom-scrollbar min-h-0 px-1.5">
+                  {meetingDateGroups.map(group => {
+                    const isDateExpanded = !collapsedDateKeys.has(group.key);
+                    return (
+                      <div key={group.key} className="mb-1">
+                        <button
+                          type="button"
+                          className="flex w-full items-center gap-1 rounded px-2 py-0.5 text-left hover:bg-gray-50"
+                          onClick={() => toggleDateGroup(group.key)}
+                          aria-expanded={isDateExpanded}
+                        >
+                          <span className="flex-1 truncate text-[11px] font-medium uppercase tracking-wider text-gray-400">
+                            {group.label}
+                          </span>
+                          <span className="text-[10px] tabular-nums text-gray-300">{group.meetings.length}</span>
+                          <ChevronDown className={`h-3 w-3 shrink-0 text-gray-400 transition-transform ${isDateExpanded ? '' : '-rotate-90'}`} />
+                        </button>
+                        {isDateExpanded && group.meetings.map(child => renderItem(child, 0))}
+                      </div>
+                    );
+                  })}
                   {!showAllMeetings && meetingItems.length > MEETINGS_PREVIEW_COUNT && (
                     <button
-                      className="w-full text-left px-3 py-1.5 text-xs text-gray-400 hover:text-gray-600 hover:bg-gray-50 rounded-lg transition-colors"
+                      className="w-full rounded-md px-2 py-1 text-left text-xs text-gray-400 transition-colors hover:bg-gray-50 hover:text-gray-600"
                       onClick={() => setShowAllMeetings(true)}
                     >
                       Show {meetingItems.length - MEETINGS_PREVIEW_COUNT} more…
@@ -730,14 +769,14 @@ const Sidebar: React.FC = () => {
         </div>
 
         {/* Footer */}
-        <div className="flex-shrink-0 border-t border-gray-100 px-2 py-2 space-y-0.5">
+        <div className="flex-shrink-0 border-t border-gray-100 px-2 py-1.5 space-y-0.5">
           {betaFeatures.importAndRetranscribe && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   onClick={() => openImportDialog()}
                   aria-label="Import audio"
-                  className="flex items-center gap-3 px-3 py-2 rounded-lg w-full text-sm hover:bg-gray-100 text-gray-700 transition-colors"
+                  className="flex items-center gap-2 px-2 py-1.5 rounded-md w-full text-sm hover:bg-gray-100 text-gray-700 transition-colors"
                 >
                   <Upload className="w-4 h-4 flex-shrink-0" />
                   {!isCollapsed && <span>Import Audio</span>}
@@ -752,7 +791,7 @@ const Sidebar: React.FC = () => {
                 onClick={() => router.push('/settings')}
                 aria-label="Settings"
                 aria-current={pathname === '/settings' ? 'page' : undefined}
-                className={`flex items-center gap-3 px-3 py-2 rounded-lg w-full text-sm transition-colors ${
+                className={`flex items-center gap-2 px-2 py-1.5 rounded-md w-full text-sm transition-colors ${
                   pathname === '/settings' ? 'bg-gray-100 font-medium text-gray-900' : 'hover:bg-gray-100 text-gray-700'
                 }`}
               >
