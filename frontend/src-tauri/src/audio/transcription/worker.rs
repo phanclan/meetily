@@ -37,28 +37,70 @@ pub fn reset_sequence_counter() {
     info!("🔢 SEQUENCE_COUNTER reset to 0 for new recording session");
 }
 
-/// Wait for the transcription model to become available, up to `MODEL_LOAD_WAIT_MS`.
-/// Returns true if the model is loaded, false if it never became available.
-async fn wait_for_model_loaded(engine: &TranscriptionEngine, worker_id: usize) -> bool {
-    if engine.is_model_loaded().await {
-        return true;
+/// Outcome of the per-chunk model availability check.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ModelReadiness {
+    Ready,
+    /// The model is unavailable and this chunk cannot be transcribed.
+    /// `first_failure` is true only for the check that latched the give-up flag, so the
+    /// UI error is emitted once per failure episode rather than once per dropped chunk.
+    Unavailable { first_failure: bool },
+}
+
+/// Wait for the transcription model to become available, up to `wait_ms`.
+///
+/// The first timeout latches `gave_up`. While latched, later chunks fail fast instead of
+/// waiting again, so a permanently unavailable model cannot add `wait_ms` of shutdown
+/// latency for every queued chunk (15s x N chunks before this latch existed). The latch is
+/// cleared as soon as the model is observed loaded again, so a model that finishes loading
+/// (or is reloaded) mid-session resumes normal transcription.
+async fn ensure_model_ready<F, Fut>(
+    is_model_loaded: F,
+    worker_id: usize,
+    gave_up: &AtomicBool,
+    wait_ms: u64,
+) -> ModelReadiness
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = bool>,
+{
+    if is_model_loaded().await {
+        if gave_up.swap(false, Ordering::SeqCst) {
+            info!(
+                "✅ Worker {}: model became available again, resuming transcription",
+                worker_id
+            );
+        }
+        return ModelReadiness::Ready;
+    }
+
+    if gave_up.load(Ordering::SeqCst) {
+        // Already waited the full timeout once in this session - drop immediately.
+        return ModelReadiness::Unavailable {
+            first_failure: false,
+        };
     }
 
     warn!(
         "⏳ Worker {}: model not loaded yet, waiting up to {}ms before dropping audio",
-        worker_id, MODEL_LOAD_WAIT_MS
+        worker_id, wait_ms
     );
 
-    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(MODEL_LOAD_WAIT_MS);
-    while std::time::Instant::now() < deadline {
+    // tokio::time::Instant (not std) so the deadline honours paused time in tests.
+    let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_millis(wait_ms);
+    while tokio::time::Instant::now() < deadline {
         tokio::time::sleep(tokio::time::Duration::from_millis(MODEL_LOAD_POLL_MS)).await;
-        if engine.is_model_loaded().await {
+        if is_model_loaded().await {
             info!("✅ Worker {}: model became available, resuming transcription", worker_id);
-            return true;
+            gave_up.store(false, Ordering::SeqCst);
+            return ModelReadiness::Ready;
         }
     }
 
-    false
+    // swap returns the previous value: only the caller that flips false -> true reports
+    // the first failure, which stays correct if NUM_WORKERS is ever raised above 1.
+    let first_failure = !gave_up.swap(true, Ordering::SeqCst);
+    ModelReadiness::Unavailable { first_failure }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -114,6 +156,9 @@ pub fn start_transcription_task<R: Runtime>(
         let chunks_completed = Arc::new(AtomicU64::new(0));
         let chunks_dropped = Arc::new(AtomicU64::new(0));
         let input_finished = Arc::new(AtomicBool::new(false));
+        // Latched once the model has been waited on for the full timeout without loading.
+        // Keeps the failure path from re-waiting (and re-toasting) for every queued chunk.
+        let model_unavailable = Arc::new(AtomicBool::new(false));
 
         info!("📊 Starting {} transcription worker{} (serial mode for ordered emission)", NUM_WORKERS, if NUM_WORKERS == 1 { "" } else { "s" });
 
@@ -131,6 +176,7 @@ pub fn start_transcription_task<R: Runtime>(
             let chunks_dropped_clone = chunks_dropped.clone();
             let input_finished_clone = input_finished.clone();
             let chunks_queued_clone = chunks_queued.clone();
+            let model_unavailable_clone = model_unavailable.clone();
 
             let worker_handle = tokio::spawn(async move {
                 info!("👷 Worker {} started", worker_id);
@@ -176,19 +222,39 @@ pub fn start_transcription_task<R: Runtime>(
                             }
 
                             // Check if the model is available before processing. Wait briefly
-                            // for a slow first load instead of silently discarding audio.
-                            if !wait_for_model_loaded(&engine_clone, worker_id).await {
-                                error!(
-                                    "❌ Worker {}: model still not loaded after {}ms - audio chunk {} could not be transcribed",
-                                    worker_id, MODEL_LOAD_WAIT_MS, chunk.chunk_id
-                                );
-                                chunks_dropped_clone.fetch_add(1, Ordering::SeqCst);
-                                let _ = app_clone.emit("transcription-error", serde_json::json!({
-                                    "error": "Speech recognition model is not loaded",
-                                    "userMessage": "Some audio could not be transcribed because the speech recognition model was not loaded.",
-                                    "actionable": true
-                                }));
-                                continue;
+                            // for a slow first load instead of silently discarding audio, but
+                            // only until the first timeout - after that, drop immediately.
+                            match ensure_model_ready(
+                                || engine_clone.is_model_loaded(),
+                                worker_id,
+                                &model_unavailable_clone,
+                                MODEL_LOAD_WAIT_MS,
+                            )
+                            .await
+                            {
+                                ModelReadiness::Ready => {}
+                                ModelReadiness::Unavailable { first_failure } => {
+                                    chunks_dropped_clone.fetch_add(1, Ordering::SeqCst);
+                                    if first_failure {
+                                        error!(
+                                            "❌ Worker {}: model still not loaded after {}ms - audio chunk {} could not be transcribed. Remaining chunks will be dropped without waiting until the model loads.",
+                                            worker_id, MODEL_LOAD_WAIT_MS, chunk.chunk_id
+                                        );
+                                        // Emitted once per failure episode; per-chunk drops
+                                        // are logged below instead of re-toasting the user.
+                                        let _ = app_clone.emit("transcription-error", serde_json::json!({
+                                            "error": "Speech recognition model is not loaded",
+                                            "userMessage": "Some audio could not be transcribed because the speech recognition model was not loaded.",
+                                            "actionable": true
+                                        }));
+                                    } else {
+                                        warn!(
+                                            "⏭️ Worker {}: model still unavailable - dropping audio chunk {} immediately",
+                                            worker_id, chunk.chunk_id
+                                        );
+                                    }
+                                    continue;
+                                }
                             }
 
                             let chunk_timestamp = chunk.timestamp;
@@ -298,11 +364,19 @@ pub fn start_transcription_task<R: Runtime>(
                                         TranscriptionError::ModelNotLoaded => {
                                             error!("Worker {}: model unloaded during transcription - chunk audio was lost", worker_id);
                                             chunks_dropped_clone.fetch_add(1, Ordering::SeqCst);
-                                            let _ = app_clone.emit("transcription-error", serde_json::json!({
-                                                "error": "Speech recognition model was unloaded during transcription",
-                                                "userMessage": "Some audio could not be transcribed because the speech recognition model was unloaded.",
-                                                "actionable": true
-                                            }));
+                                            // Latch the same give-up flag: the next chunk then
+                                            // fails fast instead of opening a fresh 15s wait, and
+                                            // the user sees one toast, not one per chunk. The flag
+                                            // clears itself if the model comes back.
+                                            let first_failure = !model_unavailable_clone
+                                                .swap(true, Ordering::SeqCst);
+                                            if first_failure {
+                                                let _ = app_clone.emit("transcription-error", serde_json::json!({
+                                                    "error": "Speech recognition model was unloaded during transcription",
+                                                    "userMessage": "Some audio could not be transcribed because the speech recognition model was unloaded.",
+                                                    "actionable": true
+                                                }));
+                                            }
                                             continue;
                                         }
                                         _ => {
@@ -672,4 +746,102 @@ fn format_recording_time(seconds: f64) -> String {
     let secs = total_seconds % 60;
 
     format!("[{:02}:{:02}]", minutes, secs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicUsize;
+
+    const TEST_WAIT_MS: u64 = 15_000;
+
+    /// Model never loads: the first chunk waits the full timeout and reports the first
+    /// failure; every later chunk drops immediately with no further UI error.
+    #[tokio::test(start_paused = true)]
+    async fn latches_after_first_timeout_and_drops_later_chunks_immediately() {
+        let gave_up = AtomicBool::new(false);
+        let polls = AtomicUsize::new(0);
+        let never_loaded = || {
+            polls.fetch_add(1, Ordering::SeqCst);
+            async { false }
+        };
+
+        let start = tokio::time::Instant::now();
+        let first = ensure_model_ready(never_loaded, 0, &gave_up, TEST_WAIT_MS).await;
+        let first_elapsed = start.elapsed();
+
+        assert_eq!(first, ModelReadiness::Unavailable { first_failure: true });
+        assert!(
+            first_elapsed >= tokio::time::Duration::from_millis(TEST_WAIT_MS),
+            "first chunk should still wait out a slow model load, waited {:?}",
+            first_elapsed
+        );
+
+        let polls_after_first = polls.load(Ordering::SeqCst);
+        let start = tokio::time::Instant::now();
+        for _ in 0..40 {
+            assert_eq!(
+                ensure_model_ready(never_loaded, 0, &gave_up, TEST_WAIT_MS).await,
+                ModelReadiness::Unavailable {
+                    first_failure: false
+                },
+                "only the first timeout may report first_failure"
+            );
+        }
+        assert_eq!(
+            start.elapsed(),
+            tokio::time::Duration::ZERO,
+            "latched worker must not wait again per chunk"
+        );
+        assert_eq!(
+            polls.load(Ordering::SeqCst) - polls_after_first,
+            40,
+            "each latched chunk costs exactly one cheap liveness check"
+        );
+    }
+
+    /// A model that is already loaded is used straight away.
+    #[tokio::test(start_paused = true)]
+    async fn ready_without_waiting_when_model_is_loaded() {
+        let gave_up = AtomicBool::new(false);
+        let start = tokio::time::Instant::now();
+
+        let result = ensure_model_ready(|| async { true }, 0, &gave_up, TEST_WAIT_MS).await;
+
+        assert_eq!(result, ModelReadiness::Ready);
+        assert_eq!(start.elapsed(), tokio::time::Duration::ZERO);
+        assert!(!gave_up.load(Ordering::SeqCst));
+    }
+
+    /// A slow first load still succeeds: the worker waits inside the timeout window.
+    #[tokio::test(start_paused = true)]
+    async fn waits_for_a_slow_first_model_load() {
+        let gave_up = AtomicBool::new(false);
+        let calls = AtomicUsize::new(0);
+        // Not loaded for the first few polls, then loaded.
+        let slow_load = || {
+            let loaded = calls.fetch_add(1, Ordering::SeqCst) >= 5;
+            async move { loaded }
+        };
+
+        let result = ensure_model_ready(slow_load, 0, &gave_up, TEST_WAIT_MS).await;
+
+        assert_eq!(result, ModelReadiness::Ready);
+        assert!(!gave_up.load(Ordering::SeqCst));
+    }
+
+    /// If the model shows up after the worker gave up, the latch clears and transcription
+    /// resumes for the rest of the session.
+    #[tokio::test(start_paused = true)]
+    async fn clears_latch_when_model_becomes_available_later() {
+        let gave_up = AtomicBool::new(true);
+
+        let result = ensure_model_ready(|| async { true }, 0, &gave_up, TEST_WAIT_MS).await;
+
+        assert_eq!(result, ModelReadiness::Ready);
+        assert!(
+            !gave_up.load(Ordering::SeqCst),
+            "latch must clear so a later unload gets its own wait and error"
+        );
+    }
 }
