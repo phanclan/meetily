@@ -3095,3 +3095,112 @@ test('a genuinely failed start surfaces the error and releases the next request'
   assert.equal(f.statuses.at(-1), recordingStatus.STARTING);
   f.runner.unmount();
 });
+
+// Tauri drops events with no listener attached, so the transcript provider's listeners
+// must outlive the meeting id that `recording-started` hands them.
+function transcriptProviderFixture() {
+  const transcriptListeners = [], startedListeners = [], stoppedListeners = [];
+  const removed = [], savedTranscripts = [], metadataReads = [], metadataWrites = [];
+  const sessionStorage = storage();
+  // Stable identities, matching the real useRecordingTitle callbacks.
+  const title = { meetingTitle: 'Synthetic call', setMeetingTitle: noop, beginSession: noop,
+    syncMeetingTitle: async load => { await load(); } };
+  const runner = hookRunner(path.join(root, 'src/contexts/TranscriptContext.tsx'), 'TranscriptProvider', {
+    '@/types': {},
+    sonner: { toast: { success: noop, error: noop } },
+    './RecordingStateContext': { useRecordingState: () => ({ isRecording: false }) },
+    '@/hooks/useRecordingTitle': { useRecordingTitle: () => title },
+    '@/lib/liveMeetingFolder': { bindRecordingFolder: noop },
+    '@tauri-apps/api/core': { invoke: async () => '' },
+    '@/services/transcriptService': { transcriptService: {
+      onTranscriptUpdate: async handler => { transcriptListeners.push(handler); return () => removed.push('transcript'); },
+      getTranscriptHistory: async () => [],
+    } },
+    '@/services/recordingService': { recordingService: {
+      onRecordingStarted: async handler => { startedListeners.push(handler); return () => removed.push('started'); },
+      onRecordingStopped: async handler => { stoppedListeners.push(handler); return () => removed.push('stopped'); },
+      getRecordingMeetingName: async () => 'Synthetic call',
+      getMeetingSession: async () => null,
+    } },
+    '@/services/indexedDBService': { indexedDBService: {
+      init: async () => {},
+      saveMeetingMetadata: async metadata => metadataWrites.push(metadata),
+      getMeetingMetadata: async id => { metadataReads.push(id); return { meetingId: id }; },
+      saveTranscript: async (meetingId, update) => savedTranscripts.push([meetingId, update.sequence_id]),
+      markMeetingSaved: async () => {},
+    } },
+  }, { sessionStorage, alert: noop });
+  let clock = 0;
+  return {
+    runner, removed, savedTranscripts, metadataReads, metadataWrites,
+    transcriptListeners, startedListeners, stoppedListeners,
+    render: () => runner.render({ children: null }).props.value,
+    meetingId: () => sessionStorage.getItem('indexeddb_current_meeting_id'),
+    startRecording: () => startedListeners.at(-1)(),
+    stopRecording: payload => stoppedListeners.at(-1)(payload),
+    emit: (text, sequenceId) => transcriptListeners.at(-1)({
+      text, sequence_id: sequenceId, timestamp: `00:00:0${++clock}`, is_partial: false, confidence: 1,
+      chunk_start_time: sequenceId, audio_start_time: sequenceId, audio_end_time: sequenceId + 1, duration: 1,
+    }),
+  };
+}
+// `meeting-${Date.now()}` needs the wall clock to advance between sessions.
+const nextMillisecond = () => new Promise(resolve => setTimeout(resolve, 2));
+
+test('the transcript listener stays mounted while recording starts and sees the new meeting id', async () => {
+  const f = transcriptProviderFixture();
+  f.render(); await settle();
+  assert.equal(f.transcriptListeners.length, 1, 'The listener is registered before any recording exists');
+  const handler = f.transcriptListeners[0];
+
+  await f.startRecording();
+  const meetingId = f.meetingId();
+  assert.match(meetingId, /^meeting-\d+$/);
+
+  // Emitted in the window the old code spent tearing down and re-awaiting listen().
+  f.emit('First words', 1);
+  await settle();
+
+  assert.deepEqual(f.savedTranscripts, [[meetingId, 1]],
+    'The handler must read the meeting id set after it was registered');
+
+  const state = f.render(); await settle();
+  // hookRunner may wrap arrays; compare plain values rather than identity-sensitive deepEqual.
+  assert.equal(state.transcripts.map(transcript => transcript.text).join('\n'), 'First words');
+  assert.equal(state.currentMeetingId, meetingId);
+  assert.equal(f.transcriptListeners.length, 1, 'A meeting id change must not re-register the transcript listener');
+  assert.equal(f.transcriptListeners[0], handler);
+  assert.equal(f.startedListeners.length, 1);
+  assert.equal(f.stoppedListeners.length, 1);
+  assert.deepEqual(f.removed, [], 'No listener may be torn down as recording begins');
+  f.runner.unmount();
+});
+
+test('lifecycle handlers follow the live meeting id across consecutive sessions', async () => {
+  const f = transcriptProviderFixture();
+  f.render(); await settle();
+
+  await f.startRecording();
+  const first = f.meetingId();
+  f.emit('First session', 1); await settle();
+  await f.stopRecording({ folder_path: '/synthetic/first' });
+  assert.deepEqual(f.metadataReads, [first]);
+  assert.equal(f.metadataWrites.at(-1).folderPath, '/synthetic/first');
+
+  f.render(); await settle();
+  await nextMillisecond();
+  await f.startRecording();
+  const second = f.meetingId();
+  assert.notEqual(second, first);
+
+  // Sequence ids restart at 1 in Rust; the retained buffer must not swallow the new session.
+  f.emit('Second session', 1); await settle();
+  assert.deepEqual(f.savedTranscripts, [[first, 1], [second, 1]]);
+  assert.equal(f.render().transcripts.map(transcript => transcript.text).join('\n'), 'Second session');
+
+  await f.stopRecording({ folder_path: '/synthetic/second' });
+  assert.deepEqual(f.metadataReads, [first, second]);
+  assert.equal(f.transcriptListeners.length, 1);
+  assert.deepEqual(f.removed, []);
+  f.runner.unmount();
+});
