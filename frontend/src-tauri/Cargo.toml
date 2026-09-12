@@ -7,8 +7,13 @@ license = "MIT"
 repository = "https://github.com/Zackriya-Solutions/meeting-minutes"
 edition = "2021"
 rust-version = "1.77"
+autobins = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[[bin]]
+name = "Afterword"
+path = "src/main.rs"
 
 [lib]
 name = "app_lib"

@@ -2,9 +2,12 @@
   "productName": "Afterword",
   "identifier": "com.meetnola.tester",
   "plugins": {
-    "updater": { "endpoints": [] }
+    "updater": {
+      "endpoints": []
+    }
   },
   "bundle": {
     "createUpdaterArtifacts": false
-  }
+  },
+  "mainBinaryName": "Afterword"
 }

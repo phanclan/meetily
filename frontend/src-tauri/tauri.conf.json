@@ -125,5 +125,6 @@
                 "https://github.com/Zackriya-Solutions/meeting-minutes/releases/latest/download/latest.json"
             ]
         }
-    }
+    },
+    "mainBinaryName": "Afterword"
 }
