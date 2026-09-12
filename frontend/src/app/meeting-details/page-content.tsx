@@ -18,6 +18,7 @@ import {
   Loader2,
   Save,
   Search,
+  Trash2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Summary } from '@/types';
@@ -53,6 +54,7 @@ import { useSavedMeetingChat } from '@/hooks/useSavedMeetingChat';
 import { useConfig } from '@/contexts/ConfigContext';
 import type { ModelConfig } from '@/components/ModelSettingsModal';
 import { EnhanceNotesCta } from '@/components/EnhanceNotesCta';
+import { afterwordInvoke } from '@/afterword/ipc';
 
 const Editor = dynamic(() => import('@/components/BlockNoteEditor/Editor'), { ssr: false });
 
@@ -297,6 +299,20 @@ export default function PageContent({
     }
   };
 
+  const handleMoveToTrash = async () => {
+    try {
+      await flushNoteChanges();
+      await afterwordInvoke('trash_meeting', { meetingId: meeting.id });
+      toast.success('Note moved to Trash');
+      router.push(backHref);
+    } catch (error) {
+      toast.error('Could not move note to Trash', {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+
+
   const handleRecipe = (recipe: Recipe) => {
     if (!chatReady || !notes.isReady || isChatLoading) return;
     setIsAiComposerOpen(true);
@@ -389,6 +405,7 @@ export default function PageContent({
                 <DropdownMenuItem onSelect={() => setIsFolderDialogOpen(true)}><FolderOpen className="mr-2 h-4 w-4" />Organize note</DropdownMenuItem>
                 <DropdownMenuItem disabled={isSummaryGenerating} onSelect={() => setIsPreviousSummaryOpen(true)}>Previous enhancement</DropdownMenuItem>
                 <DropdownMenuItem disabled={!notes.isReady || isNotesEmpty || !meetingData.aiSummary || isSummaryGenerating} onSelect={() => setIsNotesCoverageOpen(true)}>Review written-note coverage</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => void handleMoveToTrash()} className="text-red-600 focus:bg-red-50 focus:text-red-700"><Trash2 className="mr-2 h-4 w-4" />Move to Trash</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
             <NoteSaveStatus saving={notes.isSaving || meetingData.isSaving || meetingData.isSummarySaving || meetingData.titleSave.status === 'saving'} dirty={meetingData.isSummaryDirty} failed={notes.saveError || meetingData.summarySaveError || meetingData.titleSave.status === 'error'} onRetry={() => { if (meetingData.summarySaveError) void meetingData.saveAllChanges(); else void flushNoteChanges().catch(() => {}); }} />
