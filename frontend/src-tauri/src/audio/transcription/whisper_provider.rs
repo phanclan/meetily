@@ -24,9 +24,11 @@ impl TranscriptionProvider for WhisperProvider {
         audio: Vec<f32>,
         language: Option<String>,
     ) -> std::result::Result<TranscriptResult, TranscriptionError> {
+        // TranscriptionProvider is the realtime provider abstraction (see
+        // parakeet_provider), so this uses the live greedy path.
         match self
             .engine
-            .transcribe_audio_with_confidence(audio, language)
+            .transcribe_live_with_confidence(audio, language)
             .await
         {
             Ok((text, confidence, is_partial)) => Ok(TranscriptResult {

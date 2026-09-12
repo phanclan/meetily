@@ -601,8 +601,10 @@ async fn transcribe_chunk_with_provider<R: Runtime>(
             // Get language preference from global state
             let language = crate::get_language_preference_internal();
 
+            // Live path: greedy decode + reused whisper state. Retranscription and
+            // import stay on transcribe_audio_with_confidence (beam search).
             match whisper_engine
-                .transcribe_audio_with_confidence(speech_samples, language)
+                .transcribe_live_with_confidence(speech_samples, language)
                 .await
             {
                 Ok((text, confidence, is_partial)) => {
