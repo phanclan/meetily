@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useFolderRead } from '@/hooks/useNoteFolders';
-import { meetnolaInvoke } from '@/meetnola/ipc';
+import { afterwordInvoke } from '@/afterword/ipc';
 
 type TrashedNote = { id: string; title: string; trashedAt: string };
 type TrashPage = { meetings: TrashedNote[]; hasMore: boolean };
@@ -31,7 +31,7 @@ export function TrashDialog({ open, onOpenChange, onChanged }: {
     if (busyRef.current) return;
     busyRef.current = true; setBusy(true); setError(null);
     try {
-      await meetnolaInvoke(permanently ? 'delete_trashed_meeting' : 'restore_trashed_meeting', { meetingId: note.id });
+      await afterwordInvoke(permanently ? 'delete_trashed_meeting' : 'restore_trashed_meeting', { meetingId: note.id });
       setDeleting(null);
       page.retry();
       onChanged();

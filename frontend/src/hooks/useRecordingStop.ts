@@ -10,7 +10,7 @@ import { transcriptService } from '@/services/transcriptService';
 import Analytics from '@/lib/analytics';
 import { readLiveMeetingNotes, clearLiveMeetingNotes } from '@/lib/liveMeetingNotes';
 import { blocksToPlainText } from '@/lib/meetingNotes';
-import { saveMeetingNotes } from '@/meetnola/ipc';
+import { saveMeetingNotes } from '@/afterword/ipc';
 import { clearLiveMeetingFolder, saveLiveMeetingFolder } from '@/lib/liveMeetingFolder';
 
 // The quick-note page and global tray handler both use this hook.

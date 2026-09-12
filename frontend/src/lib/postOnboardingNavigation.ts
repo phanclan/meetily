@@ -1,10 +1,10 @@
 'use client';
 
 import { invoke } from '@tauri-apps/api/core';
-import { isMeetnola } from '@/flavor';
+import { isAfterword } from '@/flavor';
 import {
-  MEETNOLA_GATEWAY_ENDPOINT,
-  MEETNOLA_SUMMARY_PROVIDER,
+  AFTERWORD_GATEWAY_ENDPOINT,
+  AFTERWORD_SUMMARY_PROVIDER,
 } from '@/constants/modelDefaults';
 
 const HOME_ROUTE = '/';
@@ -26,18 +26,18 @@ function normalizeProvider(config: ProviderConfig | null): string | null {
 
 export async function getPostOnboardingRoute(): Promise<string> {
   try {
-    if (isMeetnola) {
+    if (isAfterword) {
       const [summaryConfig, customConfig] = await Promise.all([
         invoke<ProviderConfig | null>('api_get_model_config').catch(() => null),
         invoke<CustomOpenAIConfig | null>('api_get_custom_openai_config').catch(() => null),
       ]);
 
       const usesGateway =
-        normalizeProvider(summaryConfig) === MEETNOLA_SUMMARY_PROVIDER ||
+        normalizeProvider(summaryConfig) === AFTERWORD_SUMMARY_PROVIDER ||
         (customConfig?.endpoint || '')
           .trim()
           .replace(/\/$/, '')
-          .toLowerCase() === MEETNOLA_GATEWAY_ENDPOINT.toLowerCase();
+          .toLowerCase() === AFTERWORD_GATEWAY_ENDPOINT.toLowerCase();
 
       if (usesGateway && !customConfig?.apiKey?.trim()) {
         return GATEWAY_SETUP_ROUTE;
@@ -63,6 +63,6 @@ export async function getPostOnboardingRoute(): Promise<string> {
     return HOME_ROUTE;
   } catch {
     // Safe fallback for first-launch issues.
-    return isMeetnola ? GATEWAY_SETUP_ROUTE : GROQ_SETUP_ROUTE;
+    return isAfterword ? GATEWAY_SETUP_ROUTE : GROQ_SETUP_ROUTE;
   }
 }

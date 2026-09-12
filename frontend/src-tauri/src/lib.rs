@@ -44,8 +44,8 @@ pub mod audio;
 pub mod config;
 pub mod console_utils;
 pub mod database;
-#[cfg(feature = "meetnola")]
-mod meetnola;
+#[cfg(feature = "afterword")]
+mod afterword;
 pub mod notifications;
 pub mod ollama;
 pub mod onboarding;
@@ -102,9 +102,9 @@ struct BuildInfo {
 #[tauri::command]
 fn get_build_info() -> BuildInfo {
     let version = env!("CARGO_PKG_VERSION").to_string();
-    let build_id = env!("MEETNOLA_BUILD_ID").to_string();
-    let channel = env!("MEETNOLA_BUILD_CHANNEL").to_string();
-    let flavor = env!("MEETNOLA_BUILD_FLAVOR").to_string();
+    let build_id = env!("AFTERWORD_BUILD_ID").to_string();
+    let channel = env!("AFTERWORD_BUILD_CHANNEL").to_string();
+    let flavor = env!("AFTERWORD_BUILD_FLAVOR").to_string();
 
     let flavor_label = "Afterword";
 
@@ -543,9 +543,9 @@ pub fn run() {
         }));
     }
 
-    #[cfg(feature = "meetnola")]
+    #[cfg(feature = "afterword")]
     {
-        builder = builder.plugin(meetnola::init());
+        builder = builder.plugin(afterword::init());
     }
 
     builder
@@ -693,9 +693,9 @@ pub fn run() {
                 log::warn!("Failed to resolve resource directory for templates");
             }
 
-            // Meetnola lifecycle (call detection + optional automation HTTP API)
-            #[cfg(feature = "meetnola")]
-            meetnola::start_after_database(_app.handle());
+            // Afterword lifecycle (call detection + optional automation HTTP API)
+            #[cfg(feature = "afterword")]
+            afterword::start_after_database(_app.handle());
 
             #[cfg(target_os = "macos")]
             app_quit::install_quit_menu(_app.handle())?;

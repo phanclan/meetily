@@ -3,8 +3,8 @@
 /// Centralized definitions for default models and settings.
 /// Used across database initialization, import, and retranscription.
 ///
-/// Meetnola feature builds flip summary → Vercel AI Gateway (`custom-openai`)
-/// and live transcription → local Parakeet. See `meetnola::defaults`.
+/// Afterword feature builds flip summary → Vercel AI Gateway (`custom-openai`)
+/// and live transcription → local Parakeet. See `afterword::defaults`.
 
 /// Default Whisper model for transcription when no preference is configured.
 /// This is the recommended balance of accuracy and speed.
@@ -21,27 +21,27 @@ pub const DEFAULT_GROQ_SUMMARY_MODEL: &str = "openai/gpt-oss-120b";
 pub const DEFAULT_PARAKEET_MODEL: &str = "parakeet-tdt-0.6b-v3-int8";
 
 /// Default summary provider for a fresh install.
-#[cfg(feature = "meetnola")]
+#[cfg(feature = "afterword")]
 pub const DEFAULT_SUMMARY_PROVIDER: &str = "custom-openai";
-#[cfg(not(feature = "meetnola"))]
+#[cfg(not(feature = "afterword"))]
 pub const DEFAULT_SUMMARY_PROVIDER: &str = "groq";
 
 /// Default live-transcription provider for a fresh install.
-#[cfg(feature = "meetnola")]
+#[cfg(feature = "afterword")]
 pub const DEFAULT_TRANSCRIPT_PROVIDER: &str = "parakeet";
-#[cfg(not(feature = "meetnola"))]
+#[cfg(not(feature = "afterword"))]
 pub const DEFAULT_TRANSCRIPT_PROVIDER: &str = "groq";
 
 /// Default summary model id for a fresh install.
-#[cfg(feature = "meetnola")]
+#[cfg(feature = "afterword")]
 pub const DEFAULT_SUMMARY_MODEL: &str = "openai/gpt-4o-mini";
-#[cfg(not(feature = "meetnola"))]
+#[cfg(not(feature = "afterword"))]
 pub const DEFAULT_SUMMARY_MODEL: &str = DEFAULT_GROQ_SUMMARY_MODEL;
 
 /// Default live-transcription model id for a fresh install.
-#[cfg(feature = "meetnola")]
+#[cfg(feature = "afterword")]
 pub const DEFAULT_TRANSCRIPT_MODEL: &str = DEFAULT_PARAKEET_MODEL;
-#[cfg(not(feature = "meetnola"))]
+#[cfg(not(feature = "afterword"))]
 pub const DEFAULT_TRANSCRIPT_MODEL: &str = DEFAULT_GROQ_TRANSCRIPT_MODEL;
 
 /// Whisper model catalog with metadata for all supported models.

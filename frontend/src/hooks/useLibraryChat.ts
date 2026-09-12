@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePersistentChat } from './useSavedMeetingChat';
-import { meetnolaInvoke } from '@/meetnola/ipc';
+import { afterwordInvoke } from '@/afterword/ipc';
 import { createWriteQueue, registerBeforeQuit } from '@/lib/pendingWrites';
 import type { LibraryPeriod, LibrarySourceScope } from '@/lib/libraryAnswerContext';
 
@@ -29,7 +29,7 @@ export function useLibraryChat(chatId: string) {
     if (signature === saved.current) return queue.flush();
     if (owner.current === chatId) setSaving(true);
     try {
-      await queue.enqueue(() => meetnolaInvoke<void>('save_library_chat_settings', { chatId, draft, period, sourceScope }));
+      await queue.enqueue(() => afterwordInvoke<void>('save_library_chat_settings', { chatId, draft, period, sourceScope }));
       if (owner.current === chatId) { saved.current = signature; setSettingsError(null); }
     } catch (error) {
       if (owner.current === chatId) setSettingsError(`Draft not saved: ${String(error)}`);
@@ -44,7 +44,7 @@ export function useLibraryChat(chatId: string) {
     void (async () => {
       try {
         await queue.flush();
-        const result = await meetnolaInvoke<Settings>('get_library_chat_settings', { chatId });
+        const result = await afterwordInvoke<Settings>('get_library_chat_settings', { chatId });
         if (cancelled || owner.current !== chatId) return;
         if (typeof result.draft !== 'string' || !['all', '7', '30', '90'].includes(result.period) || typeof result.archived !== 'boolean' || !['keywords', 'recent'].includes(result.sourceScope)) throw new Error('Invalid saved conversation settings');
         saved.current = JSON.stringify({ draft: result.draft, period: result.period, sourceScope: result.sourceScope });

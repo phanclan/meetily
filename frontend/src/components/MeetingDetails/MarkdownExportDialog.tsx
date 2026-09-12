@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { meetnolaInvoke } from '@/meetnola/ipc';
+import { afterwordInvoke } from '@/afterword/ipc';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { exportSavedMeeting } from '@/lib/exportSavedMeeting';
@@ -20,7 +20,7 @@ export function MarkdownExportDialog({ meetingId, open, onOpenChange, beforeExpo
     const current = ++generation.current;
     if (open) {
       setLoading(true); setError(''); setExported('');
-      void meetnolaInvoke<string | null>('get_export_folder').then(value => {
+      void afterwordInvoke<string | null>('get_export_folder').then(value => {
         if (current === generation.current) setFolder(value);
       }).catch(reason => { if (current === generation.current) setError(String(reason)); })
         .finally(() => { if (current === generation.current) setLoading(false); });
@@ -34,7 +34,7 @@ export function MarkdownExportDialog({ meetingId, open, onOpenChange, beforeExpo
     const current = generation.current;
     try {
       if (choose) {
-        const selected = await meetnolaInvoke<string | null>('choose_export_folder');
+        const selected = await afterwordInvoke<string | null>('choose_export_folder');
         if (selected && current === generation.current) setFolder(selected);
       } else {
         const path = await exportSavedMeeting(meetingId, beforeExport);

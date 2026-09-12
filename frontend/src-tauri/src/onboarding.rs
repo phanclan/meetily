@@ -2,12 +2,12 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Runtime};
 use tauri_plugin_store::StoreExt;
 use log::{info, warn};
-#[cfg(not(feature = "meetnola"))]
+#[cfg(not(feature = "afterword"))]
 use log::error;
 use anyhow::Result;
 
 use crate::state::AppState;
-#[cfg(not(feature = "meetnola"))]
+#[cfg(not(feature = "afterword"))]
 use crate::database::repositories::setting::SettingsRepository;
 
 
@@ -175,17 +175,17 @@ pub async fn complete_onboarding<R: Runtime>(
 ) -> Result<(), String> {
     let pool = state.db_manager.pool();
 
-    #[cfg(feature = "meetnola")]
+    #[cfg(feature = "afterword")]
     {
-        // Meetnola: local Parakeet STT + Vercel AI Gateway summaries (CustomOpenAI).
-        // Ignore frontend-supplied Groq model ids on Meetnola builds; use Gateway default
+        // Afterword: local Parakeet STT + Vercel AI Gateway summaries (CustomOpenAI).
+        // Ignore frontend-supplied Groq model ids on Afterword builds; use Gateway default
         // unless the caller already passed a Gateway-style model id.
         let _ = model;
-        info!("Completing onboarding with Meetnola defaults (local STT + AI Gateway)");
-        crate::meetnola::defaults::apply_fresh_install_defaults(pool).await?;
+        info!("Completing onboarding with Afterword defaults (local STT + AI Gateway)");
+        crate::afterword::defaults::apply_fresh_install_defaults(pool).await?;
     }
 
-    #[cfg(not(feature = "meetnola"))]
+    #[cfg(not(feature = "afterword"))]
     {
         let summary_model = if model.trim().is_empty() {
             crate::config::DEFAULT_SUMMARY_MODEL.to_string()

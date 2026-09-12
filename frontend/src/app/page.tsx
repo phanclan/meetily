@@ -10,7 +10,7 @@ import { HomeDashboard } from '@/app/_components/HomeDashboard';
 import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
 import { TrashDialog } from '@/components/TrashDialog';
-import { meetnolaInvoke } from '@/meetnola/ipc';
+import { afterwordInvoke } from '@/afterword/ipc';
 import { SettingsModals } from './_components/SettingsModal';
 import { useModalState, type ModalType } from '@/hooks/useModalState';
 import { useTranscriptRecovery } from '@/hooks/useTranscriptRecovery';
@@ -51,7 +51,7 @@ export default function Home() {
 
   const handleDeleteMeeting = async (meetingId: string) => {
     try {
-      await meetnolaInvoke('trash_meeting', { meetingId });
+      await afterwordInvoke('trash_meeting', { meetingId });
       await refetchMeetings();
       refreshNoteFolders();
       toast.success('Note moved to Trash', { action: { label: 'Open Trash', onClick: () => setShowTrash(true) } });

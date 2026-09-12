@@ -4,7 +4,7 @@ import Image from 'next/image';
 import AnalyticsConsentSwitch from "./AnalyticsConsentSwitch";
 import { UpdateDialog } from "./UpdateDialog";
 import { updateService, UpdateInfo } from '@/services/updateService';
-import { isMeetnola } from '@/flavor';
+import { isAfterword } from '@/flavor';
 import { Button } from './ui/button';
 import { Loader2, CheckCircle2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -65,7 +65,7 @@ export function About() {
                     {buildInfo ? buildInfo.displayName : 'Afterword'}
                 </span>
                 <p className="text-medium text-gray-600 mt-1">
-                    {isMeetnola
+                    {isAfterword
                       ? 'Live transcription stays on-device; summaries and Enhance can use Vercel AI Gateway when you add a key.'
                       : 'Real-time notes and summaries that never leave your machine.'}
                 </p>
@@ -103,7 +103,7 @@ export function About() {
                 <div className="grid grid-cols-2 gap-2">
                     <div className="bg-gray-50 rounded p-3 hover:bg-gray-100 transition-colors">
                         <h3 className="font-bold text-sm text-gray-900 mb-1">Privacy-first</h3>
-                        <p className="text-xs text-gray-600 leading-relaxed">{isMeetnola ? 'Transcription stays local. Cloud summaries only run when you configure Vercel AI Gateway.' : 'Your data & AI processing workflow can now stay within your premise. No cloud, no leaks.'}</p>
+                        <p className="text-xs text-gray-600 leading-relaxed">{isAfterword ? 'Transcription stays local. Cloud summaries only run when you configure Vercel AI Gateway.' : 'Your data & AI processing workflow can now stay within your premise. No cloud, no leaks.'}</p>
                     </div>
                     <div className="bg-gray-50 rounded p-3 hover:bg-gray-100 transition-colors">
                         <h3 className="font-bold text-sm text-gray-900 mb-1">Use Any Model</h3>

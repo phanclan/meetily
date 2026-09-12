@@ -22,7 +22,9 @@ export function BuildIdentityBadge() {
     };
   }, []);
 
-  if (!buildInfo || buildInfo.flavor !== 'meetnola-tester') {
+  // `meetnola-tester` is the legacy flavor label from before the Afterword rename.
+  const testerFlavors = ['afterword-tester', 'meetnola-tester'];
+  if (!buildInfo || !testerFlavors.includes(buildInfo.flavor)) {
     return null;
   }
 

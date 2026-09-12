@@ -41,7 +41,7 @@ console.log(''); // Empty line for spacing
 const platform = os.platform();
 const env = { ...process.env };
 const testerConfig = extraArgs.some(
-  (arg) => typeof arg === 'string' && arg.includes('tauri.meetnola.tester.conf.json')
+  (arg) => typeof arg === 'string' && arg.includes('tauri.afterword.tester.conf.json')
 );
 
 function timestampBuildId() {
@@ -70,16 +70,19 @@ function gitShortSha() {
 
 const shortSha = gitShortSha();
 const defaultBuildId = [timestampBuildId(), shortSha].filter(Boolean).join('-');
-env.MEETNOLA_BUILD_ID = env.MEETNOLA_BUILD_ID || defaultBuildId;
-env.MEETNOLA_BUILD_CHANNEL = env.MEETNOLA_BUILD_CHANNEL || (command === 'build' ? 'bundle' : 'dev');
-env.MEETNOLA_BUILD_FLAVOR = env.MEETNOLA_BUILD_FLAVOR || (testerConfig ? 'meetnola-tester' : 'meetily');
+// AFTERWORD_BUILD_* is primary; MEETNOLA_BUILD_* is honored as a legacy fallback.
+env.AFTERWORD_BUILD_ID = env.AFTERWORD_BUILD_ID || env.MEETNOLA_BUILD_ID || defaultBuildId;
+env.AFTERWORD_BUILD_CHANNEL =
+  env.AFTERWORD_BUILD_CHANNEL || env.MEETNOLA_BUILD_CHANNEL || (command === 'build' ? 'bundle' : 'dev');
+env.AFTERWORD_BUILD_FLAVOR =
+  env.AFTERWORD_BUILD_FLAVOR || env.MEETNOLA_BUILD_FLAVOR || (testerConfig ? 'afterword-tester' : 'meetily');
 
-// Frontend flavor gate (Meetnola ipc / UI extensions)
+// Frontend flavor gate (Afterword ipc / UI extensions)
 if (testerConfig) {
-  env.NEXT_PUBLIC_FLAVOR = env.NEXT_PUBLIC_FLAVOR || 'meetnola';
+  env.NEXT_PUBLIC_FLAVOR = env.NEXT_PUBLIC_FLAVOR || 'afterword';
 }
 
-console.log(`🏷️  Build identity: ${env.MEETNOLA_BUILD_FLAVOR} ${env.MEETNOLA_BUILD_CHANNEL} ${env.MEETNOLA_BUILD_ID}`);
+console.log(`🏷️  Build identity: ${env.AFTERWORD_BUILD_FLAVOR} ${env.AFTERWORD_BUILD_CHANNEL} ${env.AFTERWORD_BUILD_ID}`);
 console.log('');
 
 if (platform === 'linux' && feature === 'cuda') {
@@ -95,13 +98,13 @@ if (extraArgs.length > 0) {
   tauriCmd += ` ${extraArgs.map((arg) => JSON.stringify(arg)).join(' ')}`;
   console.log(`🧩 Extra Tauri args: ${extraArgs.join(' ')}`);
 }
-// Meetnola tester builds always enable the meetnola Cargo feature.
+// Afterword tester builds always enable the afterword Cargo feature.
 const featureList = [];
 if (feature && feature !== 'none') {
   featureList.push(feature);
 }
 if (testerConfig) {
-  featureList.push('meetnola');
+  featureList.push('afterword');
 }
 if (featureList.length > 0) {
   const featuresArg = featureList.join(',');

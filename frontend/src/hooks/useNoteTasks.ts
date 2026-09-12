@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { meetnolaInvoke } from '@/meetnola/ipc';
+import { afterwordInvoke } from '@/afterword/ipc';
 import { setNoteTaskChecked, type NoteTask, type NoteTaskPage } from '@/lib/noteTasks';
 
 export function useNoteTasks(checked: boolean, folderId: string) {
@@ -16,7 +16,7 @@ export function useNoteTasks(checked: boolean, folderId: string) {
     const token = ++request.current;
     reading.current = true; setLoading(true); setError(null);
     try {
-      const result = await meetnolaInvoke<NoteTaskPage>('list_note_tasks', { checked, folderId: folderId || null, offset });
+      const result = await afterwordInvoke<NoteTaskPage>('list_note_tasks', { checked, folderId: folderId || null, offset });
       if (token !== request.current) return;
       setTasks(previous => offset ? [...previous, ...result.tasks] : result.tasks);
       setHasMore(result.hasMore);

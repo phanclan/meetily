@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { cancelLiveQuery, liveQuery, prepareLiveQuery } from '@/meetnola/ipc';
+import { cancelLiveQuery, liveQuery, prepareLiveQuery } from '@/afterword/ipc';
 
 export interface NotesCoverageSnapshot { notes: string; draft: string }
 export interface NotesCoverageFinding { explanation: string; evidence: { source: string; quote: string }[] }

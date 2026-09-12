@@ -1,6 +1,6 @@
-//! Meetnola automation HTTP API — DEVELOPMENT ONLY.
+//! Afterword automation HTTP API — DEVELOPMENT ONLY.
 //!
-//! Gated by Cargo feature `meetnola-automation` AND env `MEETILY_AUTOMATION=1`.
+//! Gated by Cargo feature `afterword-automation` AND env `MEETILY_AUTOMATION=1`.
 //! Binds to `127.0.0.1` only. Never enable in production/release tester without review.
 //!
 //! Security: all endpoints (including reads) require `Authorization: Bearer <token>`.
@@ -174,7 +174,7 @@ async fn put_transcript_config(
 }
 
 /// Start the automation HTTP server on the loopback interface.
-/// Call only when feature `meetnola-automation` is enabled and `MEETILY_AUTOMATION=1`.
+/// Call only when feature `afterword-automation` is enabled and `MEETILY_AUTOMATION=1`.
 pub async fn start(db_manager: DatabaseManager) {
     let port: u16 = std::env::var("MEETILY_AUTOMATION_PORT")
         .ok()

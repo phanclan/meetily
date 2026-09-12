@@ -392,7 +392,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
         saveTimeoutRef.current = undefined;
       }
 
-      // Defaults come from the backend (Meetnola: local STT + Gateway; Meetily: Groq-first).
+      // Defaults come from the backend (Afterword: local STT + Gateway; Meetily: Groq-first).
       await invoke('complete_onboarding', {
         model: selectedSummaryModel,
       });

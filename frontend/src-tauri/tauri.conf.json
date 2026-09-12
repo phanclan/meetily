@@ -72,7 +72,7 @@
                         "notification:allow-is-permission-granted",
                         "updater:default",
                         "process:default",
-                        "meetnola:default",
+                        "afterword:default",
                         {
                             "identifier": "fs:scope",
                             "allow": [

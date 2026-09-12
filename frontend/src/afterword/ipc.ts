@@ -1,12 +1,12 @@
 import { invoke, Channel } from '@tauri-apps/api/core'
 
 /**
- * Meetnola commands are registered on the internal Tauri plugin `meetnola`.
- * Invoke names are `plugin:meetnola|<command>` (not bare app commands).
+ * Afterword commands are registered on the internal Tauri plugin `afterword`.
+ * Invoke names are `plugin:afterword|<command>` (not bare app commands).
  */
-const PLUGIN = 'plugin:meetnola'
+const PLUGIN = 'plugin:afterword'
 
-export function meetnolaInvoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+export function afterwordInvoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   return invoke<T>(`${PLUGIN}|${command}`, args)
 }
 
@@ -15,7 +15,7 @@ export function appendFrontendLog(args: {
   message: string
   metadata?: unknown
 }): Promise<void> {
-  return meetnolaInvoke('append_frontend_log', args as Record<string, unknown>)
+  return afterwordInvoke('append_frontend_log', args as Record<string, unknown>)
 }
 
 export interface MeetingExchange {
@@ -24,11 +24,11 @@ export interface MeetingExchange {
 }
 
 export function prepareLiveQuery(): Promise<string> {
-  return meetnolaInvoke<string>('prepare_live_query')
+  return afterwordInvoke<string>('prepare_live_query')
 }
 
 export function cancelLiveQuery(requestId: string): Promise<void> {
-  return meetnolaInvoke('cancel_live_query', { requestId })
+  return afterwordInvoke('cancel_live_query', { requestId })
 }
 
 export function liveQuery(args: {
@@ -40,23 +40,23 @@ export function liveQuery(args: {
 }, onText?: (text: string) => void): Promise<string> {
   const onDelta = new Channel<string>()
   onDelta.onmessage = onText ?? (() => {})
-  return meetnolaInvoke<string>('live_query', { ...args, onDelta })
+  return afterwordInvoke<string>('live_query', { ...args, onDelta })
 }
 
 export function setCallDetectionEnabled(enabled: boolean): Promise<void> {
-  return meetnolaInvoke('set_call_detection_enabled', { enabled })
+  return afterwordInvoke('set_call_detection_enabled', { enabled })
 }
 
 export function getCallDetectionEnabled(): Promise<boolean> {
-  return meetnolaInvoke<boolean>('get_call_detection_enabled')
+  return afterwordInvoke<boolean>('get_call_detection_enabled')
 }
 
 export function startCallDetection(): Promise<void> {
-  return meetnolaInvoke('start_call_detection')
+  return afterwordInvoke('start_call_detection')
 }
 
 export function stopCallDetection(): Promise<void> {
-  return meetnolaInvoke('stop_call_detection')
+  return afterwordInvoke('stop_call_detection')
 }
 
 export function saveMeetingNotes(args: {
@@ -64,15 +64,15 @@ export function saveMeetingNotes(args: {
   notesMarkdown?: string | null
   notesJson?: string | null
 }): Promise<void> {
-  return meetnolaInvoke('save_meeting_notes', args as Record<string, unknown>)
+  return afterwordInvoke('save_meeting_notes', args as Record<string, unknown>)
 }
 
 export function getMeetingNotes<T = { notes_json?: string | null; notes_markdown?: string | null } | null>(
   meetingId: string
 ): Promise<T> {
-  return meetnolaInvoke<T>('get_meeting_notes', { meetingId })
+  return afterwordInvoke<T>('get_meeting_notes', { meetingId })
 }
 
 export function moveMeetingNotes(fromMeetingId: string, toMeetingId: string): Promise<void> {
-  return meetnolaInvoke('move_meeting_notes', { fromMeetingId, toMeetingId })
+  return afterwordInvoke('move_meeting_notes', { fromMeetingId, toMeetingId })
 }

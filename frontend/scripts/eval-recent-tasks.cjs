@@ -22,8 +22,8 @@ async function main() {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
   }).outputText;
   vm.runInNewContext(compiled, { module: loaded, exports: loaded.exports, require: name => {
-    if (name !== '@/meetnola/ipc') throw new Error(`Unexpected formatter dependency: ${name}`);
-    return { meetnolaInvoke: async command => {
+    if (name !== '@/afterword/ipc') throw new Error(`Unexpected formatter dependency: ${name}`);
+    return { afterwordInvoke: async command => {
       if (command !== 'get_recent_library_sources') throw new Error(`Unexpected retrieval: ${command}`);
       return { excerpts, totalMeetings: 1 };
     } };
@@ -35,16 +35,16 @@ async function main() {
     const { context } = await loaded.exports.loadLibraryAnswerContext(question, [], '7', 'recent');
     input.push({ id: item.id, context, question, claim: '', expected: item.expected });
   }
-  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'meetnola-task-eval-'));
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'afterword-task-eval-'));
   try {
     const inputPath = path.join(temporary, 'questions.json');
     fs.writeFileSync(inputPath, JSON.stringify(input));
     // Reuse the question/expected-answer report harness used by source claim checks.
-    const run = spawnSync('cargo', ['test', '--features', 'meetnola', '--lib', 'summary::quality_evals::live_summary_claim_checks', '--', '--exact', '--ignored', '--nocapture'], {
+    const run = spawnSync('cargo', ['test', '--features', 'afterword', '--lib', 'summary::quality_evals::live_summary_claim_checks', '--', '--exact', '--ignored', '--nocapture'], {
       cwd: path.join(frontend, 'src-tauri'), stdio: 'inherit', env: { ...process.env,
-        CARGO_TARGET_DIR: process.env.CARGO_TARGET_DIR || path.resolve(frontend, '../target/meetnola'),
-        MEETNOLA_CLAIM_EVAL_INPUT: inputPath,
-        MEETNOLA_EVAL_REPORT: process.env.MEETNOLA_EVAL_REPORT || path.join(os.tmpdir(), 'meetnola-task-quality.json'),
+        CARGO_TARGET_DIR: process.env.CARGO_TARGET_DIR || path.resolve(frontend, '../target/afterword'),
+        AFTERWORD_CLAIM_EVAL_INPUT: inputPath,
+        AFTERWORD_EVAL_REPORT: process.env.AFTERWORD_EVAL_REPORT || path.join(os.tmpdir(), 'afterword-task-quality.json'),
       },
     });
     if (run.error) throw run.error;

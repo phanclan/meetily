@@ -1,4 +1,4 @@
-import { meetnolaInvoke } from '@/meetnola/ipc';
+import { afterwordInvoke } from '@/afterword/ipc';
 import type { ChatMessage } from '@/hooks/useLiveMeetingChat';
 import type { MeetingAnswerContext } from './meetingAnswerContext';
 
@@ -45,7 +45,7 @@ export function buildLibraryAnswerContext(excerpts: LibraryExcerpt[], terms: str
 
 export async function loadLibraryAnswerContext(question: string, messages: ChatMessage[], period: LibraryPeriod, scope: LibrarySourceScope = 'keywords'): Promise<MeetingAnswerContext> {
   if (scope === 'recent') {
-    const result = await meetnolaInvoke<{ excerpts: LibraryExcerpt[]; totalMeetings: number }>('get_recent_library_sources', { sinceDays: period === 'all' ? null : Number(period) });
+    const result = await afterwordInvoke<{ excerpts: LibraryExcerpt[]; totalMeetings: number }>('get_recent_library_sources', { sinceDays: period === 'all' ? null : Number(period) });
     if (!result.excerpts.length) throw new Error('No saved notes or transcripts in this date range. Widen the date range or save a meeting first.');
     const { sources } = buildLibraryAnswerContext(result.excerpts, [], period);
     const count = new Set(sources.map(source => source.meetingId)).size;
@@ -54,6 +54,6 @@ export async function loadLibraryAnswerContext(question: string, messages: ChatM
   }
   const terms = librarySearchTerms(question, messages);
   if (!terms.length) throw new Error('Include a topic or name from your notes so I can find relevant meetings.');
-  const excerpts = await meetnolaInvoke<LibraryExcerpt[]>('search_library_sources', { terms, sinceDays: period === 'all' ? null : Number(period) });
+  const excerpts = await afterwordInvoke<LibraryExcerpt[]>('search_library_sources', { terms, sinceDays: period === 'all' ? null : Number(period) });
   return buildLibraryAnswerContext(excerpts, terms, period);
 }

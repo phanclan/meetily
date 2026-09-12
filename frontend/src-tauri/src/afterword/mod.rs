@@ -1,9 +1,9 @@
-//! Meetnola product surface as an internal Tauri v2 plugin.
+//! Afterword product surface as an internal Tauri v2 plugin.
 //!
 //! Commands are registered on this plugin (not the app `invoke_handler`), so
-//! frontend invokes use `plugin:meetnola|<command>`.
+//! frontend invokes use `plugin:afterword|<command>`.
 
-#[cfg(feature = "meetnola-automation")]
+#[cfg(feature = "afterword-automation")]
 pub mod automation;
 pub mod defaults;
 pub mod chat_history;
@@ -24,9 +24,9 @@ use tauri::{
     AppHandle, Manager, Runtime,
 };
 
-/// Register Meetnola IPC commands under the `meetnola` plugin namespace.
+/// Register Afterword IPC commands under the `afterword` plugin namespace.
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
-    Builder::new("meetnola")
+    Builder::new("afterword")
         .setup(|app, _| { app.manage(live_query::QueryRequests::default()); Ok(()) })
         .invoke_handler(tauri::generate_handler![
             frontend_logging::append_frontend_log,
@@ -81,7 +81,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
 pub fn start_after_database<R: Runtime>(app: &AppHandle<R>) {
     meeting_detection::start_detection(app.clone());
 
-    #[cfg(feature = "meetnola-automation")]
+    #[cfg(feature = "afterword-automation")]
     {
         if std::env::var("MEETILY_AUTOMATION").as_deref() == Ok("1") {
             if let Some(app_state) = app.try_state::<crate::state::AppState>() {

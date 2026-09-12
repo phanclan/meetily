@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { meetnolaInvoke } from '@/meetnola/ipc';
+import { afterwordInvoke } from '@/afterword/ipc';
 import type { SavedMeetingMatch } from './useSavedMeetingSearch';
 
 export type SavedSearchTarget = { kind: 'notes' | 'transcript'; sourceId: string; query: string };
@@ -13,7 +13,7 @@ export function useSavedSearchMatch(meetingId: string, target: SavedSearchTarget
   useEffect(() => {
     let cancelled = false;
     setState({ key, loading: true, match: null, error: null });
-    meetnolaInvoke<SavedMeetingMatch | null>('get_saved_search_match', { meetingId, sourceId, kind, query })
+    afterwordInvoke<SavedMeetingMatch | null>('get_saved_search_match', { meetingId, sourceId, kind, query })
       .then(match => { if (!cancelled) setState({ key, loading: false, match, error: null }); })
       .catch(error => { if (!cancelled) setState({ key, loading: false, match: null, error: error instanceof Error ? error.message : String(error) }); });
     return () => { cancelled = true; };

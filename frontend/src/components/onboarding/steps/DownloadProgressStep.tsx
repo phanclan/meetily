@@ -7,7 +7,7 @@ import { OnboardingContainer } from '../OnboardingContainer';
 import { useOnboarding } from '@/contexts/OnboardingContext';
 import { toast } from 'sonner';
 import { getPostOnboardingRoute } from '@/lib/postOnboardingNavigation';
-import { isMeetnola } from '@/flavor';
+import { isAfterword } from '@/flavor';
 
 const GROQ_KEYS_URL = 'https://console.groq.com/keys';
 const GROQ_PRICING_URL = 'https://groq.com/pricing';
@@ -62,9 +62,9 @@ export function DownloadProgressStep() {
 
   return (
     <OnboardingContainer
-      title={isMeetnola ? 'Local STT + AI Gateway' : 'Use Groq Free Tier'}
+      title={isAfterword ? 'Local STT + AI Gateway' : 'Use Groq Free Tier'}
       description={
-        isMeetnola
+        isAfterword
           ? 'Afterword transcribes on-device by default. Summaries and Enhance use Vercel AI Gateway when you add a key.'
           : 'Afterword will use Groq for summaries and transcription by default. Local models stay optional and can be added later from Settings.'
       }
@@ -73,7 +73,7 @@ export function DownloadProgressStep() {
     >
       <div className="flex flex-col items-center space-y-6">
         <div className="w-full max-w-xl space-y-4">
-          {isMeetnola ? (
+          {isAfterword ? (
             <>
               <div className="rounded-xl border border-gray-200 bg-white p-5">
                 <div className="flex items-start gap-3">

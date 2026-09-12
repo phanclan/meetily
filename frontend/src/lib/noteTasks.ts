@@ -1,5 +1,5 @@
 import type { Block } from '@blocknote/core';
-import { getMeetingNotes, meetnolaInvoke } from '@/meetnola/ipc';
+import { getMeetingNotes, afterwordInvoke } from '@/afterword/ipc';
 import { blocksToPlainText } from '@/lib/meetingNotes';
 import { createWriteQueue } from '@/lib/pendingWrites';
 
@@ -27,7 +27,7 @@ export async function setNoteTaskChecked(task: NoteTask, checked: boolean): Prom
   block.props = { ...block.props, checked };
   // A compare-and-save prevents a concurrent edit after the read from being lost.
   // Conflicts are not put into the general retry queue, which would block Quit.
-  await meetnolaInvoke('save_meeting_notes_if_unchanged', {
+  await afterwordInvoke('save_meeting_notes_if_unchanged', {
     meetingId: task.meetingId, expectedNotesJson: source.notes_json,
     notesJson: JSON.stringify(blocks), notesMarkdown: blocksToPlainText(blocks),
   });

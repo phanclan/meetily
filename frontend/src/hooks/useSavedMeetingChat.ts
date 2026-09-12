@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveMeetingChat } from './useLiveMeetingChat';
-import { meetnolaInvoke } from '@/meetnola/ipc';
+import { afterwordInvoke } from '@/afterword/ipc';
 import { createWriteQueue, registerBeforeQuit } from '@/lib/pendingWrites';
 import { decodeMeetingChat, encodeMeetingChat } from '@/lib/meetingChatHistory';
 import type { ChatMessage } from './useLiveMeetingChat';
@@ -30,7 +30,7 @@ export function usePersistentChat(recordId: string, scope: 'meeting' | 'library'
   owner.current = meetingId;
   const persist = useCallback((messages: typeof chat.messages, interrupted: boolean) => {
     const messagesJson = encodeMeetingChat(messages, interrupted);
-    return queue.enqueue(() => meetnolaInvoke<void>(`save_${scope}_chat`, { ...chatOwner(recordId, scope), messagesJson }));
+    return queue.enqueue(() => afterwordInvoke<void>(`save_${scope}_chat`, { ...chatOwner(recordId, scope), messagesJson }));
   }, [recordId, scope, queue]);
 
   useEffect(() => registerBeforeQuit(async () => {
@@ -46,7 +46,7 @@ export function usePersistentChat(recordId: string, scope: 'meeting' | 'library'
     void (async () => {
       try {
         await queue.flush();
-        const saved = await meetnolaInvoke<string | null>(`get_${scope}_chat`, chatOwner(recordId, scope));
+        const saved = await afterwordInvoke<string | null>(`get_${scope}_chat`, chatOwner(recordId, scope));
         if (cancelled || owner.current !== meetingId) return;
         chat.restoreMessages(decodeMeetingChat(saved));
         setRestoredFor(meetingId);

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { getMeetingNotes, saveMeetingNotes } from '@/meetnola/ipc';
+import { getMeetingNotes, saveMeetingNotes } from '@/afterword/ipc';
 import type { Block } from '@blocknote/core';
 import { blocksToPlainText, parseStoredMeetingNotesJson, plainTextToBlocks } from '@/lib/meetingNotes';
 

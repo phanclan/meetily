@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { meetnolaInvoke } from '@/meetnola/ipc';
+import { afterwordInvoke } from '@/afterword/ipc';
 import type { Summary } from '@/types';
 
 export interface PreviousSummary {
@@ -35,7 +35,7 @@ export function usePreviousSummary({ meetingId, open, beforeRead, onRestored }: 
         await callbacks.current.beforeRead();
         saved = true;
         if (cancelled || owner.current !== key) return;
-        const data = await meetnolaInvoke<PreviousSummary | null>('get_previous_summary', { meetingId });
+        const data = await afterwordInvoke<PreviousSummary | null>('get_previous_summary', { meetingId });
         if (!cancelled && owner.current === key) setState({ key, loading: false, data, error: '' });
       } catch (error) {
         if (!cancelled && owner.current === key) setState({ key, loading: false, data: null, error:
@@ -52,7 +52,7 @@ export function usePreviousSummary({ meetingId, open, beforeRead, onRestored }: 
     const token = {}; active.current = token;
     setRestoring(true); setState(value => ({ ...value, error: '' }));
     try {
-      const result = await meetnolaInvoke<Summary>('restore_previous_summary', {
+      const result = await afterwordInvoke<Summary>('restore_previous_summary', {
         meetingId, currentRevision: state.data.currentRevision, versionId: state.data.versionId,
       });
       if (owner.current === key && active.current === token) callbacks.current.onRestored(result);

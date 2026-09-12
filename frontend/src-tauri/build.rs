@@ -20,9 +20,9 @@ fn main() {
     // Download and bundle FFmpeg binary at build-time
     ffmpeg::ensure_ffmpeg_binary();
 
-    // Inlined Meetnola plugin ACL (commands live in src/meetnola, registered via Builder::new)
+    // Inlined Afterword plugin ACL (commands live in src/afterword, registered via Builder::new)
     let attrs = tauri_build::Attributes::new().plugin(
-        "meetnola",
+        "afterword",
         tauri_build::InlinedPlugin::new()
             .commands(&[
                 "append_frontend_log",
@@ -76,17 +76,27 @@ fn main() {
 }
 
 fn emit_build_metadata() {
-    println!("cargo:rerun-if-env-changed=MEETNOLA_BUILD_ID");
-    println!("cargo:rerun-if-env-changed=MEETNOLA_BUILD_CHANNEL");
-    println!("cargo:rerun-if-env-changed=MEETNOLA_BUILD_FLAVOR");
+    for suffix in ["ID", "CHANNEL", "FLAVOR"] {
+        println!("cargo:rerun-if-env-changed=AFTERWORD_BUILD_{}", suffix);
+        // Legacy Meetnola env names, still honored as a fallback.
+        println!("cargo:rerun-if-env-changed=MEETNOLA_BUILD_{}", suffix);
+    }
 
-    let build_id = std::env::var("MEETNOLA_BUILD_ID").unwrap_or_else(|_| "local-dev".to_string());
-    let channel = std::env::var("MEETNOLA_BUILD_CHANNEL").unwrap_or_else(|_| "dev".to_string());
-    let flavor = std::env::var("MEETNOLA_BUILD_FLAVOR").unwrap_or_else(|_| "meetily".to_string());
+    let build_id = build_env("ID", "local-dev");
+    let channel = build_env("CHANNEL", "dev");
+    let flavor = build_env("FLAVOR", "meetily");
 
-    println!("cargo:rustc-env=MEETNOLA_BUILD_ID={}", build_id);
-    println!("cargo:rustc-env=MEETNOLA_BUILD_CHANNEL={}", channel);
-    println!("cargo:rustc-env=MEETNOLA_BUILD_FLAVOR={}", flavor);
+    println!("cargo:rustc-env=AFTERWORD_BUILD_ID={}", build_id);
+    println!("cargo:rustc-env=AFTERWORD_BUILD_CHANNEL={}", channel);
+    println!("cargo:rustc-env=AFTERWORD_BUILD_FLAVOR={}", flavor);
+}
+
+/// Reads `AFTERWORD_BUILD_<suffix>`, falling back to the legacy
+/// `MEETNOLA_BUILD_<suffix>` name before the default.
+fn build_env(suffix: &str, default: &str) -> String {
+    std::env::var(format!("AFTERWORD_BUILD_{}", suffix))
+        .or_else(|_| std::env::var(format!("MEETNOLA_BUILD_{}", suffix)))
+        .unwrap_or_else(|_| default.to_string())
 }
 
 /// Detects GPU acceleration capabilities and provides build guidance

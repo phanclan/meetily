@@ -17,7 +17,7 @@
   Current direction: show more title text and keep the bottom AI bar persistent.
 
 ## Packaging
-- [ ] Keep `meetnola Tester.app` as the peer-test target until DMG packaging is fixed.
+- [ ] Keep `Afterword.app` as the peer-test target until DMG packaging is fixed.
 - [ ] Decide whether to notarize tester builds or continue with right-click `Open` instructions.
 
 ## Known Issues

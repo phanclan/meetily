@@ -407,11 +407,11 @@ impl SummaryService {
         if provider == LLMProvider::CustomOpenAI {
             if let Some(ref endpoint) = custom_openai_endpoint {
                 let is_gateway = {
-                    #[cfg(feature = "meetnola")]
+                    #[cfg(feature = "afterword")]
                     {
-                        crate::meetnola::defaults::is_gateway_endpoint(endpoint)
+                        crate::afterword::defaults::is_gateway_endpoint(endpoint)
                     }
-                    #[cfg(not(feature = "meetnola"))]
+                    #[cfg(not(feature = "afterword"))]
                     {
                         let trimmed = endpoint.trim().trim_end_matches('/');
                         trimmed.eq_ignore_ascii_case("https://ai-gateway.vercel.sh/v1")

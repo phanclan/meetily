@@ -1,7 +1,7 @@
 'use client'
 
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
-import { isMeetnola } from '@/flavor';
+import { isAfterword } from '@/flavor';
 import { toast } from 'sonner';
 import { useUpdateCheck } from '@/hooks/useUpdateCheck';
 import { UpdateInfo } from '@/services/updateService';
@@ -21,7 +21,7 @@ export function UpdateCheckProvider({ children }: { children: React.ReactNode })
   const [showDialog, setShowDialog] = useState(false);
 
   const handleShowDialog = useCallback(() => {
-    if (isMeetnola) {
+    if (isAfterword) {
       toast.info('Afterword updates are installed manually', {
         description: 'Use a verified Afterword build. Upstream Meetily updates are not installed in this fork.',
       });
@@ -31,7 +31,7 @@ export function UpdateCheckProvider({ children }: { children: React.ReactNode })
   }, []);
 
   const { updateInfo, isChecking, checkForUpdates } = useUpdateCheck({
-    checkOnMount: !isMeetnola,
+    checkOnMount: !isAfterword,
     showNotification: true,
     onUpdateAvailable: (info) => {
       // Show notification, dialog will be shown when user clicks notification
@@ -50,7 +50,7 @@ export function UpdateCheckProvider({ children }: { children: React.ReactNode })
   // Listen for tray menu events
   useEffect(() => {
     const handleTrayCheck = () => {
-      if (!isMeetnola) void checkForUpdates(true);
+      if (!isAfterword) void checkForUpdates(true);
       handleShowDialog();
     };
 

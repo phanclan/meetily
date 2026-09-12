@@ -1,6 +1,6 @@
-# Meetnola maintenance
+# Afterword maintenance
 
-Decision: 2026-09-05. Meetnola is maintained as an independent product fork with selective upstream adoption.
+Decision: 2026-09-05. Afterword is maintained as an independent product fork with selective upstream adoption.
 
 ## Branch policy
 
@@ -9,7 +9,7 @@ Decision: 2026-09-05. Meetnola is maintained as an independent product fork with
 - Do not routinely rebase the product branch onto upstream releases. Stashes are temporary conveniences, not release handoffs.
 - Review upstream security, platform, audio, and transcription fixes. Adopt product/UI changes only when wanted.
 - Integrate approved upstream changes into local `main`. Use `git cherry-pick -x` for self-contained commits; port changes explicitly when their dependencies do not fit. Preserve source attribution and existing license notices.
-- Meetnola tester builds disable the upstream updater feed. Distribute a verified fork build manually until a dedicated signed release feed is established.
+- Afterword tester builds disable the upstream updater feed. Distribute a verified fork build manually until a dedicated signed release feed is established.
 - Validate changes with the checks below before committing. Publishing/pushing is a separate operation.
 
 ## Supported baseline
@@ -22,13 +22,13 @@ Recording-start elapsed time can include the user's response to an OS permission
 
 ### Runtime
 
-The Tauri app and Rust core remain authoritative. Meetnola's plugin owns notes, live queries, and product extensions. The archived Python backend is not part of this baseline.
+The Tauri app and Rust core remain authoritative. Afterword's plugin owns notes, live queries, and product extensions. The archived Python backend is not part of this baseline.
 
-Transcription uses local Parakeet or Whisper. Cloud transcription is unavailable in this recovery baseline; the Meetnola selector disables Groq and explains the limitation for existing cloud configurations. Stored credentials are retained. Summary providers remain separate from transcription; their live network behavior is not established by an offline recording test.
+Transcription uses local Parakeet or Whisper. Cloud transcription is unavailable in this recovery baseline; the Afterword selector disables Groq and explains the limitation for existing cloud configurations. Stored credentials are retained. Summary providers remain separate from transcription; their live network behavior is not established by an offline recording test.
 
-Enhancement and meeting questions currently use Vercel AI Gateway with `openai/gpt-5.6-luna`, through the existing Custom OpenAI provider. The key is entered through the masked Settings field; configuration persists across app restarts. Parakeet Compact transcription stays local. Report instructions now explicitly preserve written requirements and keep unresolved source disagreements out of confirmed tasks. A native long-note rerun corrected the observed omitted requirement and false assignment, while a short control retained an explicitly resolved assignment. These single synthetic runs do not establish general factual accuracy. Translation caches include the report instructions in their identity so rule changes invalidate older reports. Meetnola also requests `reasoning_effort: "none"` when the canonical Ollama `qwen3.5` or `qwen3.6` model families are selected, so those models do not wait for extended reasoning. Generated summaries still require review.
+Enhancement and meeting questions currently use Vercel AI Gateway with `openai/gpt-5.6-luna`, through the existing Custom OpenAI provider. The key is entered through the masked Settings field; configuration persists across app restarts. Parakeet Compact transcription stays local. Report instructions now explicitly preserve written requirements and keep unresolved source disagreements out of confirmed tasks. A native long-note rerun corrected the observed omitted requirement and false assignment, while a short control retained an explicitly resolved assignment. These single synthetic runs do not establish general factual accuracy. Translation caches include the report instructions in their identity so rule changes invalidate older reports. Afterword also requests `reasoning_effort: "none"` when the canonical Ollama `qwen3.5` or `qwen3.6` model families are selected, so those models do not wait for extended reasoning. Generated summaries still require review.
 
-Local Gemma remains available as an alternative, with its existing enhancement reasoning profile unchanged. A September 9 comparison of sixteen synthetic cases rejected Qwen 9B MXFP8, Gemma 12B MLX with reasoning disabled, and reasoning-disabled Gemma E4B: each was faster but introduced additional factual or coverage failures. Gemma 12B with its default reasoning also exhausted the output limit on a tiny note. The downloaded 12B model is an evaluation artifact, not the recommended selection. These single runs are diagnostic evidence, not a general model ranking; full reports and the comparison decision are linked from `docs/wip/handoff-meetnola-current-state.md`.
+Local Gemma remains available as an alternative, with its existing enhancement reasoning profile unchanged. A September 9 comparison of sixteen synthetic cases rejected Qwen 9B MXFP8, Gemma 12B MLX with reasoning disabled, and reasoning-disabled Gemma E4B: each was faster but introduced additional factual or coverage failures. Gemma 12B with its default reasoning also exhausted the output limit on a tiny note. The downloaded 12B model is an evaluation artifact, not the recommended selection. These single runs are diagnostic evidence, not a general model ranking; full reports and the comparison decision are linked from `docs/wip/handoff-afterword-current-state.md`.
 
 The Gateway preset now targets `openai/gpt-5.6-luna`. It reuses the Custom OpenAI transport with low reasoning for enhancement/source review and medium reasoning for streamed questions, retaining the 2,048-token question budget. Chat instructions distinguish final commitments from unresolved source disagreements, and current sources follow conversation history so earlier assistant answers remain subordinate to source evidence. The combined profile passed the observed disputed-assignment case and an explicit-correction/completed-task control; general accuracy and latency remain unbenchmarked. Switching from another custom endpoint clears its credential and sampling fields; the user enters a Gateway key in the masked settings field and saves. Configuration objects containing keys must not be logged. The connection check requires complete nonempty text, keeps its result visible, and avoids exposing provider response bodies in errors. Live Gateway validation is recorded in the current handoff.
 
@@ -116,11 +116,11 @@ Coverage suggestions are not factual verification. A model can misread intent, m
 
 ## Validation before promotion
 
-For recent-meeting task classification, run `node frontend/scripts/eval-recent-tasks.cjs` from the repository root. Ten synthetic controls cover requirements, declined requests, completed work, conflicting and corrected assignments, missing owners, explicit availability checks, and conditional commitments. The runner uses the current recent-source formatter and native streaming chat profile without reading saved meetings or changing model selection. `--categorized` compares a question that requests separate categories; it does not change the app's prompt. Set `MEETNOLA_EVAL_MODEL` and `MEETNOLA_EVAL_REPORT` for comparisons. Exit zero proves successful requests only: manually compare every answer with the fixture's expected meaning, including omitted commitments and unresolved conflicts. Do not count a valid citation as proof that its task classification is correct.
+For recent-meeting task classification, run `node frontend/scripts/eval-recent-tasks.cjs` from the repository root. Ten synthetic controls cover requirements, declined requests, completed work, conflicting and corrected assignments, missing owners, explicit availability checks, and conditional commitments. The runner uses the current recent-source formatter and native streaming chat profile without reading saved meetings or changing model selection. `--categorized` compares a question that requests separate categories; it does not change the app's prompt. Set `AFTERWORD_EVAL_MODEL` and `AFTERWORD_EVAL_REPORT` for comparisons. Exit zero proves successful requests only: manually compare every answer with the fixture's expected meaning, including omitted commitments and unresolved conflicts. Do not count a valid citation as proof that its task classification is correct.
 
-For synthetic summary-quality evaluation, run `node frontend/scripts/eval-summary-quality.cjs` from the repository root. It prepares written-note context with the actual frontend helper, then calls the native summary pipeline through local Ollama. The default model is `gemma4:e4b-mlx`, with runtime context sizing; this does not change the app's selection. Set `MEETNOLA_EVAL_MODEL`, `MEETNOLA_EVAL_CASE`, or `MEETNOLA_EVAL_CONTEXT` to compare models, select a fixture, or force a token threshold. `MEETNOLA_EVAL_REPORT` overrides the default `/private/tmp/meetnola-summary-quality.json`. Reports include the prepared source context, output, timing, and failed checks. The runner intentionally exits nonzero for known factual failures; review the prose even when phrase checks pass. Invoke this script rather than the underlying ignored Cargo test, which requires the script's prepared context file.
+For synthetic summary-quality evaluation, run `node frontend/scripts/eval-summary-quality.cjs` from the repository root. It prepares written-note context with the actual frontend helper, then calls the native summary pipeline through local Ollama. The default model is `gemma4:e4b-mlx`, with runtime context sizing; this does not change the app's selection. Set `AFTERWORD_EVAL_MODEL`, `AFTERWORD_EVAL_CASE`, or `AFTERWORD_EVAL_CONTEXT` to compare models, select a fixture, or force a token threshold. `AFTERWORD_EVAL_REPORT` overrides the default `/private/tmp/afterword-summary-quality.json`. Reports include the prepared source context, output, timing, and failed checks. The runner intentionally exits nonzero for known factual failures; review the prose even when phrase checks pass. Invoke this script rather than the underlying ignored Cargo test, which requires the script's prepared context file.
 
-When scoring rules change, rescore saved synthetic outputs without another model call. Set `MEETNOLA_RESCORE_INPUT` to the original report and `MEETNOLA_RESCORE_OUTPUT` to a different output path, then run `cargo test -p meetily --features meetnola --lib summary::quality_evals::rescore_saved_summary_quality -- --exact --ignored --nocapture`. The new report retains the original failures and timing beside updated checks; a successful command means rescoring completed, not that every case passed. Fixture `allowed_negations` entries are exact, manually reviewed exceptions to forbidden-phrase checks. They do not provide general semantic negation detection, and a separate contradictory assertion still fails.
+When scoring rules change, rescore saved synthetic outputs without another model call. Set `AFTERWORD_RESCORE_INPUT` to the original report and `AFTERWORD_RESCORE_OUTPUT` to a different output path, then run `cargo test -p meetily --features afterword --lib summary::quality_evals::rescore_saved_summary_quality -- --exact --ignored --nocapture`. The new report retains the original failures and timing beside updated checks; a successful command means rescoring completed, not that every case passed. Fixture `allowed_negations` entries are exact, manually reviewed exceptions to forbidden-phrase checks. They do not provide general semantic negation detection, and a separate contradictory assertion still fails.
 
 From `frontend`:
 
@@ -129,17 +129,17 @@ npm run typecheck
 npm run test:recording
 npm run test:markdown
 node --test tests/lib/onboarding-summary-model.test.mjs
-NEXT_PUBLIC_FLAVOR=meetnola npm run build
+NEXT_PUBLIC_FLAVOR=afterword npm run build
 ```
 
 From the repository root:
 
 ```sh
-cargo check --offline -p meetily --features meetnola
-cargo test --offline -p meetily --lib --features meetnola quality_
+cargo check --offline -p meetily --features afterword
+cargo test --offline -p meetily --lib --features afterword quality_
 git diff --check
 ```
 
-Use a packaged tester for macOS audio validation. The release bundle can be built with `frontend/build-meetnola.sh`; when only an app is needed, pass `--bundles app` to the Tauri build command. Do not launch a dev instance and packaged tester with the same bundle ID simultaneously.
+Use a packaged tester for macOS audio validation. The release bundle can be built with `frontend/build-afterword.sh`; when only an app is needed, pass `--bundles app` to the Tauri build command. Do not launch a dev instance and packaged tester with the same bundle ID simultaneously.
 
 Verify **New note** opens a draft without recording, **Start recording** begins capture, synthetic speech produces a transcript, notes/title/transcript survive leaving the workspace, **Stop** saves once, and reopening shows the saved content. Edit the saved note and reopen again. Repeat a recording to catch stale session state. Check the visible build badge against the intended build.

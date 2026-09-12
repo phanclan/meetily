@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } f
 import { Button } from '@/components/ui/button';
 import { useLibraryChat } from '@/hooks/useLibraryChat';
 import { loadLibraryAnswerContext, type LibraryPeriod, type LibrarySourceScope } from '@/lib/libraryAnswerContext';
-import { meetnolaInvoke } from '@/meetnola/ipc';
+import { afterwordInvoke } from '@/afterword/ipc';
 
 interface Conversation { id: string; title: string; updatedAt: string }
 const chatPath = (id: string) => `/ask?chat=${encodeURIComponent(id)}`;
@@ -28,7 +28,7 @@ function AskNotesRoute() {
     if (id) return;
     let current = true;
     setError(null);
-    void meetnolaInvoke<Conversation[]>('list_library_chats', { archived: false, offset: 0 }).then(items => {
+    void afterwordInvoke<Conversation[]>('list_library_chats', { archived: false, offset: 0 }).then(items => {
       if (current) router.replace(chatPath(items[0]?.id || crypto.randomUUID()));
     }).catch(error => { if (current) setError(String(error)); });
     return () => { current = false; };
@@ -66,7 +66,7 @@ function AskWorkspace({ chatId }: { chatId: string }) {
     if (!append) setConversations([]);
     try {
       await chat.flush();
-      const result = await meetnolaInvoke<Conversation[]>('list_library_chats', { archived: archivedFilter, offset: append ? conversations.length : 0 });
+      const result = await afterwordInvoke<Conversation[]>('list_library_chats', { archived: archivedFilter, offset: append ? conversations.length : 0 });
       if (token !== listRequest.current) return;
       setConversations(previous => append ? [...previous, ...result] : result);
       setMore(result.length === 30);
@@ -77,7 +77,7 @@ function AskWorkspace({ chatId }: { chatId: string }) {
     setArchiving(true); setActionError(null);
     try {
       await chat.flush();
-      await meetnolaInvoke('set_library_chat_archived', { chatId, archived: !archived });
+      await afterwordInvoke('set_library_chat_archived', { chatId, archived: !archived });
       if (archived) chat.reloadSettings();
       else router.replace(chatPath(crypto.randomUUID()));
     } catch (error) { setActionError(String(error)); }

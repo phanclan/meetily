@@ -40,9 +40,9 @@ impl TranscriptsRepository {
         .await;
 
         let inserted = result?;
-        #[cfg(feature = "meetnola")]
+        #[cfg(feature = "afterword")]
         if let Some(recording_id) = source_recording_id {
-            crate::meetnola::chat_history::attach_recording_chat(&mut transaction, recording_id, &meeting_id).await?;
+            crate::afterword::chat_history::attach_recording_chat(&mut transaction, recording_id, &meeting_id).await?;
         }
         if inserted.rows_affected() == 0 {
             transaction.commit().await?;

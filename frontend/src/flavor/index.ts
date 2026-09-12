@@ -1,16 +1,25 @@
 /**
  * Thin product-flavor selector.
  *
- * Meetnola builds set NEXT_PUBLIC_FLAVOR=meetnola (or meetnola-tester) via the
- * tester/dev scripts. Upstream Meetily builds leave it unset / "meetily".
+ * Afterword builds set NEXT_PUBLIC_FLAVOR=afterword (or afterword-tester) via
+ * the tester/dev scripts. Upstream Meetily builds leave it unset / "meetily".
+ *
+ * The legacy `meetnola` / `meetnola-*` values still resolve to `afterword` so
+ * older shells, scripts, and cached env files keep working.
  */
 
-export type ProductFlavor = 'meetily' | 'meetnola'
+export type ProductFlavor = 'meetily' | 'afterword'
 
 function normalizeFlavor(raw: string | undefined): ProductFlavor {
   const value = (raw || '').trim().toLowerCase()
-  if (value === 'meetnola' || value.startsWith('meetnola-')) {
-    return 'meetnola'
+  if (
+    value === 'afterword' ||
+    value.startsWith('afterword-') ||
+    // Legacy Meetnola flavor values.
+    value === 'meetnola' ||
+    value.startsWith('meetnola-')
+  ) {
+    return 'afterword'
   }
   return 'meetily'
 }
@@ -19,11 +28,14 @@ export const productFlavor: ProductFlavor = normalizeFlavor(
   process.env.NEXT_PUBLIC_FLAVOR
 )
 
-export const isMeetnola = productFlavor === 'meetnola'
+export const isAfterword = productFlavor === 'afterword'
 
-/** Meetnola-only module surface — import lazily from call sites when needed. */
-export const meetnolaExtensions = isMeetnola
+/** @deprecated Use `isAfterword`. Kept so older call sites keep compiling. */
+export const isMeetnola = isAfterword
+
+/** Afterword-only module surface — import lazily from call sites when needed. */
+export const afterwordExtensions = isAfterword
   ? {
-      ipc: () => import('@/meetnola/ipc'),
+      ipc: () => import('@/afterword/ipc'),
     }
   : null

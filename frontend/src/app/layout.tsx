@@ -15,7 +15,7 @@ import { invoke } from '@tauri-apps/api/core'
 import {
   appendFrontendLog as appendFrontendLogIpc,
   setCallDetectionEnabled,
-} from '@/meetnola/ipc'
+} from '@/afterword/ipc'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { RecordingStateProvider } from '@/contexts/RecordingStateContext'
 import { OllamaDownloadProvider } from '@/contexts/OllamaDownloadContext'

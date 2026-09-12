@@ -1,16 +1,17 @@
-# Meetnola Tester README
+# Afterword Tester README
 
 ## What This Is
-`meetnola Tester.app` is a separate peer-test build of Meetnola for macOS.
+`Afterword.app` is a separate peer-test build of Afterword for macOS. (Afterword was
+previously called Meetnola.)
 
-- App name: `meetnola Tester`
-- Bundle ID: `com.meetnola.tester`
+- App name: `Afterword`
+- Bundle ID: `com.meetnola.tester` — kept from the Meetnola name so existing app data and macOS permission grants survive the rename
 - It is separate from the original `Meetily.app`
 
 ## If You Already Have Meetily
 That is fine.
 
-`meetnola Tester` does **not** overwrite the original Meetily app or its notes database.
+`Afterword` does **not** overwrite the original Meetily app or its notes database.
 
 - Original app data: `~/Library/Application Support/com.meetily.ai/`
 - Tester app data: `~/Library/Application Support/com.meetnola.tester/`
@@ -37,25 +38,25 @@ Existing installs retain their settings and keys, but this recovery baseline sup
    If launch fails with errors like `Launch failed`, `permission denied`, or error code `111`, run:
 
    ```bash
-   chmod +x "meetnola Tester.app/Contents/MacOS/meetily" \
-            "meetnola Tester.app/Contents/MacOS/ffmpeg" \
-            "meetnola Tester.app/Contents/MacOS/llama-helper"
+   chmod +x "Afterword.app/Contents/MacOS/meetily" \
+            "Afterword.app/Contents/MacOS/ffmpeg" \
+            "Afterword.app/Contents/MacOS/llama-helper"
    ```
 
    Adjust the path if you moved the app, for example:
-   `/Applications/meetnola Tester.app/Contents/MacOS/...`
+   `/Applications/Afterword.app/Contents/MacOS/...`
 
 2. Remove the quarantine flag
 
    Downloaded apps are often quarantined by macOS. Clear it with:
 
    ```bash
-   xattr -r -d com.apple.quarantine "meetnola Tester.app"
+   xattr -r -d com.apple.quarantine "Afterword.app"
    ```
 
 3. Open the app
 
-   Move `meetnola Tester.app` to **Applications** if you want.
+   Move `Afterword.app` to **Applications** if you want.
 
    If macOS still blocks it:
    - right-click the app
@@ -85,16 +86,17 @@ Groq’s free tier is enough for basic testing.
 ## Recordings Folder
 New default recordings go to:
 
-- macOS: `~/Movies/meetnola-recordings/`
+- macOS: `~/Movies/meetily-recordings/`
 
-If you used older internal builds that referenced `meetily-recordings`, the app will move the default path forward to `meetnola-recordings` for new saves.
+This is the path the app actually uses (`audio/recording_preferences.rs`); it was not
+renamed alongside the product name.
 
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `Launch failed`, error `111`, or `permission denied` | Binaries inside the app bundle lost executable permission during extraction | Run `chmod +x` on all three binaries in `Contents/MacOS/` |
-| `app is damaged` or Gatekeeper blocks launch | macOS quarantine attribute is still attached to the app | Run `xattr -r -d com.apple.quarantine "meetnola Tester.app"` |
+| `app is damaged` or Gatekeeper blocks launch | macOS quarantine attribute is still attached to the app | Run `xattr -r -d com.apple.quarantine "Afterword.app"` |
 | Security prompt will not go away | The app is ad-hoc signed and not trusted yet | Right-click the app, click **Open**, then confirm the dialog |
 
 ## Current Limitations
@@ -120,4 +122,4 @@ Open **About** in the app to see the current channel and build ID.
 
 ## Maintenance
 
-See [Meetnola maintenance](meetnola-maintenance.md) for the fork policy and validation required before promoting changes.
+See [Afterword maintenance](afterword-maintenance.md) for the fork policy and validation required before promoting changes.

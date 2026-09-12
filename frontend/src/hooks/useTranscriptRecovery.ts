@@ -13,7 +13,7 @@ import { applyPinnedSummaryLanguageToMeeting } from '@/lib/summary-language-pref
 import { toast } from 'sonner';
 import { readLiveMeetingNotes, clearLiveMeetingNotes } from '@/lib/liveMeetingNotes';
 import { blocksToPlainText } from '@/lib/meetingNotes';
-import { saveMeetingNotes, meetnolaInvoke } from '@/meetnola/ipc';
+import { saveMeetingNotes, afterwordInvoke } from '@/afterword/ipc';
 import { clearLiveMeetingFolder, saveLiveMeetingFolder } from '@/lib/liveMeetingFolder';
 
 interface AudioRecoveryStatus {
@@ -250,7 +250,7 @@ export function useTranscriptRecovery(): UseTranscriptRecoveryReturn {
    */
   const deleteRecoverableMeeting = useCallback(async (meetingId: string): Promise<void> => {
     try {
-      await meetnolaInvoke('discard_recording_chat', { recordingId: meetingId });
+      await afterwordInvoke('discard_recording_chat', { recordingId: meetingId });
       await indexedDBService.deleteMeeting(meetingId);
       setRecoverableMeetings(prev => prev.filter(m => m.meetingId !== meetingId));
     } catch (error) {

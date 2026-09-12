@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { OnboardingContainer } from '../OnboardingContainer';
 import { useOnboarding } from '@/contexts/OnboardingContext';
-import { isMeetnola } from '@/flavor';
+import { isAfterword } from '@/flavor';
 
 const GROQ_KEYS_URL = 'https://console.groq.com/keys';
 const GROQ_PRICING_URL = 'https://groq.com/pricing';
@@ -36,7 +36,7 @@ export function SetupOverviewStep() {
     }
   };
 
-  const meetnolaSteps = [
+  const afterwordSteps = [
     {
       icon: <Mic className="w-5 h-5 text-emerald-600" />,
       title: 'Transcribe locally by default',
@@ -78,13 +78,13 @@ export function SetupOverviewStep() {
     },
   ];
 
-  const steps = isMeetnola ? meetnolaSteps : meetilySteps;
+  const steps = isAfterword ? afterwordSteps : meetilySteps;
 
   return (
     <OnboardingContainer
       title="Setup Overview"
       description={
-        isMeetnola
+        isAfterword
           ? 'Afterword starts with local transcription and Vercel AI Gateway for summaries. Existing Groq choices are preserved on upgrade.'
           : 'Afterword now starts Groq-first. Local transcription and summary models are optional and can be added later.'
       }
@@ -111,7 +111,7 @@ export function SetupOverviewStep() {
 
         <Alert className="w-full max-w-xl border-sky-200 bg-sky-50">
           <AlertDescription className="space-y-4">
-            {isMeetnola ? (
+            {isAfterword ? (
               <>
                 <p className="text-sm text-sky-950">
                   Add a Vercel AI Gateway API key under Settings → Summary when you want cloud

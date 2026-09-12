@@ -1,6 +1,8 @@
 import { loadQuickNoteDraft } from '@/lib/quickNoteDraft';
 import { folderFromSearch, isNoteWorkspaceRoute } from '@/lib/quickNoteRoute';
 
+// Storage keys keep the legacy `meetnola.` prefix so an in-flight recording started
+// before the Afterword rename still resolves its folder after an app restart.
 const pendingKey = 'meetnola.recording.note-folder';
 const key = (id: string) => `meetnola.live-folder.${id}`;
 
@@ -35,8 +37,8 @@ export function clearLiveMeetingFolder(liveId: string) {
 export async function saveLiveMeetingFolder(liveId: string | null, meetingId: string) {
   const folderId = liveId ? readLiveMeetingFolder(liveId) : null;
   if (folderId) {
-    const { meetnolaInvoke } = await import('@/meetnola/ipc');
-    await meetnolaInvoke('set_meeting_note_folder', { meetingId, folderId, included: true });
+    const { afterwordInvoke } = await import('@/afterword/ipc');
+    await afterwordInvoke('set_meeting_note_folder', { meetingId, folderId, included: true });
   }
   return folderId;
 }

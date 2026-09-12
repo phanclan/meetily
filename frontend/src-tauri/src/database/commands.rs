@@ -190,16 +190,16 @@ pub async fn initialize_fresh_database(app: AppHandle) -> Result<(), String> {
     // Set default model configuration for fresh installs only (existing DBs untouched).
     let pool = db_manager.pool();
 
-    #[cfg(feature = "meetnola")]
+    #[cfg(feature = "afterword")]
     {
-        if let Err(e) = crate::meetnola::defaults::apply_fresh_install_defaults(pool).await {
-            error!("Failed to apply Meetnola fresh-install defaults: {}", e);
+        if let Err(e) = crate::afterword::defaults::apply_fresh_install_defaults(pool).await {
+            error!("Failed to apply Afterword fresh-install defaults: {}", e);
         } else {
-            info!("Fresh database initialized with Meetnola defaults (local STT + AI Gateway)");
+            info!("Fresh database initialized with Afterword defaults (local STT + AI Gateway)");
         }
     }
 
-    #[cfg(not(feature = "meetnola"))]
+    #[cfg(not(feature = "afterword"))]
     {
         // Meetily: Groq-first defaults
         if let Err(e) = crate::database::repositories::setting::SettingsRepository::save_model_config(

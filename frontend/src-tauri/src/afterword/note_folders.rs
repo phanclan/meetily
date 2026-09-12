@@ -117,10 +117,10 @@ mod tests {
     async fn trash_retains_memberships_but_excludes_folder_counts_and_contents() {
         let pool = fixture().await;
         let folder = create(&pool, "Recovery", Some("B")).await.unwrap();
-        crate::meetnola::trash::trash(&pool, "B").await.unwrap();
+        crate::afterword::trash::trash(&pool, "B").await.unwrap();
         assert_eq!(list(&pool).await.unwrap()[0].note_count, 0);
         assert!(members(&pool, &folder.id).await.unwrap().is_empty());
-        crate::meetnola::trash::restore(&pool, "B").await.unwrap();
+        crate::afterword::trash::restore(&pool, "B").await.unwrap();
         assert_eq!(list(&pool).await.unwrap()[0].note_count, 1);
         assert_eq!(members(&pool, &folder.id).await.unwrap(), vec!["B"]);
     }

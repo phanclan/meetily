@@ -29,10 +29,10 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn, isOllamaNotInstalledError } from '@/lib/utils';
 import { toast } from 'sonner';
-import { isMeetnola } from '@/flavor';
+import { isAfterword } from '@/flavor';
 import {
-  MEETNOLA_GATEWAY_ENDPOINT,
-  MEETNOLA_GATEWAY_MODEL,
+  AFTERWORD_GATEWAY_ENDPOINT,
+  AFTERWORD_GATEWAY_MODEL,
 } from '@/constants/modelDefaults';
 
 export interface ModelConfig {
@@ -405,7 +405,7 @@ export function ModelSettingsModal({
   const isCustomOpenAIInvalid = modelConfig.provider === 'custom-openai' && (
     !customOpenAIEndpoint.trim() ||
     !customOpenAIModel.trim() ||
-    (customOpenAIEndpoint.trim().replace(/\/$/, '').toLowerCase() === MEETNOLA_GATEWAY_ENDPOINT.toLowerCase() && !customOpenAIApiKey.trim())
+    (customOpenAIEndpoint.trim().replace(/\/$/, '').toLowerCase() === AFTERWORD_GATEWAY_ENDPOINT.toLowerCase() && !customOpenAIApiKey.trim())
   );
 
   const isDoneDisabled =
@@ -1039,11 +1039,11 @@ export function ModelSettingsModal({
                       setCustomMaxTokens(config.maxTokens?.toString() || '');
                       setCustomTemperature(config.temperature?.toString() || '');
                       setCustomTopP(config.topP?.toString() || '');
-                    } else if (isMeetnola) {
-                      setCustomOpenAIEndpoint(MEETNOLA_GATEWAY_ENDPOINT);
-                      setCustomOpenAIModel(MEETNOLA_GATEWAY_MODEL);
+                    } else if (isAfterword) {
+                      setCustomOpenAIEndpoint(AFTERWORD_GATEWAY_ENDPOINT);
+                      setCustomOpenAIModel(AFTERWORD_GATEWAY_MODEL);
                   // A preset must not carry another server's credential or sampling settings.
-                  if (customOpenAIEndpoint.trim().replace(/\/$/, '').toLowerCase() !== MEETNOLA_GATEWAY_ENDPOINT.toLowerCase()) {
+                  if (customOpenAIEndpoint.trim().replace(/\/$/, '').toLowerCase() !== AFTERWORD_GATEWAY_ENDPOINT.toLowerCase()) {
                     setCustomOpenAIApiKey('');
                   }
                   setCustomMaxTokens('');
@@ -1052,11 +1052,11 @@ export function ModelSettingsModal({
                     }
                   }).catch((err) => {
                     console.error('Failed to load custom OpenAI config:', err);
-                    if (isMeetnola) {
-                      setCustomOpenAIEndpoint(MEETNOLA_GATEWAY_ENDPOINT);
-                      setCustomOpenAIModel(MEETNOLA_GATEWAY_MODEL);
+                    if (isAfterword) {
+                      setCustomOpenAIEndpoint(AFTERWORD_GATEWAY_ENDPOINT);
+                      setCustomOpenAIModel(AFTERWORD_GATEWAY_MODEL);
                   // A preset must not carry another server's credential or sampling settings.
-                  if (customOpenAIEndpoint.trim().replace(/\/$/, '').toLowerCase() !== MEETNOLA_GATEWAY_ENDPOINT.toLowerCase()) {
+                  if (customOpenAIEndpoint.trim().replace(/\/$/, '').toLowerCase() !== AFTERWORD_GATEWAY_ENDPOINT.toLowerCase()) {
                     setCustomOpenAIApiKey('');
                   }
                   setCustomMaxTokens('');
@@ -1073,7 +1073,7 @@ export function ModelSettingsModal({
               <SelectContent className="max-h-64 overflow-y-auto">
                 <SelectItem value="builtin-ai">Built-in AI (Offline, No API needed)</SelectItem>
                 <SelectItem value="claude">Claude</SelectItem>
-                <SelectItem value="custom-openai">{isMeetnola ? 'Vercel AI Gateway / Custom OpenAI' : 'Custom Server (OpenAI)'}</SelectItem>
+                <SelectItem value="custom-openai">{isAfterword ? 'Vercel AI Gateway / Custom OpenAI' : 'Custom Server (OpenAI)'}</SelectItem>
                 <SelectItem value="groq">Groq</SelectItem>
                 <SelectItem value="ollama">Ollama</SelectItem>
                 <SelectItem value="openai">OpenAI</SelectItem>
@@ -1228,10 +1228,10 @@ export function ModelSettingsModal({
                 variant="outline"
                 size="sm"
                 onClick={() => {
-                  setCustomOpenAIEndpoint(MEETNOLA_GATEWAY_ENDPOINT);
-                  setCustomOpenAIModel(MEETNOLA_GATEWAY_MODEL);
+                  setCustomOpenAIEndpoint(AFTERWORD_GATEWAY_ENDPOINT);
+                  setCustomOpenAIModel(AFTERWORD_GATEWAY_MODEL);
                   // A preset must not carry another server's credential or sampling settings.
-                  if (customOpenAIEndpoint.trim().replace(/\/$/, '').toLowerCase() !== MEETNOLA_GATEWAY_ENDPOINT.toLowerCase()) {
+                  if (customOpenAIEndpoint.trim().replace(/\/$/, '').toLowerCase() !== AFTERWORD_GATEWAY_ENDPOINT.toLowerCase()) {
                     setCustomOpenAIApiKey('');
                   }
                   setCustomMaxTokens('');
@@ -1278,7 +1278,7 @@ export function ModelSettingsModal({
 
             <div>
               <Label htmlFor="custom-api-key">
-                {customOpenAIEndpoint.trim().replace(/\/$/, '').toLowerCase() === MEETNOLA_GATEWAY_ENDPOINT.toLowerCase()
+                {customOpenAIEndpoint.trim().replace(/\/$/, '').toLowerCase() === AFTERWORD_GATEWAY_ENDPOINT.toLowerCase()
                   ? 'Vercel AI Gateway API Key *'
                   : 'API Key (optional)'}
               </Label>
@@ -1290,7 +1290,7 @@ export function ModelSettingsModal({
                 value={customOpenAIApiKey}
                 onChange={(e) => setCustomOpenAIApiKey(e.target.value)}
                 placeholder={
-                  customOpenAIEndpoint.trim().replace(/\/$/, '').toLowerCase() === MEETNOLA_GATEWAY_ENDPOINT.toLowerCase()
+                  customOpenAIEndpoint.trim().replace(/\/$/, '').toLowerCase() === AFTERWORD_GATEWAY_ENDPOINT.toLowerCase()
                     ? 'Paste your Vercel AI Gateway key'
                     : 'Leave empty if not required'
                 }

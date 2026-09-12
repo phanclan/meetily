@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { meetnolaInvoke } from '@/meetnola/ipc';
+import { afterwordInvoke } from '@/afterword/ipc';
 
 export interface SavedMeetingMatch {
   meetingId: string;
@@ -31,7 +31,7 @@ export function useSavedMeetingSearch(query: string, folderId: string | null = n
       busy = true;
       setState(previous => ({ ...previous, loading: true, error: null }));
       try {
-        const page = await meetnolaInvoke<SearchPage>('search_saved_meetings', { query, offset, folderId });
+        const page = await afterwordInvoke<SearchPage>('search_saved_meetings', { query, offset, folderId });
         if (!current()) return;
         offset += page.meetings.length;
         setState(previous => ({ query, folderId, results: [...new Map([...previous.results, ...page.meetings].map(item => [item.meetingId, item])).values()],

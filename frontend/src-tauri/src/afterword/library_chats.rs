@@ -215,7 +215,7 @@ mod tests {
     }
     #[tokio::test]
     async fn conversation_and_draft_survive_database_close_and_reopen() {
-        let path = std::env::temp_dir().join(format!("meetnola-chat-test-{}.db", uuid::Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!("afterword-chat-test-{}.db", uuid::Uuid::new_v4()));
         let options = sqlx::sqlite::SqliteConnectOptions::new().filename(&path).create_if_missing(true);
         let pool = sqlx::sqlite::SqlitePoolOptions::new().max_connections(1).connect_with(options.clone()).await.unwrap();
         sqlx::query("CREATE TABLE meetings(id TEXT PRIMARY KEY)").execute(&pool).await.unwrap();

@@ -45,7 +45,7 @@ const quietReact = { useCallback: f => f, useEffect: noop, useRef: value => ({ c
 
 test('Markdown export waits for pending saves and preserves the meeting identity', async () => {
   const calls = [];
-  const load = loader({ '@/meetnola/ipc': { meetnolaInvoke: async (command, args) => {
+  const load = loader({ '@/afterword/ipc': { afterwordInvoke: async (command, args) => {
     calls.push([command, args.meetingId]); return '/exports/note.md';
   } } });
   const { exportSavedMeeting } = load('@/lib/exportSavedMeeting');
@@ -59,7 +59,7 @@ test('Markdown export waits for pending saves and preserves the meeting identity
 
 test('Markdown export stops on save failure and surfaces native write failures', async () => {
   let invoked = 0;
-  const load = loader({ '@/meetnola/ipc': { meetnolaInvoke: async () => { invoked++; throw new Error('Folder unavailable'); } } });
+  const load = loader({ '@/afterword/ipc': { afterwordInvoke: async () => { invoked++; throw new Error('Folder unavailable'); } } });
   const { exportSavedMeeting } = load('@/lib/exportSavedMeeting');
   await assert.rejects(exportSavedMeeting('synthetic-A', async () => { throw new Error('Save failed'); }), /Save failed/);
   assert.equal(invoked, 0);
@@ -142,7 +142,7 @@ test('notes-only and mixed follow-up context reaches the native assistant with s
   const calls = [];
   const load = loader({
     react: quietReact,
-    '@/meetnola/ipc': { prepareLiveQuery: async () => 'synthetic', cancelLiveQuery: async () => {}, liveQuery: async args => { calls.push(args); return 'Synthetic answer'; } },
+    '@/afterword/ipc': { prepareLiveQuery: async () => 'synthetic', cancelLiveQuery: async () => {}, liveQuery: async args => { calls.push(args); return 'Synthetic answer'; } },
   });
   const { buildMeetingContext } = load('@/lib/meetingContext');
   const chat = load('@/hooks/useLiveMeetingChat').useLiveMeetingChat();
@@ -207,7 +207,7 @@ test('folder binding survives draft cleanup and reload without leaking to anothe
   assert.equal(reloaded.currentRecordingFolder(), null);
 });
 
-test('recording folder assignment uses the real Meetnola IPC namespace', async () => {
+test('recording folder assignment uses the real Afterword IPC namespace', async () => {
   const calls = [];
   const load = loader({ '@tauri-apps/api/core': { invoke: async (command, args) => calls.push({ command, args }) } },
     { localStorage: storage(), sessionStorage: storage() });
@@ -215,7 +215,7 @@ test('recording folder assignment uses the real Meetnola IPC namespace', async (
   folders.prepareRecordingFolder('folder-a');
   folders.bindRecordingFolder('meeting-1');
   await folders.saveLiveMeetingFolder('meeting-1', 'saved-1');
-  assert.equal(calls[0].command, 'plugin:meetnola|set_meeting_note_folder');
+  assert.equal(calls[0].command, 'plugin:afterword|set_meeting_note_folder');
   assert.equal(calls[0].args.meetingId, 'saved-1');
 });
 
@@ -224,7 +224,7 @@ test('standalone note save persists its immutable submission through failure and
   const requests = [];
   let fail = true, sequence = 0;
   const stubs = { '@tauri-apps/api/core': { invoke: async (command, args) => {
-    assert.equal(command, 'plugin:meetnola|create_note');
+    assert.equal(command, 'plugin:afterword|create_note');
     requests.push(args);
     if (fail) throw new Error('Synthetic lost response');
     return 'meeting-note-saved';
@@ -378,7 +378,7 @@ test('recovery retains its folder when assignment fails, including after a fresh
       return { meeting_id: 'meeting-saved-uuid' };
     } } },
     '@/lib/summary-language-preferences': { applyPinnedSummaryLanguageToMeeting: async () => {} },
-    '@/meetnola/ipc': { saveMeetingNotes: async () => events.push('notes'), meetnolaInvoke: (...args) => stubs['@tauri-apps/api/core'].invoke(...args) },
+    '@/afterword/ipc': { saveMeetingNotes: async () => events.push('notes'), afterwordInvoke: (...args) => stubs['@tauri-apps/api/core'].invoke(...args) },
   };
   const load = loader(stubs, { localStorage, sessionStorage });
   const notes = load('@/lib/liveMeetingNotes');
@@ -448,7 +448,7 @@ test('leaving before notes load never overwrites stored notes with an empty docu
   const writes = [];
   const load = loader({
     react: quietReact,
-    '@/meetnola/ipc': { getMeetingNotes: async () => null, saveMeetingNotes: async args => writes.push(args) },
+    '@/afterword/ipc': { getMeetingNotes: async () => null, saveMeetingNotes: async args => writes.push(args) },
     sonner: { toast: { error: noop } },
   });
   await load('@/hooks/useMeetingNotes').useMeetingNotes('saved-meeting').flushPendingSave();
@@ -470,7 +470,7 @@ test('legacy text notes load into the editor and a failed edit can be retried in
         return [value, next => { state[index] = next; }];
       },
     },
-    '@/meetnola/ipc': {
+    '@/afterword/ipc': {
       getMeetingNotes: async () => ({ notes_json: null, notes_markdown: 'Existing legacy note' }),
       saveMeetingNotes: async args => {
         writes.push(args);
@@ -522,8 +522,8 @@ function stopFixture({ failNotes = false, meetingTitle = 'Synthetic meeting', fo
     '@/services/storageService': { storageService: { saveMeeting: async (title, received, _folder, sourceId) => { savedTitles.push(title); assert.equal(sourceId, 'meeting-1'); assert.equal(received.length, 1); saves++; events.push('meeting'); return { meeting_id: 'meeting-a5ce2dc0-f470-485c-b35d-1b2bd0b49059' }; }, getMeeting: async () => ({ id: 'meeting-a5ce2dc0-f470-485c-b35d-1b2bd0b49059', title: 'Synthetic meeting' }) } },
     '@/lib/analytics': { default: new Proxy({}, { get: () => async () => {} }), __esModule: true },
     '@/lib/summary-language-preferences': { applyPinnedSummaryLanguageToMeeting: async () => true },
-    '@/meetnola/ipc': {
-      meetnolaInvoke: async (command, args) => {
+    '@/afterword/ipc': {
+      afterwordInvoke: async (command, args) => {
         assert.equal(command, 'set_meeting_note_folder');
         assert.equal(args.folderId, folderId);
         assert.equal(args.included, true);
@@ -643,7 +643,7 @@ test('live notes survive editor unmount/remount without a SQLite write', async (
   const load = loader({
     react: { ...quietReact, useEffect: effect => effects.push(effect), useState: v => [v, value => stateValues.push(value)] },
     sonner: { toast: { error: noop } },
-    '@/meetnola/ipc': { saveMeetingNotes: () => { throw new Error('Temporary IDs cannot reference a SQLite meeting'); } },
+    '@/afterword/ipc': { saveMeetingNotes: () => { throw new Error('Temporary IDs cannot reference a SQLite meeting'); } },
   }, { localStorage });
   const { useMeetingNotes } = load('@/hooks/useMeetingNotes');
   const first = useMeetingNotes('meeting-1');
@@ -683,7 +683,7 @@ test('saved meeting UUIDs load and save through SQLite rather than the live-draf
   const load = loader({
     react: { ...quietReact, useEffect: effect => effects.push(effect) },
     sonner: { toast: { error: noop } },
-    '@/meetnola/ipc': {
+    '@/afterword/ipc': {
       getMeetingNotes: async received => { assert.equal(received, id); return { notes_json: JSON.stringify(blocks) }; },
       saveMeetingNotes: async args => writes.push(args),
     },
@@ -715,7 +715,7 @@ test('interrupted notes-only recording can be recovered and clears its draft onl
     } },
     '@/services/storageService': { storageService: { saveMeeting: async () => ({ meeting_id: 'meeting-saved-uuid' }) } },
     '@/lib/summary-language-preferences': { applyPinnedSummaryLanguageToMeeting: async () => {} },
-    '@/meetnola/ipc': { saveMeetingNotes: async args => { assert.match(args.notesMarkdown, /Synthetic/); events.push('notes'); } },
+    '@/afterword/ipc': { saveMeetingNotes: async args => { assert.match(args.notesMarkdown, /Synthetic/); events.push('notes'); } },
   }, { localStorage });
   const notes = load('@/lib/liveMeetingNotes');
   notes.writeLiveMeetingNotes('meeting-1', blocks);
@@ -725,10 +725,10 @@ test('interrupted notes-only recording can be recovered and clears its draft onl
   assert.equal(notes.readLiveMeetingNotes('meeting-1'), null);
 });
 
-test('Meetnola never checks or installs an upstream application update', async () => {
+test('Afterword never checks or installs an upstream application update', async () => {
   const unexpected = () => { throw new Error('Upstream updater must not run'); };
   const load = loader({
-    '@/flavor': { isMeetnola: true },
+    '@/flavor': { isAfterword: true },
     '@tauri-apps/plugin-updater': { check: unexpected },
     '@tauri-apps/plugin-process': { relaunch: unexpected },
     '@tauri-apps/api/app': { getVersion: async () => '0.4.0' },
@@ -759,7 +759,7 @@ for (const audioStatus of ['failed', 'partial', 'success']) {
         assert.equal(sourceId, 'meeting-1'); return { meeting_id: 'meeting-recording-meeting-1' };
       } } },
       '@/lib/summary-language-preferences': { applyPinnedSummaryLanguageToMeeting: async () => {} },
-      '@/meetnola/ipc': { saveMeetingNotes: async () => {} },
+      '@/afterword/ipc': { saveMeetingNotes: async () => {} },
     }, { localStorage });
     const notes = load('@/lib/liveMeetingNotes');
     notes.writeLiveMeetingNotes('meeting-1', blocks);
@@ -1179,7 +1179,7 @@ test('quitting flushes actual meeting-note edits before the two-second debounce 
   const load = loader({
     react: { ...quietReact, useEffect: fn => { effects.push(fn); } },
     sonner: { toast: { error: noop } },
-    '@/meetnola/ipc': {
+    '@/afterword/ipc': {
       getMeetingNotes: async () => ({ notes_json: '[]' }),
       saveMeetingNotes: async data => { saved.push(data); await pending; },
     },
@@ -1380,7 +1380,7 @@ test('failed notes can retry once without overwriting loaded or newly edited not
   const requests = [];
   const runner = hookRunner('@/hooks/useMeetingNotes', 'useMeetingNotes', {
     sonner: { toast: { error: noop } },
-    '@/meetnola/ipc': { getMeetingNotes: id => new Promise((resolve, reject) => requests.push({ id, resolve, reject })), saveMeetingNotes: async () => {} },
+    '@/afterword/ipc': { getMeetingNotes: id => new Promise((resolve, reject) => requests.push({ id, resolve, reject })), saveMeetingNotes: async () => {} },
   }, { crypto: { randomUUID: () => 'synthetic' }, setTimeout: () => 1 });
   runner.render('saved-A');
   requests[0].reject(new Error('Synthetic unavailable notes')); await new Promise(setImmediate);
@@ -1406,7 +1406,7 @@ test('late notes results and failures cannot replace the active meeting or its r
   const requests = [];
   const runner = hookRunner('@/hooks/useMeetingNotes', 'useMeetingNotes', {
     sonner: { toast: { error: noop } },
-    '@/meetnola/ipc': { getMeetingNotes: id => new Promise((resolve, reject) => requests.push({ id, resolve, reject })), saveMeetingNotes: async () => {} },
+    '@/afterword/ipc': { getMeetingNotes: id => new Promise((resolve, reject) => requests.push({ id, resolve, reject })), saveMeetingNotes: async () => {} },
   });
   runner.render('saved-A'); runner.render('saved-B');
   requests[0].reject(new Error('Obsolete read')); requests[1].resolve({ notes_json: JSON.stringify(blocks) });
@@ -1440,7 +1440,7 @@ function chatFixture(liveQuery, ipc = {}) {
       states[index] = initial;
       return [initial, value => { states[index] = typeof value === 'function' ? value(states[index]) : value; }];
     } },
-    '@/meetnola/ipc': { liveQuery, prepareLiveQuery: async () => 'request-synthetic', cancelLiveQuery: async id => { cancelled.push(id); }, ...ipc },
+    '@/afterword/ipc': { liveQuery, prepareLiveQuery: async () => 'request-synthetic', cancelLiveQuery: async id => { cancelled.push(id); }, ...ipc },
   });
   const chat = load('@/hooks/useLiveMeetingChat').useLiveMeetingChat('synthetic');
   const cleanup = effects[0]();
@@ -1669,7 +1669,7 @@ test('recording listeners registered after unmount are released and cannot resta
 });
 
 test('library questions retrieve topical words and retain a topic for follow-ups', () => {
-  const { librarySearchTerms } = loader({ '@/meetnola/ipc': {} })('@/lib/libraryAnswerContext');
+  const { librarySearchTerms } = loader({ '@/afterword/ipc': {} })('@/lib/libraryAnswerContext');
   assert.deepEqual([...librarySearchTerms('What did Mira decide about the comet launch?', [])], ['mira', 'decide', 'comet', 'launch']);
   const messages = [{ role: 'user', content: 'What did Mira decide about the comet launch?' }];
   const terms = librarySearchTerms('Who owns that?', messages);
@@ -1687,7 +1687,7 @@ test('library retrieval captures meeting links, original excerpts and explicit c
     { meetingId: 'A', title: 'Comet plan', createdAt: '2026-09-01', kind: 'notes', audioStartTime: null, text: 'Mira proposed a launch; approval pending.' },
     { meetingId: 'B', title: 'Comet review', createdAt: '2026-09-02', kind: 'transcript', audioStartTime: 75, text: 'We approved a smaller launch.' },
   ];
-  const { loadLibraryAnswerContext, buildLibraryAnswerContext } = loader({ '@/meetnola/ipc': { meetnolaInvoke: async (...args) => { calls.push(args); return hits; } } })('@/lib/libraryAnswerContext');
+  const { loadLibraryAnswerContext, buildLibraryAnswerContext } = loader({ '@/afterword/ipc': { afterwordInvoke: async (...args) => { calls.push(args); return hits; } } })('@/lib/libraryAnswerContext');
   const context = await loadLibraryAnswerContext('What happened to the comet launch?', [], '30');
   assert.equal(calls[0][0], 'search_library_sources');
   assert.equal(calls[0][1].sinceDays, 30);
@@ -1724,7 +1724,7 @@ test('recent questions bypass keywords, preserve final sources and disclose omit
     meetingId: 'A', title: 'Synthetic review', createdAt: '2026-09-01', kind: 'transcript', audioStartTime: n,
     text: n === 204 ? 'Morgan will send results Friday.' : 'Synthetic discussion.',
   })) };
-  const { loadLibraryAnswerContext } = loader({ '@/meetnola/ipc': { meetnolaInvoke: async (...args) => { calls.push(args); return result; } } })('@/lib/libraryAnswerContext');
+  const { loadLibraryAnswerContext } = loader({ '@/afterword/ipc': { afterwordInvoke: async (...args) => { calls.push(args); return result; } } })('@/lib/libraryAnswerContext');
   const context = await loadLibraryAnswerContext('What is this?', [], '7', 'recent');
   assert.equal(calls[0][0], 'get_recent_library_sources');
   assert.equal(calls[0][1].sinceDays, 7);
@@ -1767,7 +1767,7 @@ function librarySettingsFixture(invoke) {
   const timers = new Map(); let timerId = 0;
   const runner = hookRunner('@/hooks/useLibraryChat', 'useLibraryChat', {
     './useSavedMeetingChat': { usePersistentChat: () => chat },
-    '@/meetnola/ipc': { meetnolaInvoke: invoke }, '@/lib/pendingWrites': writes,
+    '@/afterword/ipc': { afterwordInvoke: invoke }, '@/lib/pendingWrites': writes,
   }, { setTimeout: callback => { const id = ++timerId; timers.set(id, callback); return id; }, clearTimeout: id => timers.delete(id) });
   return { runner, chat, flush: writes.flushPendingWrites, fire: () => { const callbacks = [...timers.values()]; timers.clear(); callbacks.forEach(callback => callback()); } };
 }
@@ -2128,7 +2128,7 @@ function savedChatFixture(invoke, exportName = 'useSavedMeetingChat') {
   const live = { messages: [], isLoading: false, send: async () => {}, clearMessages: () => {}, restoreMessages: saved => { live.messages = saved; } };
   const runner = hookRunner('@/hooks/useSavedMeetingChat', exportName, {
     './useLiveMeetingChat': { useLiveMeetingChat: () => live },
-    '@/meetnola/ipc': { meetnolaInvoke: invoke }, '@/lib/pendingWrites': writes,
+    '@/afterword/ipc': { afterwordInvoke: invoke }, '@/lib/pendingWrites': writes,
   });
   return { runner, live, flush: writes.flushPendingWrites };
 }
@@ -2164,7 +2164,7 @@ test('opening a saved recording waits for its final live conversation write', as
     if (allowWrite) await new Promise(resolve => { release = resolve; });
     stored = args.messagesJson;
   };
-  const stubs = { './useLiveMeetingChat': { useLiveMeetingChat: () => live }, '@/meetnola/ipc': { meetnolaInvoke: invoke }, '@/lib/pendingWrites': writes };
+  const stubs = { './useLiveMeetingChat': { useLiveMeetingChat: () => live }, '@/afterword/ipc': { afterwordInvoke: invoke }, '@/lib/pendingWrites': writes };
   const recording = hookRunner('@/hooks/useSavedMeetingChat', 'usePersistentChat', stubs);
   recording.render('meeting-123', 'recording'); await new Promise(setImmediate);
   recording.render('meeting-123', 'recording'); await new Promise(setImmediate);
@@ -2252,7 +2252,7 @@ test('saved meeting discovery ignores stale reads and retries a failed page with
   const requests = [], timers = new Map();
   let timerId = 0;
   const runner = hookRunner('@/hooks/useSavedMeetingSearch', 'useSavedMeetingSearch', {
-    '@/meetnola/ipc': { meetnolaInvoke: (command, args) => new Promise((resolve, reject) => requests.push({ command, ...args, resolve, reject })) },
+    '@/afterword/ipc': { afterwordInvoke: (command, args) => new Promise((resolve, reject) => requests.push({ command, ...args, resolve, reject })) },
   }, { setTimeout: callback => { timers.set(++timerId, callback); return timerId; }, clearTimeout: id => timers.delete(id) });
   const match = meetingId => ({ meetingId, title: meetingId, createdAt: '', kind: 'notes', text: 'Original source match', audioStartTime: null });
   runner.render('alpha'); timers.get(1)();
@@ -2676,7 +2676,7 @@ test('claim checking keeps quoted text separate from original meeting evidence a
 test('search source reads follow meeting and source identity, with missing and retry states', async () => {
   const requests = [];
   const runner = hookRunner('@/hooks/useSavedSearchMatch', 'useSavedSearchMatch', {
-    '@/meetnola/ipc': { meetnolaInvoke: (command, args) => new Promise((resolve, reject) => requests.push({ command, ...args, resolve, reject })) },
+    '@/afterword/ipc': { afterwordInvoke: (command, args) => new Promise((resolve, reject) => requests.push({ command, ...args, resolve, reject })) },
   });
   const flush = () => new Promise(setImmediate);
   const target = { kind: 'transcript', sourceId: 'A-late-segment', query: 'launch & title' };
@@ -2728,7 +2728,7 @@ test('matching source renders current excerpts safely and distinguishes failed f
 test('folder reads discard stale selections, retain confirmed data during refresh, and retry failures', async () => {
   const requests = [];
   const runner = hookRunner('@/hooks/useNoteFolders', 'useFolderRead', {
-    '@/meetnola/ipc': { meetnolaInvoke: (command, args) => new Promise((resolve, reject) => requests.push({ command, ...args, resolve, reject })) },
+    '@/afterword/ipc': { afterwordInvoke: (command, args) => new Promise((resolve, reject) => requests.push({ command, ...args, resolve, reject })) },
   });
   const flush = () => new Promise(setImmediate);
   const render = (folderId, revision = 0, enabled = true) => runner.render('get_note_folder_members', { folderId }, enabled, revision);
@@ -2750,7 +2750,7 @@ test('folder reads discard stale selections, retain confirmed data during refres
 test('search results never flash matches from a previously selected folder', async () => {
   const requests = [], timers = [];
   const runner = hookRunner('@/hooks/useSavedMeetingSearch', 'useSavedMeetingSearch', {
-    '@/meetnola/ipc': { meetnolaInvoke: (command, args) => new Promise(resolve => requests.push({ command, ...args, resolve })) },
+    '@/afterword/ipc': { afterwordInvoke: (command, args) => new Promise(resolve => requests.push({ command, ...args, resolve })) },
   }, { setTimeout: callback => { timers.push(callback); return timers.length; }, clearTimeout: noop });
   const flush = () => new Promise(setImmediate);
   runner.render('launch', 'A'); timers[0]();
@@ -2769,7 +2769,7 @@ test('search results never flash matches from a previously selected folder', asy
 test('coverage review uses current editor snapshots without transcript or chat history', async () => {
   const calls = [], cancelled = [];
   const runner = hookRunner('@/hooks/useNotesCoverage', 'useNotesCoverage', {
-    '@/meetnola/ipc': {
+    '@/afterword/ipc': {
       prepareLiveQuery: async () => 'review-1',
       liveQuery: async args => { calls.push(args); return JSON.stringify({ findings: [] }); },
       cancelLiveQuery: async id => { cancelled.push(id); },
@@ -2789,7 +2789,7 @@ test('coverage review uses current editor snapshots without transcript or chat h
 test('coverage review cancels registrations resolved after closing and never dispatches them', async () => {
   let resolvePrepare; const cancelled = [], calls = [];
   const runner = hookRunner('@/hooks/useNotesCoverage', 'useNotesCoverage', {
-    '@/meetnola/ipc': {
+    '@/afterword/ipc': {
       prepareLiveQuery: () => new Promise(resolve => { resolvePrepare = resolve; }),
       liveQuery: async args => { calls.push(args); return '{"findings":[]}'; },
       cancelLiveQuery: async id => { cancelled.push(id); },
@@ -2806,7 +2806,7 @@ test('coverage review cancels registrations resolved after closing and never dis
 test('coverage review ignores obsolete results after meeting changes and unmount', async () => {
   const requests = [], cancelled = []; let nextId = 0;
   const runner = hookRunner('@/hooks/useNotesCoverage', 'useNotesCoverage', {
-    '@/meetnola/ipc': {
+    '@/afterword/ipc': {
       prepareLiveQuery: async () => `review-${++nextId}`,
       liveQuery: args => new Promise(resolve => requests.push({ args, resolve })),
       cancelLiveQuery: async id => { cancelled.push(id); },
@@ -2825,7 +2825,7 @@ test('coverage review ignores obsolete results after meeting changes and unmount
 test('coverage review retries failures with a fresh snapshot and rejects missing sources', async () => {
   let current = { notes: '', draft: 'Draft' }; const calls = [];
   const runner = hookRunner('@/hooks/useNotesCoverage', 'useNotesCoverage', {
-    '@/meetnola/ipc': {
+    '@/afterword/ipc': {
       prepareLiveQuery: async () => 'review', cancelLiveQuery: async () => {},
       liveQuery: async args => { calls.push(args); if (calls.length === 1) throw Error('Synthetic model failure'); return '{"findings":[]}'; },
     },
@@ -2855,7 +2855,7 @@ test('previous enhancement waits for pending edits and exposes failed saves befo
   runner.render(props);
   assert.equal(calls.length, 0);
   finishSave(); await new Promise(setImmediate);
-  assert.equal(calls[0].command, 'plugin:meetnola|get_previous_summary');
+  assert.equal(calls[0].command, 'plugin:afterword|get_previous_summary');
   assert.equal(runner.render(props).data, null);
   runner.render({ ...props, open: false });
   save = async () => { throw Error('Could not save latest edit'); };
@@ -2870,7 +2870,7 @@ test('previous enhancement waits for pending edits and exposes failed saves befo
 test('previous enhancement ignores reads after closing, changing notes, or unmounting', async () => {
   const requests = [];
   const runner = hookRunner('@/hooks/usePreviousSummary', 'usePreviousSummary', {
-    '@/meetnola/ipc': { meetnolaInvoke: (command, args) => new Promise(resolve => requests.push({ command, ...args, resolve })) },
+    '@/afterword/ipc': { afterwordInvoke: (command, args) => new Promise(resolve => requests.push({ command, ...args, resolve })) },
   });
   const props = { meetingId: 'A', open: true, beforeRead: async () => {}, onRestored: noop };
   const flush = () => new Promise(setImmediate);
@@ -2901,7 +2901,7 @@ test('previous enhancement suppresses duplicate restores and retries the same ve
   let state = runner.render(props);
   const first = state.restore(); await state.restore();
   assert.equal(requests.length, 1);
-  assert.equal(requests[0].command, 'plugin:meetnola|restore_previous_summary');
+  assert.equal(requests[0].command, 'plugin:afterword|restore_previous_summary');
   assert.equal(requests[0].args.versionId, 'version-A');
   assert.equal(requests[0].args.currentRevision, 'revision-A');
   requests[0].reject('Synthetic lost response'); await first;
@@ -2961,9 +2961,9 @@ test('follow-up writes flush notes and preserve nested source blocks and checkbo
   const calls = [];
   const load = loader({
     '@/lib/pendingWrites': { createWriteQueue: key => ({ flush: async () => calls.push(['flush', key]) }) },
-    '@/meetnola/ipc': {
+    '@/afterword/ipc': {
       getMeetingNotes: async id => { calls.push(['read', id]); return { notes_json: original, updated_at: 'r1' }; },
-      meetnolaInvoke: async (command, args) => calls.push([command, args]),
+      afterwordInvoke: async (command, args) => calls.push([command, args]),
     },
   });
   await load('@/lib/noteTasks').setNoteTaskChecked({ meetingId: 'A', blockId: 'task', checked: false, revision: 'r1' }, true);
@@ -2987,7 +2987,7 @@ test('stale or ambiguous follow-up sources never overwrite a note', async () => 
   ]) {
     const load = loader({
       '@/lib/pendingWrites': { createWriteQueue: () => ({ flush: async () => {} }) },
-      '@/meetnola/ipc': { getMeetingNotes: async () => ({ notes_json: JSON.stringify(blocks), updated_at: revision }), meetnolaInvoke: () => assert.fail('Must not write a stale or ambiguous source') },
+      '@/afterword/ipc': { getMeetingNotes: async () => ({ notes_json: JSON.stringify(blocks), updated_at: revision }), afterwordInvoke: () => assert.fail('Must not write a stale or ambiguous source') },
     });
     await assert.rejects(load('@/lib/noteTasks').setNoteTaskChecked({ meetingId: 'A', blockId: 'task', checked: false, revision: 'r1' }, true), /changed/);
   }
@@ -2996,7 +2996,7 @@ test('stale or ambiguous follow-up sources never overwrite a note', async () => 
 test('follow-up lists ignore late folder results and prevent duplicate writes', async () => {
   const requests = []; let finishSave; let writes = 0;
   const runner = hookRunner('@/hooks/useNoteTasks', 'useNoteTasks', {
-    '@/meetnola/ipc': { meetnolaInvoke: (command, args) => new Promise((resolve, reject) => requests.push({ ...args, resolve, reject })) },
+    '@/afterword/ipc': { afterwordInvoke: (command, args) => new Promise((resolve, reject) => requests.push({ ...args, resolve, reject })) },
     '@/lib/noteTasks': { setNoteTaskChecked: () => { writes++; return new Promise(resolve => { finishSave = resolve; }); } },
   });
   const flush = () => new Promise(setImmediate);

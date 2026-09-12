@@ -6,6 +6,9 @@ use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_store::StoreExt;
 
+/// Store filename intentionally keeps the legacy `meetnola-` prefix: renaming it
+/// would drop the export folder a user already picked. Same data-continuity
+/// reason the bundle id stays `com.meetnola.tester`.
 const STORE: &str = "meetnola-export.json";
 
 #[tauri::command]
@@ -64,7 +67,7 @@ async fn snapshot(pool: &SqlitePool, id: &str) -> Result<(String, String), Strin
     tx.commit().await.map_err(|e| e.to_string())?;
     let exported = chrono::Utc::now().to_rfc3339();
     // JSON string literals are valid YAML scalars, including multiline or quoted titles.
-    let mut document = format!("---\nsource: meetnola\nmeeting_id: {}\ntitle: {}\ncreated_at: {}\nexported_at: {}\ntranscript_segments: {}\n---\n\n# {}\n\n## Enhanced notes\n\n{}\n\n## Written notes\n\n{}\n\n## Transcript\n\n",
+    let mut document = format!("---\nsource: afterword\nmeeting_id: {}\ntitle: {}\ncreated_at: {}\nexported_at: {}\ntranscript_segments: {}\n---\n\n# {}\n\n## Enhanced notes\n\n{}\n\n## Written notes\n\n{}\n\n## Transcript\n\n",
         serde_json::json!(id), serde_json::json!(title), serde_json::json!(date), serde_json::json!(exported), rows.len(),
         title.replace(['\r', '\n'], " "), if enhanced.trim().is_empty() { "_No enhanced notes._" } else { &enhanced },
         notes.as_deref().filter(|text| !text.trim().is_empty()).unwrap_or("_No written notes._"));
@@ -91,7 +94,7 @@ fn write_snapshot(folder: &Path, title: &str, document: &str) -> Result<PathBuf,
     }
     let name = format!("{}-{}-{}.md", chrono::Utc::now().format("%Y%m%d-%H%M%S"), slug.trim_matches('-'), uuid::Uuid::new_v4());
     let path = folder.join(name);
-    let mut file = tempfile::Builder::new().prefix(".meetnola-").tempfile_in(folder).map_err(|e| format!("Could not write to the export folder: {e}"))?;
+    let mut file = tempfile::Builder::new().prefix(".afterword-").tempfile_in(folder).map_err(|e| format!("Could not write to the export folder: {e}"))?;
     file.write_all(document.as_bytes()).and_then(|_| file.as_file().sync_all()).map_err(|e| format!("Could not finish the export: {e}"))?;
     file.persist_noclobber(&path).map_err(|e| format!("Could not publish the export: {e}"))?;
     Ok(path)

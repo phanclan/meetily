@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { liveQuery, prepareLiveQuery, cancelLiveQuery, type MeetingExchange } from '@/meetnola/ipc';
+import { liveQuery, prepareLiveQuery, cancelLiveQuery, type MeetingExchange } from '@/afterword/ipc';
 import type { MeetingAnswerContext, MeetingSource } from '@/lib/meetingAnswerContext';
 
 export interface ChatMessage {

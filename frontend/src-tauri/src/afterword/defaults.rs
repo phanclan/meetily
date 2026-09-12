@@ -1,4 +1,4 @@
-//! Meetnola product defaults: local STT + Vercel AI Gateway for summaries/Enhance.
+//! Afterword product defaults: local STT + Vercel AI Gateway for summaries/Enhance.
 //!
 //! Live transcription stays local (Parakeet). Summaries and Enhance use the existing
 //! `custom-openai` transport pointed at the Vercel AI Gateway. Existing installs that
@@ -26,25 +26,25 @@ pub const TRANSCRIPT_PROVIDER: &str = "parakeet";
 /// Default Parakeet model id (same catalog as Meetily local STT).
 pub const TRANSCRIPT_MODEL: &str = DEFAULT_PARAKEET_MODEL;
 
-/// Effective summary provider for Meetnola feature builds.
+/// Effective summary provider for Afterword feature builds.
 #[allow(dead_code)]
 pub fn summary_provider() -> &'static str {
     SUMMARY_PROVIDER
 }
 
-/// Effective summary model id for Meetnola feature builds.
+/// Effective summary model id for Afterword feature builds.
 #[allow(dead_code)]
 pub fn summary_model() -> &'static str {
     GATEWAY_MODEL
 }
 
-/// Effective live-transcription provider for Meetnola feature builds.
+/// Effective live-transcription provider for Afterword feature builds.
 #[allow(dead_code)]
 pub fn transcript_provider() -> &'static str {
     TRANSCRIPT_PROVIDER
 }
 
-/// Effective live-transcription model for Meetnola feature builds.
+/// Effective live-transcription model for Afterword feature builds.
 #[allow(dead_code)]
 pub fn transcript_model() -> &'static str {
     TRANSCRIPT_MODEL
@@ -57,7 +57,7 @@ pub fn is_gateway_endpoint(endpoint: &str) -> bool {
         || trimmed.eq_ignore_ascii_case("https://ai-gateway.vercel.sh/v1/")
 }
 
-/// Apply Meetnola fresh-install / onboarding defaults atomically:
+/// Apply Afterword fresh-install / onboarding defaults atomically:
 /// - transcript_settings → local Parakeet
 /// - settings.provider/model → custom-openai + Gateway model
 /// - settings.customOpenAIConfig → Gateway endpoint + model (no API key baked in)
@@ -67,7 +67,7 @@ pub fn is_gateway_endpoint(endpoint: &str) -> bool {
 pub async fn apply_fresh_install_defaults(pool: &SqlitePool) -> Result<(), String> {
     SettingsRepository::save_transcript_config(pool, TRANSCRIPT_PROVIDER, TRANSCRIPT_MODEL)
         .await
-        .map_err(|e| format!("Failed to set Meetnola transcript defaults: {}", e))?;
+        .map_err(|e| format!("Failed to set Afterword transcript defaults: {}", e))?;
 
     SettingsRepository::save_model_config(
         pool,
@@ -77,7 +77,7 @@ pub async fn apply_fresh_install_defaults(pool: &SqlitePool) -> Result<(), Strin
         None,
     )
     .await
-    .map_err(|e| format!("Failed to set Meetnola summary defaults: {}", e))?;
+    .map_err(|e| format!("Failed to set Afterword summary defaults: {}", e))?;
 
     let gateway_config = CustomOpenAIConfig {
         endpoint: GATEWAY_ENDPOINT.to_string(),
@@ -90,10 +90,10 @@ pub async fn apply_fresh_install_defaults(pool: &SqlitePool) -> Result<(), Strin
 
     SettingsRepository::save_custom_openai_config(pool, &gateway_config)
         .await
-        .map_err(|e| format!("Failed to set Meetnola Gateway config: {}", e))?;
+        .map_err(|e| format!("Failed to set Afterword Gateway config: {}", e))?;
 
     log::info!(
-        "Applied Meetnola defaults: transcript={}/{}, summary={}/{} @ {}",
+        "Applied Afterword defaults: transcript={}/{}, summary={}/{} @ {}",
         TRANSCRIPT_PROVIDER,
         TRANSCRIPT_MODEL,
         SUMMARY_PROVIDER,

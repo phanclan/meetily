@@ -431,15 +431,21 @@ $env:RUST_LOG="debug"; ./clean_run_windows.bat
 - [frontend/src-tauri/src/whisper_engine/whisper_engine.rs](frontend/src-tauri/src/whisper_engine/whisper_engine.rs) - Whisper model management and transcription
 
 
-## Meetnola fork notes
+## Afterword fork notes
 
-Meetnola is this fork's tester/product flavor of Meetily.
+Afterword is this fork's tester/product flavor of Meetily. It was previously called
+Meetnola; the name is gone from code and scripts, but the bundle id is deliberately
+unchanged (see below).
 
 - Stock app data (Meetily): `~/Library/Application Support/com.meetily.ai/`
-- Tester app data (Meetnola): `~/Library/Application Support/com.meetnola.tester/`
-- Tester bundle id: `com.meetnola.tester`
-- Packaged tester: prefer `frontend/build-meetnola.sh` / `meetnola Tester.app` for macOS system-audio permission testing (`tauri dev` is not trustworthy for TCC)
-- WIP handoffs live under `docs/wip/` (see `handoff-meetnola-current-state.md`)
+- Tester app data (Afterword): `~/Library/Application Support/com.meetnola.tester/`
+- Tester bundle id: `com.meetnola.tester` — **do not change it.** Changing the identifier orphans Application Support data and macOS TCC (mic / screen recording) grants.
+- Packaged tester: prefer `frontend/build-afterword.sh` / `Afterword.app` for macOS system-audio permission testing (`tauri dev` is not trustworthy for TCC)
+- WIP handoffs live under `docs/wip/` (see `handoff-afterword-current-state.md`)
+
+Other identifiers kept on the legacy `meetnola` name for the same data-continuity
+reason: the export-folder store file (`meetnola-export.json`) and the live-note /
+live-folder `localStorage` key prefixes.
 
 ### Recording / UI stability debugging
 
@@ -506,19 +512,19 @@ MEETILY_AUTOMATION=1 RUST_LOG=debug ./clean_run.sh 2>&1 | tee /tmp/meetily-dev.l
 - `frontend-runtime.log` is also written to `~/Library/Application Support/com.meetily.ai/logs/`
 - **The console bridge is development-only.** It costs one IPC round-trip per log line, and the transcript path logs several times per segment. In a packaged (production) build it is off unless a tester opts in from DevTools: `localStorage.setItem('meetily:console-bridge', '1')` then reload. Uncaught errors and unhandled rejections are always logged, bridge or not.
 
-### Meetnola Tester Build (Preferred for macOS audio / peer testing)
+### Afterword Tester Build (Preferred for macOS audio / peer testing)
 
 Use the packaged tester app when validating macOS permissions, startup behavior, or peer-ready flows:
 
 ```bash
 cd frontend
-./build-meetnola.sh
-open -n '../target/release/bundle/macos/meetnola Tester.app'
+./build-afterword.sh
+open -n '../target/release/bundle/macos/Afterword.app'
 ```
 
 Important paths:
-- Packaged app: `target/release/bundle/macos/meetnola Tester.app`
-- Bundle id: `com.meetnola.tester`
+- Packaged app: `target/release/bundle/macos/Afterword.app` (bundle name follows `productName`; older builds on disk are still named `meetnola Tester.app`)
+- Bundle id: `com.meetnola.tester` (unchanged by the Afterword rename)
 - Tester app data: `~/Library/Application Support/com.meetnola.tester/`
 - Tester DB: `~/Library/Application Support/com.meetnola.tester/meeting_minutes.sqlite`
 
@@ -531,7 +537,7 @@ Tester builds also expose a visible build badge in the UI. Use it to confirm the
 
 Operational note:
 - The `.app` bundle is currently the peer-test artifact; the `.dmg` step still fails in this branch.
-- `docs/meetnola-tester-readme.md` is the current setup/troubleshooting guide for testers.
+- `docs/afterword-tester-readme.md` is the current setup/troubleshooting guide for testers.
 - `frontend/build-gpu.sh` now normalizes executable bits on `*.app/Contents/MacOS/*` after build so the packaged bundle is less fragile if DMG bundling fails later.
 
 ### Automation HTTP API (Testing & Scripting)

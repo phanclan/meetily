@@ -5,6 +5,8 @@ export function isLiveMeetingId(id: string) {
   return /^meeting-\d+$/.test(id) || id.startsWith('session-');
 }
 
+// Storage key keeps the legacy `meetnola.` prefix so unsaved live notes written
+// before the Afterword rename are still recoverable.
 const key = (id: string) => `meetnola.live-notes.${id}`;
 
 export function readLiveMeetingNotes(id: string): Block[] | null {

@@ -6,7 +6,7 @@ import { Folder, Plus } from 'lucide-react';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { meetnolaInvoke } from '@/meetnola/ipc';
+import { afterwordInvoke } from '@/afterword/ipc';
 import { useFolderRead, type NoteFolder } from '@/hooks/useNoteFolders';
 
 export function NoteFolderDialog({ open, onOpenChange, folder, onCreated, returnFocusRef }: {
@@ -20,9 +20,9 @@ export function NoteFolderDialog({ open, onOpenChange, folder, onCreated, return
     event.preventDefault(); if (busy || !name.trim()) return;
     setBusy(true); setError('');
     try {
-      if (folder) await meetnolaInvoke('rename_note_folder', { folderId: folder.id, name });
+      if (folder) await afterwordInvoke('rename_note_folder', { folderId: folder.id, name });
       else {
-        const created = await meetnolaInvoke<NoteFolder>('create_note_folder', { name, meetingId: null });
+        const created = await afterwordInvoke<NoteFolder>('create_note_folder', { name, meetingId: null });
         onCreated?.(created);
       }
       refreshNoteFolders(); onOpenChange(false);
@@ -75,7 +75,7 @@ export function MeetingFoldersDialog({ meetingId, open, onOpenChange }: { meetin
     if (busy || !selected.data) return;
     setBusy(true); setError('');
     try {
-      await meetnolaInvoke('set_meeting_note_folder', { meetingId, folderId, included });
+      await afterwordInvoke('set_meeting_note_folder', { meetingId, folderId, included });
       selected.setData(included ? [...new Set([...selected.data, folderId])] : selected.data.filter(id => id !== folderId));
       refreshNoteFolders();
     } catch (error) { setError(String(error)); } finally { setBusy(false); }
@@ -85,7 +85,7 @@ export function MeetingFoldersDialog({ meetingId, open, onOpenChange }: { meetin
     setBusy(true); setError('');
     restoreFocusRef.current = nameInputRef.current;
     try {
-      const folder = await meetnolaInvoke<NoteFolder>('create_note_folder', { name, meetingId });
+      const folder = await afterwordInvoke<NoteFolder>('create_note_folder', { name, meetingId });
       selected.setData([...selected.data, folder.id]); setName(''); refreshNoteFolders();
     } catch (error) { setError(String(error)); } finally { setBusy(false); }
   };

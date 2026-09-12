@@ -239,7 +239,7 @@ mod tests {
             sqlx::query("INSERT INTO meetings VALUES (?, ?, '2100-01-01', '')").bind(&id).bind(&id).execute(&pool).await.unwrap();
             sqlx::query("INSERT INTO meeting_notes VALUES (?, 'Synthetic original', NULL, '', '')").bind(&id).execute(&pool).await.unwrap();
         }
-        crate::meetnola::trash::trash(&pool, "new-0").await.unwrap();
+        crate::afterword::trash::trash(&pool, "new-0").await.unwrap();
         let result = recent_sources(&pool, None).await.unwrap();
         assert_eq!(result.total_meetings, 7);
         assert_eq!(result.excerpts.len(), 5);
@@ -263,7 +263,7 @@ mod tests {
     #[tokio::test]
     async fn trash_hides_sources_from_discovery_and_assistant_until_restored() {
         let pool = fixture().await;
-        crate::meetnola::trash::trash(&pool, "A").await.unwrap();
+        crate::afterword::trash::trash(&pool, "A").await.unwrap();
         let terms = vec!["comet".to_owned()];
         assert!(search(&pool, &terms, None).await.unwrap().iter().all(|hit| hit.meeting_id == "B"));
         let hits = search_meetings(&pool, "comet", 0, None).await.unwrap();
@@ -271,7 +271,7 @@ mod tests {
         assert_eq!(hits.meetings[0].meeting_id, "B");
         assert!(search_meetings(&pool, "Alpha", 0, None).await.unwrap().meetings.is_empty());
         assert!(search_match(&pool, "A", "a", "transcript", "comet").await.unwrap().is_none());
-        crate::meetnola::trash::restore(&pool, "A").await.unwrap();
+        crate::afterword::trash::restore(&pool, "A").await.unwrap();
         assert_eq!(search_meetings(&pool, "comet", 0, None).await.unwrap().meetings.len(), 2);
         assert!(search(&pool, &terms, None).await.unwrap().iter().any(|hit| hit.meeting_id == "A"));
         assert!(search_match(&pool, "A", "a", "transcript", "comet").await.unwrap().is_some());

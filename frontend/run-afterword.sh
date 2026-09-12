@@ -4,7 +4,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
-TMP_LOG_DIR="${TMP_LOG_DIR:-/tmp/meetnola}"
+TMP_LOG_DIR="${TMP_LOG_DIR:-/tmp/afterword}"
+# Bundle id stays com.meetnola.tester so app data and macOS TCC grants survive
+# the Meetnola -> Afterword rename.
 TESTER_APP_SUPPORT_DIR="$HOME/Library/Application Support/com.meetnola.tester"
 
 mkdir -p "$TMP_LOG_DIR"
@@ -15,7 +17,7 @@ ln -sfn "$TESTER_APP_SUPPORT_DIR" "$TMP_LOG_DIR/app-support"
 
 export EXTRA_LOG_LINK_DIR="$TMP_LOG_DIR"
 export PRESTART_NEXT_DEV="true"
-export TAURI_DEV_SCRIPT="tauri:dev:meetnola:attach"
-export NEXT_PUBLIC_FLAVOR="${NEXT_PUBLIC_FLAVOR:-meetnola}"
+export TAURI_DEV_SCRIPT="tauri:dev:afterword:attach"
+export NEXT_PUBLIC_FLAVOR="${NEXT_PUBLIC_FLAVOR:-afterword}"
 
 ./clean_run.sh "$@"
