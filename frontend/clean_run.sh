@@ -15,6 +15,7 @@ SKIP_PREWARM="${SKIP_PREWARM:-false}"
 PRESTART_NEXT_DEV="${PRESTART_NEXT_DEV:-false}"
 EXTRA_LOG_LINK_DIR="${EXTRA_LOG_LINK_DIR:-}"
 NEXTJS_DEV_PID=""
+NEXTJS_PREWARM_PID=""
 
 usage() {
     echo "Usage: $0 [--log-level info|debug|trace] [--clean|--no-clean] [--no-install] [--no-build] [-h|--help]"
@@ -31,14 +32,29 @@ usage() {
     exit 0
 }
 
+# `pnpm dev` forks a `next-server` child that holds port 3118. Killing only the
+# pnpm PID leaves that child orphaned, so every background Next.js below is
+# started under `set -m` (its own process group, PGID == PID) and torn down with
+# `kill -- -PGID` so the whole group goes with it.
+stop_process_group() {
+    local pid="$1"
+    [ -n "$pid" ] || return 0
+    kill -- "-$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+}
+
 cleanup() {
-    if [ -n "${NEXTJS_DEV_PID:-}" ]; then
-        kill "${NEXTJS_DEV_PID}" 2>/dev/null || true
-        wait "${NEXTJS_DEV_PID}" 2>/dev/null || true
-    fi
+    local prewarm="${NEXTJS_PREWARM_PID:-}"
+    local dev="${NEXTJS_DEV_PID:-}"
+    NEXTJS_PREWARM_PID=""
+    NEXTJS_DEV_PID=""
+    stop_process_group "$prewarm"
+    stop_process_group "$dev"
 }
 
 trap cleanup EXIT
+trap 'cleanup; exit 130' INT
+trap 'cleanup; exit 143' TERM
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -162,8 +178,10 @@ if [ "$PRESTART_NEXT_DEV" = true ]; then
             ln -sfn "$NEXT_DEV_LOG" "$EXTRA_LOG_LINK_DIR/next-dev-latest.log"
         fi
         echo "Starting external Next.js dev server (log: $NEXT_DEV_LOG)..."
+        set -m
         pnpm dev > "$NEXT_DEV_LOG" 2>&1 &
         NEXTJS_DEV_PID=$!
+        set +m
 
         if ! wait_for_http "http://localhost:3118/" 120; then
             echo "Error: external Next.js dev server did not start within 120s"
@@ -191,20 +209,24 @@ elif ! command -v curl >/dev/null 2>&1; then
     echo "Skipping Next.js pre-warm (requires curl in PATH)"
 elif ! wait_for_http "http://localhost:3118/" 1; then
     echo "Pre-warming Next.js (compiling home page into .next/ cache)..."
+    set -m
     pnpm dev > /dev/null 2>&1 &
     NEXTJS_PREWARM_PID=$!
+    set +m
+    # Total pre-warm budget, shared across both readiness probes.
     MAX_WAIT=120
+    PREWARM_DEADLINE=$((SECONDS + MAX_WAIT))
 
-    if ! wait_for_http "http://localhost:3118/" "$MAX_WAIT"; then
+    if ! wait_for_http "http://localhost:3118/" "$((PREWARM_DEADLINE - SECONDS))"; then
         echo "Warning: Next.js pre-warm timed out waiting for '/' after ${MAX_WAIT}s, continuing anyway"
-    elif ! wait_for_http "http://localhost:3118/_next/static/chunks/app/layout.js" "$MAX_WAIT"; then
+    elif ! wait_for_http "http://localhost:3118/_next/static/chunks/app/layout.js" "$((PREWARM_DEADLINE - SECONDS))"; then
         echo "Warning: Next.js pre-warm timed out waiting for app/layout.js after ${MAX_WAIT}s, continuing anyway"
     else
         echo "Pre-warm complete — home page and app/layout.js are ready"
     fi
 
-    kill $NEXTJS_PREWARM_PID 2>/dev/null
-    wait $NEXTJS_PREWARM_PID 2>/dev/null || true
+    stop_process_group "$NEXTJS_PREWARM_PID"
+    NEXTJS_PREWARM_PID=""
     sleep 1
 else
     echo "Next.js is already responding on port 3118, skipping pre-warm"

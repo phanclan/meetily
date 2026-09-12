@@ -298,6 +298,10 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     // CRITICAL: Listen for transcript-update events and save to recording manager
     // This enables transcript history persistence for page reload sync
     // Store listener ID for cleanup during stop_recording to ensure microphone is released
+    // NOTE: this round-trips through the event bus even though the emitter (transcription
+    // worker) is in-process. Calling the persistence path directly from the worker would
+    // avoid a JSON re-parse per segment, but it would also persist segments drained after
+    // stop_recording unregisters this listener - a stop-flow behavior change, so left as-is.
     {
         use tauri::Listener;
         let listener_id = app.listen("transcript-update", move |event: tauri::Event| {
@@ -470,6 +474,10 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     // CRITICAL: Listen for transcript-update events and save to recording manager
     // This enables transcript history persistence for page reload sync
     // Store listener ID for cleanup during stop_recording to ensure microphone is released
+    // NOTE: this round-trips through the event bus even though the emitter (transcription
+    // worker) is in-process. Calling the persistence path directly from the worker would
+    // avoid a JSON re-parse per segment, but it would also persist segments drained after
+    // stop_recording unregisters this listener - a stop-flow behavior change, so left as-is.
     {
         use tauri::Listener;
         let listener_id = app.listen("transcript-update", move |event: tauri::Event| {

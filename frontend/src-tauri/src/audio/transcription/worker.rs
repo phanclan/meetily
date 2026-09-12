@@ -403,20 +403,10 @@ pub fn start_transcription_task<R: Runtime>(
                                 );
                             }
 
-                            // Emit progress event for frontend
-                            let progress_percentage = if queued > 0 {
-                                (completed as f64 / queued as f64 * 100.0) as u32
-                            } else {
-                                100
-                            };
-
-                            let _ = app_clone.emit("transcription-progress", serde_json::json!({
-                                "worker_id": worker_id,
-                                "chunks_completed": completed,
-                                "chunks_queued": queued,
-                                "progress_percentage": progress_percentage,
-                                "message": format!("Worker {} processing... ({}/{})", worker_id, completed, queued)
-                            }));
+                            // No progress event is emitted here: live transcription has no
+                            // frontend listener for one (the retranscription flow has its own
+                            // `retranscription-progress`), and emitting per chunk cost an IPC
+                            // round-trip plus a JSON serialization for every segment.
                         }
                         None => {
                             // No more chunks available

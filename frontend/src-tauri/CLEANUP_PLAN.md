@@ -5,14 +5,14 @@ After analyzing the src-tauri codebase, I've identified several areas requiring 
 
 ## Key Issues Identified
 
-### 1. **Legacy Code Presence**
-- **`lib_old_complex.rs`** (2,437 lines) - Large legacy file that appears to contain old implementation
-- **Dual Audio Systems** - Both `audio/` and `audio_v2/` modules exist, indicating migration in progress
+### 1. **Legacy Code Presence** — *resolved*
+- ~~**`lib_old_complex.rs`** (2,437 lines) - Large legacy file that appears to contain old implementation~~ Deleted; it was never declared as a module.
+- ~~**Dual Audio Systems** - Both `audio/` and `audio_v2/` modules exist, indicating migration in progress~~ `audio_v2/` deleted; `audio/` is the only audio system.
 - Multiple `pub use *` wildcard imports creating unclear dependency boundaries
 
 ### 2. **Incomplete Implementation Areas**
-- **20+ TODO comments** across audio_v2 modules indicating incomplete features
-- Substantial placeholder code in audio_v2 system (Phase 2, 3, 4 implementations pending)
+- ~~**20+ TODO comments** across audio_v2 modules indicating incomplete features~~ Removed with `audio_v2/`.
+- ~~Substantial placeholder code in audio_v2 system (Phase 2, 3, 4 implementations pending)~~ Removed with `audio_v2/`.
 - Debug logging scattered throughout codebase (9 occurrences of println!/dbg!)
 
 ### 3. **Module Organization Issues**
@@ -30,14 +30,11 @@ After analyzing the src-tauri codebase, I've identified several areas requiring 
 ### Phase 1: Remove Dead Code & Legacy Systems
 **Priority: High | Risk: Low | Estimated: 2-3 hours**
 
-1. **Remove legacy file**
-   - Delete `lib_old_complex.rs` after ensuring no active dependencies
-   - Update any remaining references
+1. ~~**Remove legacy file**~~ **Done**
+   - Deleted `lib_old_complex.rs`, `audio/core-old.rs`, and `audio/recording_commands.rs.backup`; none were in the module tree and nothing referenced them.
 
-2. **Consolidate audio systems**
-   - Evaluate audio_v2 completion status
-   - Either complete audio_v2 migration or remove incomplete modules
-   - Maintain single, clear audio system architecture
+2. ~~**Consolidate audio systems**~~ **Done**
+   - Deleted `audio_v2/` (never declared in `lib.rs`). `audio/` is the single audio system.
 
 3. **Clean up TODO markers**
    - Address or document 20+ TODO/FIXME comments
