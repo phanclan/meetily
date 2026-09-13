@@ -88,12 +88,17 @@ export function HomeDashboard({
       void import('@/app/recording/page');
       void import('@/app/_components/NoteWorkspace');
     };
-    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+    if (typeof window === 'undefined') return;
+    // Hoisted before the `in` check below: narrowing `window` itself leaves the
+    // fallback branch with `window` typed as `never`.
+    const scheduleTimeout = window.setTimeout.bind(window);
+    const cancelTimeout = window.clearTimeout.bind(window);
+    if ('requestIdleCallback' in window) {
       const id = window.requestIdleCallback(warm, { timeout: 1500 });
       return () => window.cancelIdleCallback(id);
     }
-    const timer = window.setTimeout(warm, 0);
-    return () => window.clearTimeout(timer);
+    const timer = scheduleTimeout(warm, 0);
+    return () => cancelTimeout(timer);
   }, [router]);
   const searchParams = useSearchParams();
   const queryString = searchParams.toString();

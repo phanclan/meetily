@@ -176,15 +176,24 @@ export function useRecordingStop(
   // Main recording stop handler
   const handleRecordingStop = useCallback(async (isCallApi: boolean, options: RecordingStopOptions = {}) => {
     let savedId: string | undefined;
-    if (recordingStoppedDataRef.current) {
-      await recordingStoppedDataRef.current;
-    }
 
-    // Guard: prevent duplicate/concurrent stop calls
+    // Guard: prevent duplicate/concurrent stop calls. Claimed before the await
+    // below, otherwise two callers both pass the check while suspended on it and
+    // the meeting is saved twice.
     if (stopProcessing) {
       return;
     }
     stopProcessing = true;
+
+    if (recordingStoppedDataRef.current) {
+      try {
+        await recordingStoppedDataRef.current;
+      } catch (error) {
+        // The guard is claimed above, so it has to be released on every exit.
+        stopProcessing = false;
+        throw error;
+      }
+    }
 
     // Set status to STOPPING immediately
     setStatus(RecordingStatus.STOPPING);

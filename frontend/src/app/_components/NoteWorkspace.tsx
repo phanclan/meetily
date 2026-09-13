@@ -23,7 +23,7 @@ import { MeetingAssistantDock } from '@/components/MeetingDetails/MeetingAssista
 import { MeetingFolderPicker } from '@/components/MeetingFolderPicker';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { ChromeDragBar } from '@/components/WindowChrome';
-import { useTranscripts } from '@/contexts/TranscriptContext';
+import { useTranscripts, type PersistedTranscriptSegment } from '@/contexts/TranscriptContext';
 import { RecordingStatus } from '@/contexts/RecordingStateContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useAutoSizeTitle } from '@/hooks/useAutoSizeTitle';
@@ -161,7 +161,7 @@ export function NoteWorkspace({ mode }: { mode: NoteWorkspaceMode }) {
   const [isSummarySaving, setIsSummarySaving] = useState(false);
   const [summarySaveError, setSummarySaveError] = useState(false);
   const openModelSettingsRef = useRef<(() => void) | null>(null);
-  const { transcripts } = useTranscripts();
+  const { transcripts, hydrateSavedTranscripts } = useTranscripts();
   const { modelConfig, setModelConfig } = useConfig();
   const templates = useTemplates();
   const [chatInput, setChatInput] = useState('');
@@ -354,7 +354,15 @@ export function NoteWorkspace({ mode }: { mode: NoteWorkspaceMode }) {
         // is what this workspace is showing.
         if (consumeSavedHydration(savedMeetingId)) {
           if (meeting?.title) setNoteTitle(meeting.title);
-          setSavedTranscriptCount(Array.isArray(meeting?.transcripts) ? meeting.transcripts.length : 0);
+          const savedSegments: PersistedTranscriptSegment[] = Array.isArray(meeting?.transcripts)
+            ? meeting.transcripts
+            : [];
+          setSavedTranscriptCount(savedSegments.length);
+          // Reopened from the URL, so nothing has been captured in this tab: copy,
+          // the transcript sheet, Ask context, and the resume baseline all read the
+          // live buffer and would otherwise see an empty transcript. Called even when
+          // empty, so switching saved notes does not keep the previous one's segments.
+          hydrateSavedTranscripts(savedSegments);
         }
 
         const parsedSummary = parseSummaryData(summary);

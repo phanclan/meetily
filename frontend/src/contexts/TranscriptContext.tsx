@@ -19,6 +19,16 @@ import {
   writeLiveSessionId,
 } from '@/lib/recordingSessionIdentity';
 
+/** What `api_get_meeting` returns per segment (SQLite `MeetingTranscript`). */
+export type PersistedTranscriptSegment = {
+  id?: string;
+  text?: string;
+  timestamp?: string;
+  audio_start_time?: number;
+  audio_end_time?: number;
+  duration?: number;
+};
+
 interface TranscriptContextType {
   transcripts: Transcript[];
   transcriptsRef: MutableRefObject<Transcript[]>
@@ -29,6 +39,11 @@ interface TranscriptContextType {
   meetingTitle: string;
   setMeetingTitle: (title: string) => void;
   clearTranscripts: () => void;
+  /**
+   * Load a saved meeting's persisted segments into the live buffer when reopening it
+   * from the URL. Refused while a capture session owns the buffer.
+   */
+  hydrateSavedTranscripts: (segments: PersistedTranscriptSegment[]) => boolean;
   /** Live capture id (`liveSessionId`). Not notesOwnerId. */
   currentMeetingId: string | null;
   liveSessionId: string | null;
@@ -61,7 +76,16 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
   const resetTranscriptBufferRef = useRef<(() => void) | null>(null);
   // Native sessions restart sequence_id at 1. Resume keeps prior segments, so each
   // capture generation needs its own scope or new lines are dropped as duplicates.
-  const sequenceScopeRef = useRef(Number(sessionStorage.getItem(RESUME_SEQUENCE_SCOPE_STORAGE_KEY) || '0') || 0);
+  // Read once, lazily: an unguarded read at render breaks the static-export
+  // prerender, where there is no `sessionStorage` at all.
+  const sequenceScopeRef = useRef(0);
+  const sequenceScopeLoadedRef = useRef(false);
+  if (!sequenceScopeLoadedRef.current) {
+    sequenceScopeLoadedRef.current = true;
+    if (typeof sessionStorage !== 'undefined') {
+      sequenceScopeRef.current = Number(sessionStorage.getItem(RESUME_SEQUENCE_SCOPE_STORAGE_KEY) || '0') || 0;
+    }
+  }
 
   // Single writer for the meeting id: the ref updates synchronously for listeners, the
   // state update keeps consumers rendering.
@@ -559,6 +583,41 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
     // Don't clear currentMeetingId here - it will be set by recording-started event
   }, []);
 
+  /**
+   * Reopening a saved note (`/recording?saved=`) has no live capture behind it, so the
+   * transcript buffer is empty: copy, the transcript sheet, Ask context, and the resume
+   * baseline all see nothing. Load the persisted segments as the session baseline.
+   *
+   * Segments deliberately land in scope 0 with no `sequence_id`: a later resume bumps
+   * to scope 1, so `selectResumedTranscripts` still appends only the new lines.
+   */
+  const hydrateSavedTranscripts = useCallback((segments: PersistedTranscriptSegment[]) => {
+    // A live capture owns the buffer; never overwrite it. Otherwise this call is the
+    // authority for what the buffer holds, so an empty saved meeting clears it rather
+    // than leaving the previously opened note's segments behind.
+    if (recordingState.isRecording || currentMeetingIdRef.current) return false;
+
+    sequenceScopeRef.current = 0;
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.removeItem(RESUME_SEQUENCE_SCOPE_STORAGE_KEY);
+    }
+
+    const hydrated: Transcript[] = segments.map((segment, index) => ({
+      id: segment.id || `saved-${index}`,
+      text: segment.text || '',
+      timestamp: segment.timestamp || '',
+      sequence_scope: 0,
+      chunk_start_time: segment.audio_start_time,
+      is_partial: false,
+      audio_start_time: segment.audio_start_time,
+      audio_end_time: segment.audio_end_time,
+      duration: segment.duration,
+    }));
+
+    setTranscripts(hydrated);
+    return true;
+  }, [recordingState.isRecording]);
+
   const beginResumeTranscriptSession = useCallback(() => {
     sequenceScopeRef.current += 1;
     sessionStorage.setItem(RESUME_SEQUENCE_SCOPE_STORAGE_KEY, String(sequenceScopeRef.current));
@@ -606,6 +665,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
     meetingTitle,
     setMeetingTitle,
     clearTranscripts,
+    hydrateSavedTranscripts,
     currentMeetingId,
     liveSessionId: currentMeetingId,
     markMeetingAsSaved,

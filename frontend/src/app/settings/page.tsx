@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { ArrowLeft, Settings2, Mic, Database as DatabaseIcon, SparkleIcon, FlaskConical } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { invoke } from '@tauri-apps/api/core';
-import { TranscriptSettings } from '@/components/TranscriptSettings';
+import { TranscriptSettings, type TranscriptModelProps } from '@/components/TranscriptSettings';
 import { RecordingSettings } from '@/components/RecordingSettings';
 import { PreferenceSettings } from '@/components/PreferenceSettings';
 import { SummaryModelSettings } from '@/components/SummaryModelSettings';
@@ -27,6 +27,13 @@ type TabValue = (typeof TABS)[number]['value'];
 
 function isTabValue(value: string | null): value is TabValue {
   return TABS.some((tab) => tab.value === value);
+}
+
+const TRANSCRIPT_PROVIDERS = ['localWhisper', 'parakeet', 'deepgram', 'elevenLabs', 'groq', 'openai'] as const;
+
+/** The DB returns a plain string; anything unknown falls back to local Whisper. */
+function toTranscriptProvider(value: string | null | undefined): TranscriptModelProps['provider'] {
+  return TRANSCRIPT_PROVIDERS.find((provider) => provider === value) ?? 'localWhisper';
 }
 
 export default function SettingsPage() {
@@ -64,7 +71,7 @@ export default function SettingsPage() {
             hasKey: !!config.apiKey,
           });
           setTranscriptModelConfig({
-            provider: config.provider || 'localWhisper',
+            provider: toTranscriptProvider(config.provider),
             model: config.model || 'large-v3',
             apiKey: config.apiKey || null,
           });

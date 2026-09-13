@@ -444,6 +444,10 @@ export function useNoteWorkspaceSession(
         showSavedSessionInUrl(nextMeetingId);
       },
     });
+
+    // Navigating away leaves these options registered, so a later tray stop would
+    // save into this workspace's stale append target / callbacks.
+    return () => clearRecordingStopOptions();
   }, [isLiveSessionVisible, isRecordingWorkspace, noteFolderId, savedMeetingId]);
 
   const handleStartRecording = async () => {
@@ -453,10 +457,18 @@ export function useNoteWorkspaceSession(
     } catch {
       return;
     }
-    const currentText = noteText;
-    const normalizedTitle = noteTitle.trim() || 'New note';
-    // The live session opens with whatever was already written here.
-    saveQuickNoteDraft(normalizedTitle, currentText, noteFolderId);
+    // A new recording started from a saved note is a new note, not a copy of that
+    // one: seeding it from the saved title/body would clone it into a second
+    // meeting (and into the shared quick-note draft).
+    const startsFromSavedNote = isRecordingWorkspace && Boolean(savedMeetingId);
+    const currentText = startsFromSavedNote ? '' : noteText;
+    const normalizedTitle = startsFromSavedNote ? 'New note' : (noteTitle.trim() || 'New note');
+    if (startsFromSavedNote) {
+      clearQuickNoteDraft();
+    } else {
+      // The live session opens with whatever was already written here.
+      saveQuickNoteDraft(normalizedTitle, currentText, noteFolderId);
+    }
 
     if (!isRecordingWorkspace) {
       // The draft surface never captures audio; the recording route owns the session.
@@ -469,6 +481,9 @@ export function useNoteWorkspaceSession(
     resumeBaselineCountRef.current = 0;
     clearResumeIdentity();
     onNewRecordingSessionRef.current?.();
+    // The seed plan reads live `noteTitle` ahead of the fallback seed, so the saved
+    // note's title has to be cleared here too, not just in the fallback.
+    if (startsFromSavedNote) setNoteTitle(normalizedTitle);
     setDraftContent(currentText);
     preSessionDraftRef.current = {
       title: normalizedTitle,
