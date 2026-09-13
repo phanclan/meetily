@@ -257,6 +257,44 @@ test('note workspace seed plan does not reseed or rebind on resume append', () =
   assert.equal(placeholderSeed.syncTitleToSession, false);
 });
 
+test('selectResumedTranscripts prefers scope and falls back to baseline when scope is missing', () => {
+  const { selectResumedTranscripts } = loader()('@/lib/transcriptSequence');
+  const transcripts = [
+    { id: 'old-1', text: 'old', timestamp: '', sequence_scope: 0 },
+    { id: 'old-2', text: 'old2', timestamp: '', sequence_scope: 0 },
+    { id: 'new-1', text: 'new', timestamp: '', sequence_id: 1, sequence_scope: 1 },
+    { id: 'new-2', text: 'new2', timestamp: '', sequence_id: 2, sequence_scope: 1 },
+  ];
+  assert.deepEqual(
+    selectResumedTranscripts(transcripts, 2, 1).map(item => item.id),
+    ['new-1', 'new-2'],
+  );
+
+  const missingScope = [
+    { id: 'old-1', text: 'old', timestamp: '', sequence_scope: 0 },
+    { id: 'old-2', text: 'old2', timestamp: '', sequence_scope: 0 },
+    { id: 'new-1', text: 'new', timestamp: '', sequence_id: 1, sequence_scope: 0 },
+    { id: 'new-2', text: 'new2', timestamp: '', sequence_id: 2, sequence_scope: 0 },
+  ];
+  assert.deepEqual(
+    selectResumedTranscripts(missingScope, 2, 1).map(item => item.id),
+    ['new-1', 'new-2'],
+  );
+  assert.deepEqual(selectResumedTranscripts(transcripts.slice(0, 2), 2, 1), []);
+  assert.deepEqual(
+    selectResumedTranscripts(
+      [
+        { id: 'a', text: 'a', timestamp: '' },
+        { id: 'b', text: 'b', timestamp: '' },
+        { id: 'c', text: 'c', timestamp: '' },
+      ],
+      1,
+      null,
+    ).map(item => item.id),
+    ['b', 'c'],
+  );
+});
+
 test('a stale in-memory resume baseline defers to the sessionStorage baseline', () => {
   const session = loader()('@/lib/noteWorkspaceSession');
   // The tab that started the resume knows the count.

@@ -12,7 +12,10 @@
 //! - Enabling detection in Settings must not announce for apps that are open but
 //!   whose mic is idle.
 //!
-//! Emits existing Tauri events `call-detected` / `call-ended`.
+//! Emits existing Tauri events `call-detected` / `call-ended`, and on Detected
+//! shows a macOS notification with a Record action (`os_prompt`).
+
+mod os_prompt;
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -282,6 +285,7 @@ pub fn start_detection<R: Runtime>(app: AppHandle<R>) {
                 if in_call {
                     in_call = false;
                     info!("Call detection disabled — clearing active meeting");
+                    os_prompt::invalidate_pending_prompts();
                     let _ = app.emit("call-ended", ());
                 }
                 continue;
@@ -318,6 +322,9 @@ pub fn start_detection<R: Runtime>(app: AppHandle<R>) {
                         "Active meeting detected: {} (mic debounced, app present)",
                         name
                     );
+                    // OS banner with Record action (primary UX). Frontend still gets
+                    // call-detected for state sync; in-app floating pill stays gated off.
+                    os_prompt::show_record_prompt(&app, &name);
                     let _ = app.emit(
                         "call-detected",
                         CallDetectedPayload { app_name: name },
@@ -325,6 +332,7 @@ pub fn start_detection<R: Runtime>(app: AppHandle<R>) {
                 }
                 Some(DetectionEvent::Ended) => {
                     info!("Active meeting ended (mic idle or meeting app gone)");
+                    os_prompt::invalidate_pending_prompts();
                     let _ = app.emit("call-ended", ());
                 }
                 None => {}

@@ -13,7 +13,7 @@ import { blocksToPlainText } from '@/lib/meetingNotes';
 import { saveMeetingNotes } from '@/afterword/ipc';
 import { clearLiveMeetingFolder, saveLiveMeetingFolder } from '@/lib/liveMeetingFolder';
 import { readResumeSequenceScope, selectResumedTranscripts } from '@/lib/transcriptSequence';
-import { resolvePersistedMeetingTitle } from '@/lib/meetingTitle';
+import { resolvePersistedMeetingTitle, shouldPersistTitleOnAppend } from '@/lib/meetingTitle';
 import { invoke } from '@tauri-apps/api/core';
 import {
   clearLiveSessionId,
@@ -317,7 +317,28 @@ export function useRecordingStop(
 
           let meetingId: string;
           if (appendToMeetingId) {
-            await storageService.appendMeetingTranscripts(appendToMeetingId, transcriptsToPersist);
+            const appendResult = await storageService.appendMeetingTranscripts(
+              appendToMeetingId,
+              transcriptsToPersist,
+            );
+            const appendedCount =
+              typeof appendResult?.appended === 'number'
+                ? appendResult.appended
+                : transcriptsToPersist.length;
+            console.log('💾 Resume append complete', {
+              meetingId: appendToMeetingId,
+              selected: transcriptsToPersist.length,
+              appended: appendedCount,
+              baseline,
+              resumeScope: readResumeSequenceScope(),
+              bufferTotal: freshTranscripts.length,
+            });
+            if (transcriptsToPersist.length === 0 && freshTranscripts.length > baseline) {
+              console.warn(
+                'Resume append selected 0 segments while the live buffer grew past baseline — check sequence_scope / baseline.',
+                { baseline, bufferTotal: freshTranscripts.length, resumeScope: readResumeSequenceScope() },
+              );
+            }
             meetingId = appendToMeetingId;
             const liveNotes = liveId ? readLiveMeetingNotes(liveId) : null;
             const sourceText = [
@@ -330,10 +351,23 @@ export function useRecordingStop(
               savedMeetingName,
               sourceText,
             });
-            if (persistedTitle && persistedTitle !== meetingTitle) {
-              setMeetingTitle(persistedTitle);
+            // Always persist a non-placeholder title on append. The UI often already
+            // shows the generated timestamp (meetingTitle === persistedTitle) while
+            // SQLite still holds "New note", so comparing only to meetingTitle skipped
+            // the save and left Home stuck on the placeholder.
+            let databaseTitle: string | null = null;
+            try {
+              const existing = await storageService.getMeeting(meetingId);
+              databaseTitle = existing?.title ?? null;
+            } catch (error) {
+              console.warn('Could not read existing meeting title before resume title save:', error);
+            }
+            if (shouldPersistTitleOnAppend({ persistedTitle, databaseTitle })) {
+              if (persistedTitle !== meetingTitle) {
+                setMeetingTitle(persistedTitle);
+              }
               await invoke('api_save_meeting_title', { meetingId, title: persistedTitle }).catch(error => {
-                console.warn('Failed to persist derived meeting title after resume:', error);
+                console.warn('Failed to persist meeting title after resume:', error);
               });
             }
             clearResumeIdentity();

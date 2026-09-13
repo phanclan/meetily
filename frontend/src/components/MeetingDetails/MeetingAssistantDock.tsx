@@ -111,7 +111,7 @@ export function MeetingAssistantDock(props: Props) {
                 const element = event.currentTarget;
                 followLatest.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80;
                 setShowLatest(!followLatest.current);
-              }} className={`${props.workspace ? 'min-h-0 flex-1' : 'max-h-[36vh]'} space-y-4 overflow-y-auto overscroll-contain pb-4 text-sm leading-6 focus-visible:outline focus-visible:outline-1 focus-visible:outline-stone-300`}>
+              }} className={`${props.workspace ? 'min-h-0 flex-1' : 'max-h-[36vh]'} space-y-4 overflow-y-scroll overscroll-contain pb-4 text-sm leading-6 [scrollbar-gutter:stable] focus-visible:outline focus-visible:outline-1 focus-visible:outline-stone-300`}>
               {props.messages.length === 0 && !props.loading && <p className="py-3 text-sm text-stone-500">{props.emptyMessage || 'Ask a question or choose a recipe. Answers use this meeting’s notes and transcript.'}</p>}
               {props.messages.map((message, index) => <div key={index}
                 className={message.role === 'user' ? 'ml-8 rounded-xl bg-stone-100 px-3 py-2 whitespace-pre-wrap' : 'px-1 text-stone-700'}>

@@ -402,7 +402,10 @@
 .notes-scroll-frame > .notes-scrollbar {
   min-height: 0;
   flex: 1 1 auto;
-  overflow-y: auto;
+  /* Reserve scrollbar space so content does not shift when Ask / long lists overflow.
+     WKWebView often ignores gutter alone — keep overflow-y: scroll as a belt-and-suspenders. */
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
   overscroll-behavior: contain;
 }
 

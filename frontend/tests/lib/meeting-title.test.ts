@@ -6,6 +6,7 @@ import {
   isPlaceholderMeetingTitle,
   resolvePersistedMeetingTitle,
   resolveSeededMeetingTitle,
+  shouldPersistTitleOnAppend,
 } from '../../src/lib/meetingTitle';
 
 describe('meetingTitle placeholders', () => {
@@ -76,3 +77,35 @@ describe('meetingTitle placeholders', () => {
     );
   });
 });
+
+  test('always saves non-placeholder title on append when DB still has placeholder', () => {
+    assert.equal(
+      shouldPersistTitleOnAppend({
+        persistedTitle: 'Meeting 12_09_26_23_04_55',
+        databaseTitle: 'New note',
+      }),
+      true,
+    );
+    assert.equal(
+      shouldPersistTitleOnAppend({
+        persistedTitle: 'Meeting 12_09_26_23_04_55',
+        databaseTitle: 'Meeting 12_09_26_23_04_55',
+      }),
+      false,
+    );
+    assert.equal(
+      shouldPersistTitleOnAppend({
+        persistedTitle: 'New note',
+        databaseTitle: 'New note',
+      }),
+      false,
+    );
+    assert.equal(
+      shouldPersistTitleOnAppend({
+        persistedTitle: 'Weekly sync',
+        databaseTitle: null,
+      }),
+      true,
+    );
+  });
+

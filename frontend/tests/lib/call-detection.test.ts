@@ -8,7 +8,7 @@ import {
 } from '../../src/lib/callDetectionCopy';
 
 describe('callDetectionCopy', () => {
-  test('hides the banner while recording without requiring lastDetected to clear', () => {
+  test('keeps the in-app banner off by default (OS notification is primary)', () => {
     assert.equal(
       shouldShowCallDetectionBanner({
         enabled: true,
@@ -27,7 +27,7 @@ describe('callDetectionCopy', () => {
         isRecording: false,
         announcement: 'running',
       }),
-      true,
+      false,
     );
   });
 

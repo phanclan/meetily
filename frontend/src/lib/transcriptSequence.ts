@@ -23,10 +23,19 @@ export function selectResumedTranscripts(
   baselineCount: number,
   resumeScope: number | null,
 ): Transcript[] {
+  const baseline = Math.max(0, baselineCount);
   if (resumeScope != null && Number.isFinite(resumeScope)) {
-    return transcripts.filter(transcript => (transcript.sequence_scope ?? 0) === resumeScope);
+    const byScope = transcripts.filter(
+      transcript => (transcript.sequence_scope ?? 0) === resumeScope,
+    );
+    // Scope is authoritative when new segments carry it. If the live buffer grew but
+    // nothing matched (stale/missing scope after reload), fall back to the baseline
+    // slice so resume still persists what the UI is showing.
+    if (byScope.length > 0 || transcripts.length <= baseline) {
+      return byScope;
+    }
   }
-  return transcripts.slice(Math.max(0, baselineCount));
+  return transcripts.slice(baseline);
 }
 
 export function readResumeSequenceScope(): number | null {

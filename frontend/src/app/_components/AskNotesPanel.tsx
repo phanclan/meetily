@@ -224,7 +224,7 @@ function AskWorkspace({
             <button type="button" aria-pressed={!showArchived} onClick={() => void loadHistory(false)} className="rounded-full px-3 py-1.5 aria-pressed:bg-stone-100">Recent</button>
             <button type="button" aria-pressed={showArchived} onClick={() => void loadHistory(true)} className="rounded-full px-3 py-1.5 aria-pressed:bg-stone-100">Archived</button>
           </div>
-          <div className="max-h-[45vh] min-w-0 overflow-y-auto">
+          <div className="max-h-[45vh] min-w-0 overflow-y-scroll [scrollbar-gutter:stable]">
             {conversations.map(item => <button key={item.id} type="button" aria-current={item.id === chatId ? 'page' : undefined} onClick={() => { setShowHistory(false); router.push(chatPath(item.id)); }} className="flex w-full flex-col gap-1 rounded-lg px-3 py-3 text-left hover:bg-stone-100 aria-[current=page]:bg-stone-100">
               <span className="w-full truncate text-sm font-medium">{item.title}</span><span className="text-xs text-stone-500">{new Date(item.updatedAt).toLocaleDateString()}</span>
             </button>)}

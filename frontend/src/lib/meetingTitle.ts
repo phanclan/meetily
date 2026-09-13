@@ -99,3 +99,19 @@ export function resolvePersistedMeetingTitle(options: {
 
   return candidates[0] || 'New note';
 }
+
+/**
+ * On resume/append, always write a non-placeholder title to SQLite — even when the
+ * UI already shows it. Comparing only to `meetingTitle` skipped saves when the open
+ * note already adopted a generated timestamp while the home list still read "New note".
+ */
+export function shouldPersistTitleOnAppend(options: {
+  persistedTitle: string | null | undefined;
+  databaseTitle?: string | null;
+}): boolean {
+  const title = (options.persistedTitle ?? '').trim();
+  if (!title || isNamedDraftPlaceholder(title)) return false;
+  const dbTitle = (options.databaseTitle ?? '').trim();
+  if (!dbTitle) return true;
+  return title !== dbTitle;
+}
