@@ -8,7 +8,7 @@ import {
 } from '../../src/lib/callDetectionCopy';
 
 describe('callDetectionCopy', () => {
-  test('keeps the in-app banner off by default (OS notification is primary)', () => {
+  test('shows the in-app banner by default when a call is detected (and hides while recording)', () => {
     assert.equal(
       shouldShowCallDetectionBanner({
         enabled: true,
@@ -27,7 +27,17 @@ describe('callDetectionCopy', () => {
         isRecording: false,
         announcement: 'running',
       }),
-      false,
+      true,
+    );
+    assert.equal(
+      shouldShowCallDetectionBanner({
+        enabled: true,
+        lastDetected: 'Zoom',
+        dismissed: false,
+        isRecording: false,
+        announcement: 'detected',
+      }),
+      true,
     );
   });
 

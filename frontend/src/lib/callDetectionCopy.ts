@@ -9,10 +9,11 @@ export type CallDetectionView = {
 };
 
 /**
- * Prefer the macOS/system notification with a Record action (OpenOats-style).
- * Keep the in-app floating pill off by default so the prompt lives on the desktop.
+ * When true, hide the in-app floating pill and rely on the OS notification only.
+ * Default false so users see a Granola-style Record affordance even if the macOS
+ * notification is missed / ignored (OS notification is still shown alongside).
  */
-export const PREFER_OS_CALL_DETECTION_PROMPT = true;
+export const PREFER_OS_CALL_DETECTION_PROMPT = false;
 
 /** Hide while recording; do not clear last-detected. */
 export function shouldShowCallDetectionBanner(view: CallDetectionView): boolean {

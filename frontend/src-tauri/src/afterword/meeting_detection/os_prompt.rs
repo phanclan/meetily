@@ -1,7 +1,7 @@
 //! OpenOats-style desktop prompt: macOS notification with a Record action.
 //!
-//! The in-app floating banner is gated off by default on the frontend. This module
-//! is the primary UX when an active meeting is detected.
+//! Shown alongside the in-app CallDetectionBanner (`call-detected` event). Either
+//! path can start recording via `request-recording-start`.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
