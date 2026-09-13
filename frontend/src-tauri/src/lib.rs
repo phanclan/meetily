@@ -252,6 +252,20 @@ fn persist_then_hide_main_window<R: Runtime>(window: &WebviewWindow<R>) {
     }
 }
 
+/// Final save before process exit (menu quit / tray quit / complete_app_quit).
+/// Forces a persist even if the window was already hidden to tray.
+pub(crate) fn persist_main_window_before_quit<R: Runtime>(app: &AppHandle<R>) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    WINDOW_STATE_PERSIST_SEQ.fetch_add(1, Ordering::SeqCst);
+    // Quit can race bootstrap; still try to capture the last visible frame.
+    WINDOW_STATE_PERSIST_ENABLED.store(true, Ordering::SeqCst);
+    if let Err(e) = persist_main_window_state(&window, true) {
+        log::warn!("Failed to persist main window state before quit: {}", e);
+    }
+}
+
 fn enable_main_window_state_persist<R: Runtime>(window: &WebviewWindow<R>) {
     WINDOW_STATE_PERSIST_ENABLED.store(true, Ordering::SeqCst);
     schedule_persist_main_window_state(window, true);
@@ -410,6 +424,10 @@ fn frontend_bootstrap_complete<R: Runtime>(app: AppHandle<R>) -> Result<(), Stri
         }
     }
 
+    // Monitors are usually fully enumerated by the time the frontend is ready.
+    // Re-apply saved state so a side-display frame is not left on the primary
+    // after an early .setup restore that ran with incomplete geometry.
+    restore_main_window_state(&window);
     ensure_main_window_frame_is_sane(&window);
     enable_main_window_state_persist(&window);
 
@@ -786,6 +804,30 @@ pub fn run() {
             if let Some(window) = _app.get_webview_window("main") {
                 restore_main_window_state(&window);
 
+                // Secondary displays are sometimes missing during .setup. If the
+                // saved origin was not on any monitor yet, retry shortly once
+                // display geometry is more likely complete.
+                let monitors_after_setup = window_monitor_bounds(&window);
+                let needs_monitor_retry = load_main_window_state(&_app.handle()).is_some_and(|state| {
+                    match (state.x, state.y) {
+                        (Some(x), Some(y)) => {
+                            let ox = x.round() as i32;
+                            let oy = y.round() as i32;
+                            !monitors_after_setup
+                                .iter()
+                                .any(|monitor| monitor.contains_point(ox, oy))
+                        }
+                        _ => false,
+                    }
+                });
+                if needs_monitor_retry {
+                    let window_for_retry = window.clone();
+                    tauri::async_runtime::spawn(async move {
+                        tokio::time::sleep(Duration::from_millis(400)).await;
+                        restore_main_window_state(&window_for_retry);
+                    });
+                }
+
                 let window_for_bootstrap_timeout = window.clone();
                 tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(Duration::from_secs(15)).await;
@@ -799,7 +841,7 @@ pub fn run() {
                             if let Err(e) = window_for_bootstrap_timeout.show() {
                                 log::warn!("Failed to show fallback main window: {}", e);
                             }
-                            ensure_main_window_frame_is_sane(&window_for_bootstrap_timeout);
+                            restore_main_window_state(&window_for_bootstrap_timeout);
                             enable_main_window_state_persist(&window_for_bootstrap_timeout);
                         }
                         Err(e) => {

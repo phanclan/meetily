@@ -30,6 +30,7 @@ pub fn install_quit_menu<R: Runtime>(app: &AppHandle<R>) -> Result<(), Box<dyn s
     app.set_menu(menu)?;
     app.on_menu_event(|app, event| {
         if event.id().as_ref() == "app-safe-quit" {
+            crate::persist_main_window_before_quit(app);
             app.exit(0);
         }
     });
@@ -72,6 +73,7 @@ pub async fn complete_app_quit<R: Runtime>(app: AppHandle<R>, request_id: u64) -
         return Err("Stop the recording and wait for it to save before quitting.".into());
     }
     app.state::<QuitCoordinator>().resolve(request_id, true)?;
+    crate::persist_main_window_before_quit(&app);
     app.exit(0);
     Ok(())
 }

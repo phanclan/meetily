@@ -28,7 +28,7 @@ impl MonitorBounds {
         self.y.saturating_add(self.height as i32)
     }
 
-    fn contains_point(self, x: i32, y: i32) -> bool {
+    pub fn contains_point(self, x: i32, y: i32) -> bool {
         x >= self.x && x < self.right() && y >= self.y && y < self.bottom()
     }
 
@@ -141,30 +141,40 @@ pub fn sanitize_restored_frame(
     } else {
         intersecting as f64 / window_area as f64
     };
-    let off_all_screens = saved_origin.is_none()
-        || (!origin_on_a_display && visible_fraction < MIN_VISIBLE_FRACTION);
+    // Missing origin → fall back to primary defaults.
+    // A known origin that is currently off every enumerated display (common
+    // when a secondary monitor is not ready yet, or the saved frame is taller
+    // than the side display work area) still targets the nearest display and
+    // clamps there — never recenter on primary solely because height needs a
+    // clamp.
+    let missing_origin = saved_origin.is_none();
+    let origin_off_displays =
+        !missing_origin && !origin_on_a_display && visible_fraction < MIN_VISIBLE_FRACTION;
 
-    let target = if off_all_screens {
+    let target = if missing_origin {
+        primary
+    } else if origin_off_displays {
         nearest_monitor(probe_x, probe_y, monitors).unwrap_or(primary)
     } else {
         select_target_monitor(probe_x, probe_y, probe_w, probe_h, monitors).unwrap_or(primary)
     };
 
-    // Off-screen / missing-origin restores use a sane default, never full-monitor.
-    // Known-good in-range frames keep their saved size via clamp_size_to_monitor.
-    let (width, height) = if off_all_screens {
+    let (width, height) = if missing_origin {
+        // Missing-origin restores use a sane default, never full-monitor.
         target.default_physical_size()
     } else {
+        // Known origin (on-display or nearest): keep saved size clamped to that
+        // monitor. Height taller than a side display must stay on that display.
         let (width, height) = clamp_size_to_monitor(raw_width, raw_height, target);
-        // Oversized frames clamp to the display; don't leave a non-maximized
-        // window looking fullscreen after correction.
+        // Oversized junk that fills the whole monitor after clamp would look
+        // maximized; use defaults for size only, still keep placement below.
         if width == target.width && height == target.height {
             target.default_physical_size()
         } else {
             (width, height)
         }
     };
-    let (x, y) = if off_all_screens {
+    let (x, y) = if missing_origin {
         center_on_monitor(width, height, target)
     } else {
         clamp_position_to_monitor(probe_x, probe_y, width, height, target)
@@ -374,9 +384,12 @@ mod tests {
         assert!(frame.width >= 1200);
         assert!(frame.height >= 800);
         assert!(display.contains_point(frame.x, frame.y));
-        let (cx, cy) = super::center_on_monitor(frame.width, frame.height, display);
-        assert_eq!(frame.x, cx);
-        assert_eq!(frame.y, cy);
+        // Known but off-display origin: clamp toward the saved point on the
+        // nearest monitor (do not recenter on primary).
+        let (expected_x, expected_y) =
+            super::clamp_position_to_monitor(6596, 62, frame.width, frame.height, display);
+        assert_eq!(frame.x, expected_x);
+        assert_eq!(frame.y, expected_y);
     }
 
     #[test]
@@ -454,6 +467,98 @@ mod tests {
         assert_eq!(frame.x, 3600);
         assert_eq!(frame.y, 80);
         assert!(right.contains_point(frame.x, frame.y));
+    }
+
+    fn five_k_primary() -> MonitorBounds {
+        MonitorBounds {
+            x: 0,
+            y: 45,
+            width: 5120,
+            height: 2835,
+            scale_factor: 2.0,
+        }
+    }
+
+    fn qhd_side() -> MonitorBounds {
+        // Physical QHD secondary to the right of a 5K primary.
+        MonitorBounds {
+            x: 5120,
+            y: 0,
+            width: 2560,
+            height: 1440,
+            scale_factor: 1.0,
+        }
+    }
+
+    #[test]
+    fn taller_than_side_display_stays_on_side_with_clamped_height() {
+        let primary = five_k_primary();
+        let side = qhd_side();
+        // Mirrors a real Afterword restore: saved height exceeds the side
+        // display work-area height but the origin is clearly on that display.
+        let frame = sanitize_restored_frame(
+            1840.0,
+            1730.0,
+            Some(6532.0),
+            Some(686.0),
+            &[primary, side],
+            Some(primary),
+        )
+        .unwrap();
+
+        assert_eq!(frame.width, 1840);
+        assert_eq!(frame.height, side.height);
+        assert!(side.contains_point(frame.x, frame.y));
+        assert!(!primary.contains_point(frame.x, frame.y));
+        // Full-height clamp pulls the origin onto the side work area; it must
+        // not jump to the primary.
+        let (expected_x, expected_y) =
+            super::clamp_position_to_monitor(6532, 686, frame.width, frame.height, side);
+        assert_eq!(frame.x, expected_x);
+        assert_eq!(frame.y, expected_y);
+    }
+
+    #[test]
+    fn early_single_monitor_then_dual_monitor_re_restore_returns_to_side() {
+        let primary = five_k_primary();
+        let side = qhd_side();
+        let saved_w = 1840.0;
+        let saved_h = 1730.0;
+        let saved_x = Some(6532.0);
+        let saved_y = Some(686.0);
+
+        // First restore while only the primary is enumerated (startup race):
+        // origin looks off-screen → clamp onto nearest (primary) edge.
+        let early = sanitize_restored_frame(
+            saved_w,
+            saved_h,
+            saved_x,
+            saved_y,
+            &[primary],
+            Some(primary),
+        )
+        .unwrap();
+        assert!(primary.contains_point(early.x, early.y));
+
+        // After monitors are ready, a full re-restore from saved state must put
+        // the window back on the side display with height clamped there.
+        let ready = sanitize_restored_frame(
+            saved_w,
+            saved_h,
+            saved_x,
+            saved_y,
+            &[primary, side],
+            Some(primary),
+        )
+        .unwrap();
+        assert_eq!(ready.width, 1840);
+        assert_eq!(ready.height, side.height);
+        assert!(side.contains_point(ready.x, ready.y));
+        assert!(!primary.contains_point(ready.x, ready.y));
+        let (expected_x, expected_y) =
+            super::clamp_position_to_monitor(6532, 686, ready.width, ready.height, side);
+        assert_eq!(ready.x, expected_x);
+        assert_eq!(ready.y, expected_y);
     }
 
     #[test]

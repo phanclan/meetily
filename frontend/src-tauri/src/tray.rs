@@ -48,7 +48,10 @@ fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, item_id: &str) {
             }
         }
         "check_updates" => check_updates_handler(app),
-        "quit" => app.exit(0),
+        "quit" => {
+            crate::persist_main_window_before_quit(app);
+            app.exit(0);
+        }
         _ => {}
     }
 }
