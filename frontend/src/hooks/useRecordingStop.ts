@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { listen } from '@tauri-apps/api/event';
 import { toast } from 'sonner';
@@ -12,9 +12,24 @@ import { readLiveMeetingNotes, clearLiveMeetingNotes } from '@/lib/liveMeetingNo
 import { blocksToPlainText } from '@/lib/meetingNotes';
 import { saveMeetingNotes } from '@/afterword/ipc';
 import { clearLiveMeetingFolder, saveLiveMeetingFolder } from '@/lib/liveMeetingFolder';
+import { readResumeSequenceScope, selectResumedTranscripts } from '@/lib/transcriptSequence';
+import { resolvePersistedMeetingTitle } from '@/lib/meetingTitle';
+import { invoke } from '@tauri-apps/api/core';
+import {
+  clearLiveSessionId,
+  clearResumeIdentity,
+  readAppendTargetMeetingId,
+  readLiveSessionId,
+  readResumeBaselineCount,
+} from '@/lib/recordingSessionIdentity';
+import { createSavedNotePath } from '@/lib/savedNoteRoute';
+import type { RecordingStopOptions } from '@/lib/recordingStopOrchestrator';
+import {
+  applyPinnedSummaryLanguageToMeeting,
+  detectAndCacheSummaryLanguage,
+} from '@/lib/summary-language-preferences';
 
-// The quick-note page and global tray handler both use this hook.
-let stopProcessing = false;
+export type { RecordingStopOptions } from '@/lib/recordingStopOrchestrator';
 
 // Rust's `stop_recording` only returns after every queued chunk has been transcribed, so
 // the frontend just has to let the last `transcript-update` events land in React state.
@@ -50,21 +65,6 @@ async function waitForTranscriptsToSettle(getCount: () => number): Promise<numbe
   return getCount();
 }
 
-interface RecordingStopOptions {
-  autoNavigate?: boolean;
-  showToast?: boolean;
-  /** When set, append new segments to this meeting instead of creating a new one. */
-  appendToMeetingId?: string;
-  /** Index into the live transcript buffer where this resume session began. */
-  resumeBaselineCount?: number;
-  onSaved?: (meetingId: string) => Promise<void> | void;
-}
-
-import {
-  applyPinnedSummaryLanguageToMeeting,
-  detectAndCacheSummaryLanguage,
-} from '@/lib/summary-language-preferences';
-
 type SummaryStatus = 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
 
 interface UseRecordingStopReturn {
@@ -76,6 +76,9 @@ interface UseRecordingStopReturn {
   setIsStopping: (value: boolean) => void;
 }
 
+// Shared across the orchestrator instance so UI + tray cannot double-save.
+let stopProcessing = false;
+
 /**
  * Custom hook for managing recording stop lifecycle.
  * Handles the complex stop sequence: transcription wait → buffer flush → SQLite save → navigation.
@@ -85,9 +88,8 @@ interface UseRecordingStopReturn {
  * - Transcript buffer flush coordination
  * - SQLite meeting save with folder_path from sessionStorage
  * - Comprehensive analytics tracking (duration, word count, activation)
- * - Auto-navigation to meeting details
+ * - Auto-navigation to the flavor's saved-note surface
  * - Toast notifications for success/error
- * - Window exposure for Rust callbacks
  */
 export function useRecordingStop(
   setIsRecording: (value: boolean) => void,
@@ -109,6 +111,7 @@ export function useRecordingStop(
     flushBuffer,
     clearTranscripts,
     meetingTitle,
+    setMeetingTitle,
     markMeetingAsSaved,
   } = useTranscripts();
 
@@ -294,24 +297,54 @@ export function useRecordingStop(
         });
 
         try {
-          const liveId = currentMeetingId || sessionStorage.getItem('indexeddb_current_meeting_id');
-          const appendToMeetingId = options.appendToMeetingId || sessionStorage.getItem('resume_meeting_id') || undefined;
+          const liveId = currentMeetingId || readLiveSessionId();
+          const appendToMeetingId = options.appendToMeetingId || readAppendTargetMeetingId() || undefined;
           const baseline = typeof options.resumeBaselineCount === 'number'
             ? options.resumeBaselineCount
-            : Number(sessionStorage.getItem('resume_baseline_count') || '0');
+            : readResumeBaselineCount();
           const transcriptsToPersist = appendToMeetingId
-            ? freshTranscripts.slice(Math.max(0, baseline))
+            ? selectResumedTranscripts(freshTranscripts, baseline, readResumeSequenceScope())
             : freshTranscripts;
 
           let meetingId: string;
           if (appendToMeetingId) {
             await storageService.appendMeetingTranscripts(appendToMeetingId, transcriptsToPersist);
             meetingId = appendToMeetingId;
-            sessionStorage.removeItem('resume_meeting_id');
-            sessionStorage.removeItem('resume_baseline_count');
+            const liveNotes = liveId ? readLiveMeetingNotes(liveId) : null;
+            const sourceText = [
+              liveNotes ? blocksToPlainText(liveNotes) : '',
+              ...transcriptsToPersist.map(item => item.text || ''),
+            ].filter(Boolean).join('\n');
+            const persistedTitle = resolvePersistedMeetingTitle({
+              uiTitle: meetingTitle,
+              sessionTitle: savedMeetingName,
+              savedMeetingName,
+              sourceText,
+            });
+            if (persistedTitle && persistedTitle !== meetingTitle) {
+              setMeetingTitle(persistedTitle);
+              await invoke('api_save_meeting_title', { meetingId, title: persistedTitle }).catch(error => {
+                console.warn('Failed to persist derived meeting title after resume:', error);
+              });
+            }
+            clearResumeIdentity();
           } else {
+            const liveNotes = liveId ? readLiveMeetingNotes(liveId) : null;
+            const sourceText = [
+              liveNotes ? blocksToPlainText(liveNotes) : '',
+              ...transcriptsToPersist.map(item => item.text || ''),
+            ].filter(Boolean).join('\n');
+            const persistedTitle = resolvePersistedMeetingTitle({
+              uiTitle: meetingTitle,
+              sessionTitle: savedMeetingName,
+              savedMeetingName,
+              sourceText,
+            });
+            if (persistedTitle && persistedTitle !== meetingTitle) {
+              setMeetingTitle(persistedTitle);
+            }
             const responseData = await storageService.saveMeeting(
-              meetingTitle || savedMeetingName || 'New Meeting',
+              persistedTitle,
               transcriptsToPersist,
               folderPath,
               liveId,
@@ -333,7 +366,10 @@ export function useRecordingStop(
           }
           // Folder membership must be confirmed before discarding retry data.
           const noteFolderId = await saveLiveMeetingFolder(liveId, meetingId);
-          const meetingPath = `/meeting-details?id=${encodeURIComponent(meetingId)}${noteFolderId ? `&folder=${encodeURIComponent(noteFolderId)}` : ''}`;
+          const meetingPath = createSavedNotePath(meetingId, {
+            folderId: noteFolderId,
+            source: 'recording',
+          });
           await options.onSaved?.(meetingId);
           if (liveId) clearLiveMeetingNotes(liveId);
           savedId = meetingId;
@@ -373,8 +409,7 @@ export function useRecordingStop(
           // Clean up session storage
           sessionStorage.removeItem('last_recording_folder_path');
           sessionStorage.removeItem('last_recording_meeting_name');
-          // Clean up IndexedDB meeting ID (redundant with markMeetingAsSaved cleanup, but ensures cleanup)
-          sessionStorage.removeItem('indexeddb_current_meeting_id');
+          clearLiveSessionId();
 
           // Refetch meetings and set current meeting
           await refetchMeetings();
@@ -411,7 +446,7 @@ export function useRecordingStop(
 
           // Navigate immediately - everything this page was waiting for is already saved.
           if (options.autoNavigate !== false) {
-            router.push(`${meetingPath}&source=recording`);
+            router.push(meetingPath);
             clearTranscripts();
             Analytics.trackPageView('meeting_details');
 
@@ -504,6 +539,7 @@ export function useRecordingStop(
     flushBuffer,
     clearTranscripts,
     meetingTitle,
+    setMeetingTitle,
     markMeetingAsSaved,
     refetchMeetings,
     setCurrentMeeting,

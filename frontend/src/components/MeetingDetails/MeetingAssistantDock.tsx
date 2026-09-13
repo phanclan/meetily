@@ -1,7 +1,7 @@
 'use client';
 
 import { ArrowDown, ArrowUp, ChevronUp, Loader2, MessageCircle, Sparkles, X } from 'lucide-react';
-import { useLayoutEffect, useRef, useState } from 'react';
+import { type ReactNode, useLayoutEffect, useRef, useState } from 'react';
 import { AssistantMessage } from '@/components/AssistantMessage';
 import type { ChatMessage } from '@/hooks/useLiveMeetingChat';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -27,6 +27,9 @@ interface Props {
   loadingLabel?: string;
   workspace?: boolean;
   readOnly?: boolean;
+  label?: string;
+  /** Sibling control to the left of the Ask bar. Live Stop and post-stop Resume share this slot so Ask does not shift. */
+  leadingAction?: ReactNode;
 }
 
 /** Keep meeting questions reachable while the document scrolls independently. */
@@ -35,6 +38,7 @@ export function MeetingAssistantDock(props: Props) {
   const messagesRef = useRef<HTMLDivElement>(null);
   const followLatest = useRef(true);
   const wasExpanded = useRef(false);
+  const ignoreFocusExpand = useRef(false);
   const [showLatest, setShowLatest] = useState(false);
   const jumpToLatest = () => {
     followLatest.current = true;
@@ -45,6 +49,9 @@ export function MeetingAssistantDock(props: Props) {
     if (props.messages.length === 0 || (props.expanded && (!wasExpanded.current || followLatest.current))) jumpToLatest();
     wasExpanded.current = props.expanded;
   }, [props.messages, props.expanded, props.loading]);
+  useLayoutEffect(() => {
+    if (props.expanded) inputRef.current?.focus({ preventScroll: true });
+  }, [props.expanded]);
   useLayoutEffect(() => {
     const input = inputRef.current;
     if (!input) return;
@@ -64,15 +71,26 @@ export function MeetingAssistantDock(props: Props) {
     observer.observe(input);
     return () => observer.disconnect();
   }, [props.input]);
-  const collapse = () => { props.onExpandedChange(false); inputRef.current?.focus(); };
+  const collapse = () => {
+    ignoreFocusExpand.current = true;
+    props.onExpandedChange(false);
+    inputRef.current?.focus();
+    queueMicrotask(() => { ignoreFocusExpand.current = false; });
+  };
+  const expand = () => {
+    if (ignoreFocusExpand.current || props.expanded) return;
+    props.onExpandedChange(true);
+  };
   const submit = () => {
     if (!props.canSend || props.loading || !props.input.trim()) return;
     followLatest.current = true;
     props.onSend();
   };
   return (
-    <aside onKeyDown={event => { if (event.key === 'Escape' && props.expanded) { event.preventDefault(); collapse(); } }} aria-label="Meeting assistant" className={`${props.workspace && props.expanded ? 'flex min-h-0 flex-1 flex-col' : 'shrink-0'} bg-background px-4 pb-5 pt-2 md:px-8`}>
-      <div className={`mx-auto w-full max-w-3xl border border-stone-200 bg-white shadow-sm ${props.workspace && props.expanded ? 'flex min-h-0 flex-1 flex-col' : ''} ${props.expanded ? 'rounded-2xl' : 'rounded-[28px]'}`}>
+    <aside onKeyDown={event => { if (event.key === 'Escape' && props.expanded) { event.preventDefault(); collapse(); } }} aria-label={props.label || 'Meeting assistant'} className={`${props.workspace && props.expanded ? 'flex min-h-0 flex-1 flex-col' : 'shrink-0'} bg-background px-4 pb-5 pt-2 md:px-8`}>
+      <div className={`mx-auto flex w-full max-w-3xl gap-4 ${props.workspace && props.expanded ? 'min-h-0 flex-1' : ''}`}>
+        {props.leadingAction ? <div className="flex h-[52px] w-[8.25rem] shrink-0 items-stretch self-end [&>*]:h-full [&>*]:w-full">{props.leadingAction}</div> : null}
+        <div className={`min-w-0 flex-1 border border-stone-200 bg-white shadow-sm ${props.workspace && props.expanded ? 'flex min-h-0 flex-1 flex-col' : ''} ${props.expanded ? 'rounded-2xl' : 'rounded-[28px]'}`}>
         {props.historyStatus && <p role="status" className="px-5 pt-3 text-xs text-stone-600">{props.historyStatus} {props.onRetryHistory && <button type="button" onClick={props.onRetryHistory} className="underline">Retry</button>}</p>}
         {props.expanded && (
           <div className={`relative border-b border-stone-100 px-4 pt-3 ${props.workspace ? 'flex min-h-0 flex-1 flex-col' : ''}`}>
@@ -105,14 +123,30 @@ export function MeetingAssistantDock(props: Props) {
             {showLatest && <button type="button" onClick={() => { jumpToLatest(); messagesRef.current?.focus(); }} className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-stone-200 bg-white px-3 py-1.5 text-xs text-stone-600 shadow-sm"><ArrowDown className="h-3 w-3" />Jump to latest</button>}
           </div>
         )}
+        {props.expanded && props.messages.length === 0 && !props.loading && props.recipes.length > 0 && (
+          <div className="flex shrink-0 flex-wrap gap-2 border-t border-stone-100 px-4 py-2">
+            {props.recipes.map(recipe => (
+              <button
+                key={recipe.label}
+                type="button"
+                disabled={props.loading || !props.canSend}
+                onClick={() => { followLatest.current = true; recipe.onSelect(); }}
+                className="rounded-full border border-stone-200 px-3 py-1.5 text-xs leading-[18px] text-stone-600 hover:bg-stone-100 disabled:opacity-40"
+              >
+                {recipe.label}
+              </button>
+            ))}
+          </div>
+        )}
         <form className="flex shrink-0 items-end gap-1.5 p-2" onSubmit={event => { event.preventDefault(); submit(); }}>
           {props.recipes.length > 0 && <DropdownMenu>
-            <DropdownMenuTrigger asChild><button type="button" aria-label="Meeting recipes" disabled={props.loading || !props.canSend} className="shrink-0 rounded-full p-2.5 text-stone-500 hover:bg-stone-100 disabled:opacity-40"><Sparkles className="h-4 w-4" /></button></DropdownMenuTrigger>
+            <DropdownMenuTrigger asChild><button type="button" aria-label="Recipes" disabled={props.loading || !props.canSend} className="shrink-0 rounded-full p-2.5 text-stone-500 hover:bg-stone-100 disabled:opacity-40"><Sparkles className="h-4 w-4" /></button></DropdownMenuTrigger>
             <DropdownMenuContent side="top" align="start">
               {props.recipes.map(recipe => <DropdownMenuItem key={recipe.label} onSelect={() => { followLatest.current = true; recipe.onSelect(); }}>{recipe.label}</DropdownMenuItem>)}
             </DropdownMenuContent>
           </DropdownMenu>}
           <textarea ref={inputRef} rows={1} disabled={props.readOnly} aria-label={props.inputLabel || 'Ask about this meeting'} aria-describedby="meeting-composer-help" value={props.input} onChange={event => props.onInputChange(event.target.value)}
+            onFocus={expand}
             onKeyDown={event => {
               if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) { event.preventDefault(); submit(); }
             }} placeholder={`${props.inputLabel || 'Ask about this meeting'}…`} className="min-w-0 flex-1 resize-none bg-transparent px-1 py-2 text-sm leading-5 outline-none focus-visible:ring-1 focus-visible:ring-stone-400 rounded-md" />
@@ -125,6 +159,7 @@ export function MeetingAssistantDock(props: Props) {
           <button type="submit" aria-label="Send question" disabled={!props.input.trim() || !props.canSend}
             className="rounded-full bg-stone-900 p-2.5 text-white disabled:opacity-20"><ArrowUp className="h-4 w-4" /></button>}
         </form>
+        </div>
       </div>
       <p role="status" className="sr-only">{props.loading ? props.loadingLabel || 'Writing an answer' : props.messages.at(-1)?.role === 'assistant' ? props.messages.at(-1)?.notice || (props.messages.at(-1)?.content.startsWith('Error:') ? 'Could not answer. Edit the question to try again.' : 'Answer ready') : ''}</p>
     </aside>

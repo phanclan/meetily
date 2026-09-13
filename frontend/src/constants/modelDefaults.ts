@@ -40,7 +40,8 @@ export const AFTERWORD_TRANSCRIPT_PROVIDER = 'parakeet' as const;
 
 /**
  * Default providers / models for a fresh install.
- * Afterword: local Parakeet STT + Gateway summaries.
+ * Afterword: local Parakeet STT + Gateway summaries (must match
+ * `src-tauri/src/config.rs` afterword constants).
  * Meetily: Groq-first (unchanged).
  */
 export const DEFAULT_SUMMARY_PROVIDER = isAfterword

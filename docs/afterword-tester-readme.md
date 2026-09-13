@@ -24,7 +24,7 @@ On first launch, the app will:
 1. Create its own clean app-data folder under `~/Library/Application Support/com.meetnola.tester/`
 2. Start onboarding
 3. Default **Transcription** to local **Parakeet** (Whisper also available)
-4. Default **Summary / Enhance** to **Vercel AI Gateway** via Custom OpenAI (`https://ai-gateway.vercel.sh/v1`, model `openai/gpt-4o-mini`)
+4. Default **Summary / Enhance** to **Vercel AI Gateway** via Custom OpenAI (`https://ai-gateway.vercel.sh/v1`, model `openai/gpt-5.6-luna`)
 5. Skip local model downloads during onboarding (download Parakeet later from Settings)
 6. Route you to **Settings → Summary** if no Gateway API key is present
 
@@ -78,7 +78,7 @@ Groq’s free tier is enough for basic testing.
 
 ## Defaults
 - Analytics: **off by default**
-- Summary provider: **custom-openai** → Vercel AI Gateway (`openai/gpt-4o-mini`)
+- Summary provider: **custom-openai** → Vercel AI Gateway (`openai/gpt-5.6-luna`)
 - Transcript provider: **parakeet** (local)
 - Local STT models: optional download after onboarding
 - Gateway API key: required only for summaries/Enhance

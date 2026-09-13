@@ -1,44 +1,46 @@
 'use client';
 
-import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { ArrowLeft, Settings2, Mic, Database as DatabaseIcon, SparkleIcon, FlaskConical } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { invoke } from '@tauri-apps/api/core';
-import { motion } from 'framer-motion';
 import { TranscriptSettings } from '@/components/TranscriptSettings';
 import { RecordingSettings } from '@/components/RecordingSettings';
 import { PreferenceSettings } from '@/components/PreferenceSettings';
 import { SummaryModelSettings } from '@/components/SummaryModelSettings';
 import { BetaSettings } from '@/components/BetaSettings';
 import { useConfig } from '@/contexts/ConfigContext';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { getBuildInfo, type BuildInfo } from '@/lib/buildInfo';
+import { ChromeDragBar } from '@/components/WindowChrome';
+import { cn } from '@/lib/utils';
 
-// Tabs configuration (constant)
 const TABS = [
   { value: 'general', label: 'General', icon: Settings2 },
   { value: 'recording', label: 'Recording', icon: Mic },
   { value: 'Transcriptionmodels', label: 'Transcription', icon: DatabaseIcon },
-  { value: 'summaryModels', label: 'Enhancement', icon: SparkleIcon },
-  { value: 'beta', label: 'Beta', icon: FlaskConical }
+  { value: 'summaryModels', label: 'AI Enhancement', icon: SparkleIcon },
+  { value: 'beta', label: 'Beta', icon: FlaskConical },
 ] as const;
+
+type TabValue = (typeof TABS)[number]['value'];
+
+function isTabValue(value: string | null): value is TabValue {
+  return TABS.some((tab) => tab.value === value);
+}
 
 export default function SettingsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { transcriptModelConfig, setTranscriptModelConfig } = useConfig();
 
-  // Animation state for tabs
-  const [activeTab, setActiveTab] = useState('general');
-  const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
-  const [underlineStyle, setUnderlineStyle] = useState({ left: 0, width: 0 });
+  const [activeTab, setActiveTab] = useState<TabValue>('general');
   const onboardingIntent = searchParams.get('onboarding');
   const [buildInfo, setBuildInfo] = useState<BuildInfo | null>(null);
 
   useEffect(() => {
     const requestedTab = searchParams.get('tab');
-    if (requestedTab && TABS.some((tab) => tab.value === requestedTab)) {
+    if (isTabValue(requestedTab)) {
       setActiveTab(requestedTab);
     }
   }, [searchParams]);
@@ -47,126 +49,142 @@ export default function SettingsPage() {
     getBuildInfo().then(setBuildInfo).catch(console.error);
   }, []);
 
-  // Load saved transcript configuration on mount
   useEffect(() => {
     const loadTranscriptConfig = async () => {
       try {
-        const config = await invoke('api_get_transcript_config') as any;
+        const config = (await invoke('api_get_transcript_config')) as {
+          provider?: string;
+          model?: string;
+          apiKey?: string | null;
+        } | null;
         if (config) {
-          console.log('Loaded saved transcript config:', { provider: config.provider, model: config.model, hasKey: !!config.apiKey });
+          console.log('Loaded saved transcript config:', {
+            provider: config.provider,
+            model: config.model,
+            hasKey: !!config.apiKey,
+          });
           setTranscriptModelConfig({
             provider: config.provider || 'localWhisper',
             model: config.model || 'large-v3',
-            apiKey: config.apiKey || null
+            apiKey: config.apiKey || null,
           });
         }
       } catch (error) {
         console.error('Failed to load transcript config:', error);
       }
     };
-    loadTranscriptConfig();
+    void loadTranscriptConfig();
   }, [setTranscriptModelConfig]);
 
-  // Update underline position when active tab changes
-  useLayoutEffect(() => {
-    const activeIndex = TABS.findIndex(tab => tab.value === activeTab);
-    const activeTabElement = tabRefs.current[activeIndex];
+  const selectTab = useCallback(
+    (value: TabValue) => {
+      setActiveTab(value);
+      const params = new URLSearchParams(searchParams.toString());
+      if (value === 'general') {
+        params.delete('tab');
+      } else {
+        params.set('tab', value);
+      }
+      const query = params.toString();
+      router.replace(query ? `/settings?${query}` : '/settings');
+    },
+    [router, searchParams],
+  );
 
-    if (activeTabElement) {
-      activeTabElement.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-      const { offsetLeft, offsetWidth } = activeTabElement;
-      setUnderlineStyle({ left: offsetLeft, width: offsetWidth });
-    }
-  }, [activeTab]);
+  const activeSection = useMemo(
+    () => TABS.find((tab) => tab.value === activeTab) ?? TABS[0],
+    [activeTab],
+  );
 
   return (
-    <div className="h-screen bg-background flex flex-col">
-      {/* Fixed Header */}
-      <div className="sticky top-0 z-10 bg-background border-b border-stone-200">
-        <div className="max-w-5xl mx-auto px-5 py-5 md:px-8">
-          <div className="flex items-center gap-4">
-            <button
-              onClick={() => router.back()}
-              className="flex items-center gap-2 text-stone-600 hover:text-stone-900 transition-colors"
-            >
-              <ArrowLeft className="w-5 h-5" />
-              <span>Back</span>
-            </button>
-            <h1 className="text-2xl font-semibold">Settings</h1>
-          </div>
-        </div>
+    <div className="flex h-screen flex-col bg-background">
+      <div className="sticky top-0 z-10 border-b border-stone-200 bg-background">
+        <ChromeDragBar className="px-5 md:px-8">
+          <button
+            type="button"
+            onClick={() => router.back()}
+            className="no-drag flex items-center gap-2 text-stone-600 transition-colors hover:text-stone-900"
+          >
+            <ArrowLeft className="h-5 w-5" />
+            <span>Back</span>
+          </button>
+        </ChromeDragBar>
       </div>
 
-      {/* Scrollable Content */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="max-w-5xl mx-auto px-5 py-4 md:px-8">
-          {onboardingIntent === 'groq-key' && (
-            <Alert className="mb-6 border-blue-200 bg-blue-50 text-blue-950">
-              <AlertDescription className="space-y-2">
-                <p className="font-medium">Afterword is ready, but Groq still needs an API key.</p>
-                <p className="text-sm leading-relaxed">
-                  Enter one Groq key in <strong>Transcription</strong> below. Afterword shares that same key with <strong>Summary</strong>, so you only need to save it once.
-                </p>
-              </AlertDescription>
-            </Alert>
-          )}
-
-          {/* Tabs */}
-          <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <div className="max-w-full overflow-x-auto">
-            <TabsList className="w-max bg-transparent relative rounded-none border-b border-stone-200 p-0 h-auto">
-              {TABS.map((tab, index) => {
-                const Icon = tab.icon;
-                return (
-                  <TabsTrigger
-                    key={tab.value}
-                    value={tab.value}
-                    ref={el => { tabRefs.current[index] = el }}
-                    className="flex items-center gap-2 px-6 py-4 bg-transparent rounded-none border-0 data-[state=active]:bg-transparent data-[state=active]:text-stone-900 data-[state=active]:shadow-none text-stone-600 hover:text-stone-900 relative z-10"
+      <div className="flex min-h-0 flex-1">
+        <nav
+          aria-label="Settings sections"
+          className="flex w-[220px] shrink-0 flex-col border-r border-stone-200/80 px-3 py-4"
+        >
+          <ul className="flex flex-col gap-0.5">
+            {TABS.map((tab) => {
+              const Icon = tab.icon;
+              const isActive = tab.value === activeTab;
+              return (
+                <li key={tab.value}>
+                  <button
+                    type="button"
+                    onClick={() => selectTab(tab.value)}
+                    aria-current={isActive ? 'page' : undefined}
+                    className={cn(
+                      'flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition-colors',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-400 focus-visible:ring-offset-2',
+                      isActive
+                        ? 'bg-stone-100 font-medium text-stone-900'
+                        : 'text-stone-600 hover:bg-stone-50 hover:text-stone-900',
+                    )}
                   >
-                    <Icon className="w-4 h-4" />
-                    {tab.label}
-                  </TabsTrigger>
-                );
-              })}
+                    <Icon className="h-4 w-4 shrink-0" aria-hidden />
+                    <span>{tab.label}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </nav>
 
-              <motion.div
-                className="absolute bottom-0 z-20 h-0.5 bg-stone-900"
-                layoutId="underline"
-                style={{ left: underlineStyle.left, width: underlineStyle.width }}
-                transition={{ type: 'spring', stiffness: 400, damping: 40 }}
-              />
-            </TabsList>
+        <div className="min-w-0 flex-1 overflow-y-auto">
+          <div className="mx-auto max-w-3xl px-5 py-5 md:px-8">
+            {onboardingIntent === 'groq-key' && (
+              <Alert className="mb-6 border-blue-200 bg-blue-50 text-blue-950">
+                <AlertDescription className="space-y-2">
+                  <p className="font-medium">Afterword is ready, but Groq still needs an API key.</p>
+                  <p className="text-sm leading-relaxed">
+                    Enter one Groq key in <strong>Transcription</strong> below. Afterword shares that
+                    same key with <strong>Summary</strong>, so you only need to save it once.
+                  </p>
+                </AlertDescription>
+              </Alert>
+            )}
+
+            <h2 className="font-serif text-2xl tracking-tight text-stone-900">
+              {activeSection.label}
+            </h2>
+
+            <div className="mt-5">
+              {activeTab === 'general' && <PreferenceSettings />}
+              {activeTab === 'recording' && <RecordingSettings />}
+              {activeTab === 'Transcriptionmodels' && (
+                <TranscriptSettings
+                  transcriptModelConfig={transcriptModelConfig}
+                  setTranscriptModelConfig={setTranscriptModelConfig}
+                />
+              )}
+              {activeTab === 'summaryModels' && <SummaryModelSettings />}
+              {activeTab === 'beta' && <BetaSettings />}
             </div>
 
-            <TabsContent value="general">
-              <PreferenceSettings />
-            </TabsContent>
-            <TabsContent value="recording">
-              <RecordingSettings />
-            </TabsContent>
-            <TabsContent value="Transcriptionmodels">
-              <TranscriptSettings
-                transcriptModelConfig={transcriptModelConfig}
-                setTranscriptModelConfig={setTranscriptModelConfig}
-              />
-            </TabsContent>
-            <TabsContent value="summaryModels">
-              <SummaryModelSettings />
-            </TabsContent>
-            <TabsContent value="beta" className="mt-6">
-              <BetaSettings />
-            </TabsContent>
-          </Tabs>
-
-          {buildInfo && (
-            <div className="mt-8 border-t border-stone-200 pt-4 text-xs text-stone-500">
-              <p>{buildInfo.displayName}</p>
-              <p className="mt-1">Channel: {buildInfo.channel} · Build ID: {buildInfo.buildId}</p>
-            </div>
-          )}
+            {buildInfo && (
+              <div className="mt-8 border-t border-stone-200 pt-4 text-xs text-stone-500">
+                <p>{buildInfo.displayName}</p>
+                <p className="mt-1">
+                  Channel: {buildInfo.channel} · Build ID: {buildInfo.buildId}
+                </p>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
   );
-};
+}

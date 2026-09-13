@@ -1,18 +1,20 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use sysinfo::System;
 use tauri::{AppHandle, Emitter, Runtime};
 use tracing::info;
 
-/// Conferencing apps to watch for: (process name substring, display name)
-const CONFERENCING_APPS: &[(&str, &str)] = &[
-    ("zoom.us", "Zoom"),
-    ("Microsoft Teams", "Microsoft Teams"),
-    ("Slack", "Slack"),
-    ("Discord", "Discord"),
-    ("Webex", "Webex"),
-    ("FaceTime", "FaceTime"),
-    ("Google Meet", "Google Meet"),
+/// Display-name priority when multiple conferencing apps appear in the same poll.
+/// First match in this list wins for the `call-detected` payload.
+const DISPLAY_PRIORITY: &[&str] = &[
+    "Microsoft Teams",
+    "Zoom",
+    "Slack",
+    "Discord",
+    "Webex",
+    "FaceTime",
+    "Google Meet",
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -23,24 +25,88 @@ pub struct CallDetectedPayload {
 static DETECTION_RUNNING: AtomicBool = AtomicBool::new(false);
 static DETECTION_ENABLED: AtomicBool = AtomicBool::new(false);
 
-/// Returns the display name of the first detected conferencing app, if any.
-fn detect_conferencing_app() -> Option<String> {
-    let mut sys = System::new_all();
-    sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+/// sysinfo may return a basename (`MSTeams`) or occasionally a full path — normalize.
+fn process_basename(name: &str) -> &str {
+    name.rsplit('/').next().unwrap_or(name)
+}
 
-    for (needle, display_name) in CONFERENCING_APPS {
-        for (_pid, proc_) in sys.processes() {
-            let name = proc_.name().to_string_lossy();
-            if name.contains(needle) {
-                return Some(display_name.to_string());
-            }
-        }
+/// Map a process name to a conferencing app display name.
+/// Prefers main binaries (e.g. `MSTeams`, `zoom.us`, `Slack`) over crashpads / Stream Deck plugins.
+fn match_conferencing_app(name: &str) -> Option<&'static str> {
+    let base = process_basename(name);
+
+    // Skip known non-call helpers / plugins even if they share a brand substring.
+    if base.contains("crashpad") || base.contains("sdzoomplugin") {
+        return None;
     }
+
+    // New Teams (macOS) main binary is `MSTeams`; older builds / helpers use "Microsoft Teams*".
+    // Do not match TeamsWidgetExtension / teams2 agent alone — those are not the call UI.
+    if base == "MSTeams" || base.contains("Microsoft Teams") {
+        return Some("Microsoft Teams");
+    }
+
+    // Zoom main binary; `zoom.us` does not match ZoomCefHelper or sdzoomplugin.
+    if base == "zoom.us" || base.contains("zoom.us") {
+        return Some("Zoom");
+    }
+
+    // Slack main + Electron helpers (`Slack Helper`, etc.)
+    if base == "Slack" || base.starts_with("Slack ") {
+        return Some("Slack");
+    }
+
+    if base.contains("Discord") {
+        return Some("Discord");
+    }
+    if base.contains("Webex") {
+        return Some("Webex");
+    }
+    if base == "FaceTime" || base.contains("FaceTime") {
+        return Some("FaceTime");
+    }
+    if base.contains("Google Meet") {
+        return Some("Google Meet");
+    }
+
     None
 }
 
+/// Returns the set of conferencing apps currently running (by display name).
+fn detect_conferencing_apps() -> HashSet<String> {
+    let mut sys = System::new_all();
+    sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+
+    let mut found = HashSet::new();
+    for (_pid, proc_) in sys.processes() {
+        let name = proc_.name().to_string_lossy();
+        if let Some(display) = match_conferencing_app(&name) {
+            found.insert(display.to_string());
+        }
+    }
+    found
+}
+
+fn pick_announced_app(new_apps: &HashSet<String>) -> Option<String> {
+    for &preferred in DISPLAY_PRIORITY {
+        if new_apps.contains(preferred) {
+            return Some(preferred.to_string());
+        }
+    }
+    new_apps.iter().next().cloned()
+}
+
 /// Start the background poll loop. Emits `call-detected` / `call-ended` events.
-/// Safe to call multiple times — subsequent calls are no-ops if already running.
+///
+/// Behavior:
+/// - Polls every 15s while enabled and not recording.
+/// - Tracks the *set* of detected conferencing apps.
+/// - Emits `call-detected` when a new app appears that was not in the previous set
+///   (so Teams starting while Zoom is already idle still notifies, with `app_name` = Teams).
+/// - Emits `call-ended` when the set becomes empty (all watched apps gone).
+/// - While recording, skips the poll without clearing `last_detected` and without
+///   emitting `call-ended` (the same app after Stop is not a fresh detection).
+/// - Safe to call multiple times — subsequent calls are no-ops if already running.
 pub fn start_detection<R: Runtime>(app: AppHandle<R>) {
     if DETECTION_RUNNING.swap(true, Ordering::SeqCst) {
         return; // Already running
@@ -48,45 +114,48 @@ pub fn start_detection<R: Runtime>(app: AppHandle<R>) {
 
     tauri::async_runtime::spawn(async move {
         info!("Call detection started");
-        let mut last_detected: Option<String> = None;
+        let mut last_detected: HashSet<String> = HashSet::new();
 
         loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(15)).await;
 
             if !DETECTION_ENABLED.load(Ordering::Relaxed) {
-                last_detected = None;
+                last_detected.clear();
                 continue;
             }
 
-            // Skip detection while recording to avoid redundant banners
+            // Skip polling while recording without treating the call as ended.
+            // Clearing last_detected here made Teams/Zoom look "new" after Stop.
             if crate::audio::recording_commands::is_recording().await {
-                if last_detected.is_some() {
-                    last_detected = None;
-                    let _ = app.emit("call-ended", ());
-                }
                 continue;
             }
 
-            let detected = detect_conferencing_app();
+            let detected = detect_conferencing_apps();
 
-            match (&last_detected, &detected) {
-                (None, Some(name)) => {
-                    info!("Conferencing app detected: {}", name);
-                    let _ = app.emit(
-                        "call-detected",
-                        CallDetectedPayload {
-                            app_name: name.clone(),
-                        },
-                    );
-                    last_detected = detected;
-                }
-                (Some(_), None) => {
-                    info!("Conferencing app closed");
-                    let _ = app.emit("call-ended", ());
-                    last_detected = None;
-                }
-                _ => {} // No change
+            let new_apps: HashSet<String> = detected
+                .difference(&last_detected)
+                .cloned()
+                .collect();
+
+            if let Some(name) = pick_announced_app(&new_apps) {
+                info!(
+                    "Conferencing app detected: {} (active: {:?})",
+                    name, detected
+                );
+                let _ = app.emit(
+                    "call-detected",
+                    CallDetectedPayload {
+                        app_name: name,
+                    },
+                );
             }
+
+            if !last_detected.is_empty() && detected.is_empty() {
+                info!("All conferencing apps closed");
+                let _ = app.emit("call-ended", ());
+            }
+
+            last_detected = detected;
         }
     });
 }

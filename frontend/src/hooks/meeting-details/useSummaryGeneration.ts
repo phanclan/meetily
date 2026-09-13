@@ -13,6 +13,7 @@ import {
   readMeetingSummaryLanguage,
   readCachedDetectedSummaryLanguage,
 } from '@/lib/summary-language-preferences';
+import { isPlaceholderMeetingTitle } from '@/lib/meetingTitle';
 
 async function resolveSummaryLanguage(
   meetingId: string,
@@ -224,7 +225,7 @@ export function useSummaryGeneration({
 
       // Update meeting title if available
       const meetingName = pollingResult.data.MeetingName || pollingResult.meetingName;
-      if (meetingName && ['', '+ New Call', 'Untitled meeting', 'Untitled'].includes((currentMeeting.current.title || '').trim())) {
+      if (meetingName && isPlaceholderMeetingTitle(currentMeeting.current.title || '')) {
         updateMeetingTitle(meetingName);
       }
 

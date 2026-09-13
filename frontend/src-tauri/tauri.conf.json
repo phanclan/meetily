@@ -20,6 +20,12 @@
                 "fullscreen": false,
                 "theme": "Light",
                 "decorations": true,
+                "titleBarStyle": "Overlay",
+                "hiddenTitle": true,
+                "trafficLightPosition": {
+                    "x": 16,
+                    "y": 18
+                },
                 "backgroundColor": [
                     255,
                     255,
@@ -67,6 +73,7 @@
                         "core:menu:default",
                         "core:tray:default",
                         "core:window:allow-set-title",
+                        "core:window:allow-start-dragging",
                         "store:default",
                         "notification:default",
                         "notification:allow-is-permission-granted",

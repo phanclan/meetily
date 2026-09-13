@@ -34,6 +34,7 @@ import { toast } from 'sonner';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useImportAudio, ImportResult } from '@/hooks/useImportAudio';
 import { useRouter } from 'next/navigation';
+import { createSavedNotePath } from '@/lib/savedNoteRoute';
 import { useSidebar } from '../Sidebar/SidebarProvider';
 import { LANGUAGES } from '@/constants/languages';
 import { useTranscriptionModels, ModelOption } from '@/hooks/useTranscriptionModels';
@@ -101,7 +102,7 @@ export function ImportAudioDialog({
     refetchMeetings();
     onComplete?.();
     onOpenChange(false);
-    router.push(`/meeting-details?id=${result.meeting_id}`);
+    router.push(createSavedNotePath(result.meeting_id));
   }, [router, refetchMeetings, onComplete, onOpenChange]);
 
   const handleImportError = useCallback((error: string) => {

@@ -20,6 +20,7 @@ import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 import { useImportDialog } from '@/contexts/ImportDialogContext';
 import { createDraftNotePath, createRecordingPath } from '@/lib/quickNoteRoute';
+import { createSavedNotePath } from '@/lib/savedNoteRoute';
 
 export default function Home() {
   const [showRecoveryDialog, setShowRecoveryDialog] = useState(false);
@@ -128,14 +129,15 @@ export default function Home() {
       const result = await recoverMeeting(meetingId);
 
       if (result.success) {
+        const recoveredId = result.meetingId;
         toast.success('Meeting recovered successfully!', {
           description: result.audioRecoveryStatus?.status === 'success'
             ? 'Transcripts and audio recovered'
             : 'Transcripts recovered (no audio available)',
-          action: result.meetingId ? {
+          action: recoveredId ? {
             label: 'View Meeting',
             onClick: () => {
-              router.push(`/meeting-details?id=${result.meetingId}`);
+              router.push(createSavedNotePath(recoveredId));
             }
           } : undefined,
           duration: 10000,
@@ -188,7 +190,7 @@ export default function Home() {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, ease: 'easeOut' }}
-      className="flex flex-col h-screen bg-gray-50"
+      className="flex h-screen min-h-0 flex-col overflow-hidden bg-gray-50"
     >
       <SettingsModals
         modals={modals}
@@ -213,13 +215,12 @@ export default function Home() {
         selectedDevices={selectedDevices}
         recoverableMeetings={recoverableMeetings}
         onOpenMeeting={(meetingId, searchQuery, match, folderId) => {
-          const params = new URLSearchParams({ id: meetingId, ...(searchQuery ? { search: searchQuery } : {}) });
-          if (folderId) params.set('folder', folderId);
-          if (searchQuery && match?.sourceId && (match.kind === 'notes' || match.kind === 'transcript')) {
-            params.set('match', match.kind);
-            params.set('sourceId', match.sourceId);
-          }
-          router.push(`/meeting-details?${params}`);
+          router.push(createSavedNotePath(meetingId, {
+            folderId,
+            searchQuery,
+            matchKind: match?.kind === 'notes' || match?.kind === 'transcript' ? match.kind : null,
+            sourceId: match?.sourceId,
+          }));
         }}
         onOpenRecovery={() => setShowRecoveryDialog(true)}
         onImportAudio={() => openImportDialog()}

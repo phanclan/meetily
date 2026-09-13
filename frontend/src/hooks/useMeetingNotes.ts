@@ -4,15 +4,16 @@ import type { Block } from '@blocknote/core';
 import { blocksToPlainText, parseStoredMeetingNotesJson, plainTextToBlocks } from '@/lib/meetingNotes';
 
 import { isLiveMeetingId, readLiveMeetingNotes, writeLiveMeetingNotes } from '@/lib/liveMeetingNotes';
+import { isPersistedMeetingId } from '@/lib/recordingSessionIdentity';
 import { toast } from 'sonner';
 import { createWriteQueue, registerBeforeQuit } from '@/lib/pendingWrites';
 
 const DEBOUNCE_MS = 2000;
 
-function isPersistedMeetingId(meetingId: string | null) {
-  return Boolean(meetingId && !isLiveMeetingId(meetingId));
-}
-
+/**
+ * Persist notes for `notesOwnerId`. Callers must pass the resolved notes owner
+ * (`resolveNotesOwnerId`), not a conflated live capture id, when those differ.
+ */
 export function useMeetingNotes(meetingId: string | null) {
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [isSaving, setIsSaving] = useState(false);

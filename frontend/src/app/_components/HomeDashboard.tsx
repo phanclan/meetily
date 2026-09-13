@@ -1,8 +1,10 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { FileAudio, FileText, MessageCircle, Mic, MoreHorizontal, NotebookPen, RefreshCw, Search, Trash2, X } from 'lucide-react';
+import { FileAudio, FileText, Mic, MoreHorizontal, NotebookPen, RefreshCw, Search, Trash2, X } from 'lucide-react';
+import { AskNotesPanel } from '@/app/_components/AskNotesPanel';
+import { ASK_CHAT_QUERY, ASK_QUERY, homeAskPath, homeLibraryPath, homePathWithoutAsk, type HomeLibraryPathUpdates } from '@/lib/askRoute';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -17,6 +19,8 @@ import type { SavedMeetingMatch } from '@/hooks/useSavedMeetingSearch';
 import { useFolderRead } from '@/hooks/useNoteFolders';
 import { NoteFolderDialog, MeetingFoldersDialog } from '@/components/NoteFolderControls';
 import { MeetingFolderPicker } from '@/components/MeetingFolderPicker';
+import { NotesLibraryTabs, NotesLibraryToolbar } from '@/app/_components/NotesLibraryChrome';
+import { ChromeDragBar } from '@/components/WindowChrome';
 
 interface HomeDashboardProps {
   meetings: CurrentMeeting[];
@@ -78,8 +82,35 @@ export function HomeDashboard({
 
   useEffect(() => {
     router.prefetch('/recording');
+    // Quietly warm the recording workspace chunk so the first New note after cold
+    // start does not wait on compile/load. Does not navigate or start recording.
+    const warm = () => {
+      void import('@/app/recording/page');
+      void import('@/app/_components/NoteWorkspace');
+    };
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      const id = window.requestIdleCallback(warm, { timeout: 1500 });
+      return () => window.cancelIdleCallback(id);
+    }
+    const timer = window.setTimeout(warm, 0);
+    return () => window.clearTimeout(timer);
   }, [router]);
   const searchParams = useSearchParams();
+  const queryString = searchParams.toString();
+  const askOpen = searchParams.get(ASK_QUERY) === '1';
+  const askChatId = searchParams.get(ASK_CHAT_QUERY);
+  const askChatPath = useCallback((id: string) => homeAskPath(queryString, id), [queryString]);
+  const libraryPath = useCallback(
+    (updates: HomeLibraryPathUpdates) => homeLibraryPath(queryString, updates),
+    [queryString],
+  );
+  const closeAsk = useCallback(() => {
+    router.replace(homePathWithoutAsk(queryString));
+  }, [router, queryString]);
+  const setAskExpanded = useCallback((expanded: boolean) => {
+    if (expanded) router.replace(homeAskPath(queryString, askChatId));
+    else closeAsk();
+  }, [router, queryString, askChatId, closeAsk]);
   const { noteFolders, folderRevision } = useSidebar();
   const folderId = searchParams.get('folder') || '';
   const folder = noteFolders.data?.find(item => item.id === folderId);
@@ -146,37 +177,37 @@ export function HomeDashboard({
     weekday: 'long', month: 'long', day: 'numeric',
   });
 
+  const libraryView = folderId ? 'all' : showAll ? 'all' : 'recent';
+
   return (
-    <div className="flex-1 overflow-y-auto bg-background">
-      <div className="mx-auto flex w-full max-w-3xl flex-col px-5 py-4 md:px-8">
-
-        {/* Header */}
-        <div className="flex flex-wrap items-center justify-between gap-2 pb-3">
-          <div>
-            <h1 className="break-words font-serif text-3xl tracking-tight text-stone-900 [overflow-wrap:anywhere]">{folderId ? folder?.name || 'Folder' : 'Your notes'}</h1>
-            <p className="mt-0.5 text-xs text-stone-500">{todayLabel}</p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {hasDraft && (
-              <Button variant="outline" className="rounded-full shadow-none" onClick={openQuickNote}>
-                <NotebookPen className="h-3.5 w-3.5" />
-                Resume draft
-              </Button>
-            )}
-            <Button
-              className="h-9 rounded-full bg-stone-900 px-4 text-sm font-medium text-white hover:bg-stone-800"
-              onClick={() => onStartRecording(folderId || undefined)}
-              disabled={isRecordingDisabled}
-            >
-              <Mic className="h-3.5 w-3.5" />
-              New note
+    <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-background">
+      <ChromeDragBar className="justify-end px-3">
+        <div className="no-drag flex items-center justify-end gap-1.5">
+          {hasDraft && (
+            <Button variant="outline" size="sm" className="h-7 rounded-full px-3 shadow-none" onClick={openQuickNote}>
+              <NotebookPen className="h-3.5 w-3.5" />
+              Resume draft
             </Button>
-          </div>
+          )}
+          <Button
+            size="sm"
+            className="h-7 rounded-full bg-stone-900 px-3 text-xs font-medium text-white hover:bg-stone-800"
+            onClick={() => onStartRecording(folderId || undefined)}
+            disabled={isRecordingDisabled}
+          >
+            <Mic className="h-3.5 w-3.5" />
+            New note
+          </Button>
         </div>
+      </ChromeDragBar>
 
-        <button type="button" onClick={() => router.push('/ask')} className="mb-2 flex w-full items-center gap-2 rounded-full border border-stone-200 px-3 py-2 text-left text-sm text-stone-500 shadow-sm hover:bg-stone-50 focus-visible:outline-stone-400">
-          <MessageCircle className="h-4 w-4" /><span>Ask your notes</span><span className="ml-auto hidden text-xs sm:inline">Across meetings</span>
-        </button>
+      <div className="notes-scroll-frame">
+      <div className="notes-scrollbar">
+      <div className="mx-auto flex w-full max-w-3xl flex-col px-5 pb-4 pt-0 md:px-8">
+        <div>
+          <h1 className="break-words font-serif text-2xl tracking-tight text-stone-900 [overflow-wrap:anywhere]">{folderId ? folder?.name || 'Folder' : 'Your notes'}</h1>
+          <p className="mt-0.5 text-xs leading-4 text-stone-500">{todayLabel}</p>
+        </div>
 
         {hasDraft && (
           <section aria-label="Unfinished draft" className="mb-3 flex min-w-0 items-center gap-3 rounded-xl border border-stone-200 bg-stone-50 px-4 py-3">
@@ -191,16 +222,17 @@ export function HomeDashboard({
         )}
 
         {/* Meeting timeline and supporting details */}
-        <div className="mt-2 flex flex-col gap-4">
+        <div className="mt-1 flex flex-col gap-3">
 
           {/* Recent meetings — primary list */}
           <div className="w-full">
-            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-              <div className="flex gap-1" aria-label="Meeting list view">
-                <button type="button" className="rounded-full px-3 py-1.5 text-sm text-stone-500 hover:bg-stone-100" onClick={() => router.push(`/follow-ups${folderId ? `?folder=${encodeURIComponent(folderId)}` : ''}`)}>Follow-ups</button>
-                <button type="button" aria-pressed={!showAll} className="rounded-full px-3 py-1.5 text-sm text-stone-500 hover:bg-stone-100 aria-pressed:bg-stone-100 aria-pressed:text-stone-900" onClick={() => { setSearch(''); router.push('/'); }}>Recent</button>
-                <button type="button" aria-pressed={showAll && !folderId} className="rounded-full px-3 py-1.5 text-sm text-stone-500 hover:bg-stone-100 aria-pressed:bg-stone-100 aria-pressed:text-stone-900" onClick={() => router.push(`/?${new URLSearchParams({ view: 'all', ...(filter ? { q: filter } : {}) })}`)}>All notes</button>
-              </div>
+            <div className="mb-2 flex min-h-9 flex-wrap items-center justify-between gap-2">
+              <NotesLibraryTabs
+                current={libraryView}
+                folderId={folderId}
+                filter={filter}
+                onRecent={() => { setSearch(''); }}
+              />
               <div className="flex items-center gap-2"><Button data-trash-trigger variant="ghost" size="sm" onClick={onOpenTrash}><Trash2 />Trash</Button>
               {!filter && visibleMeetings.length > 0 && (
                 <span role="status" className="text-xs text-stone-500">{visibleMeetings.length} {visibleMeetings.length === 1 ? 'note' : 'notes'}</span>
@@ -208,26 +240,23 @@ export function HomeDashboard({
               </div>
             </div>
 
-            <div className="mb-3 flex min-w-0 flex-wrap items-center gap-2">
-              <select aria-label="Filter by folder" value={folderId} onChange={event => router.push(`/?${new URLSearchParams({ view: 'all', ...(event.target.value ? { folder: event.target.value } : {}), ...(filter ? { q: filter } : {}) })}`)} className="h-9 max-w-[11rem] shrink-0 rounded-md border border-stone-200 bg-white px-2.5 text-sm text-stone-700 sm:max-w-[14rem]">
+            <NotesLibraryToolbar>
+              <select aria-label="Filter by folder" value={folderId} onChange={event => router.push(libraryPath({ view: 'all', folder: event.target.value || null, q: filter || null }))} className="h-9 max-w-[11rem] shrink-0 rounded-md border border-stone-200 bg-white px-2.5 text-sm text-stone-700 sm:max-w-[14rem]">
                 <option value="">All folders</option>
                 {folderId && !folder && <option value={folderId}>Selected folder</option>}
                 {noteFolders.data?.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
               </select>
               <Button variant="ghost" size="sm" className="shrink-0" onClick={event => { folderFormTriggerRef.current = event.currentTarget; setFolderDialog('new'); }}>New folder</Button>
-              {folder && <Button variant="ghost" size="sm" className="shrink-0" onClick={event => { folderFormTriggerRef.current = event.currentTarget; setFolderDialog('rename'); }}>Rename</Button>}
+              {folder ? <Button variant="ghost" size="sm" className="shrink-0" onClick={event => { folderFormTriggerRef.current = event.currentTarget; setFolderDialog('rename'); }}>Rename</Button> : <span className="hidden h-9 w-[4.75rem] shrink-0 sm:block" aria-hidden />}
               <form role="search" className="flex min-w-0 flex-1 items-center gap-2 rounded-md bg-stone-100/70 px-2.5 focus-within:ring-1 focus-within:ring-stone-400" onSubmit={event => {
                   event.preventDefault();
-                  const params = new URLSearchParams({ view: 'all' });
-                  if (folderId) params.set('folder', folderId);
-                  if (filter) params.set('q', filter);
-                  router.replace(`/?${params.toString()}`);
+                  router.replace(libraryPath({ view: 'all', folder: folderId || null, q: filter || null }));
                 }}>
                   <Search aria-hidden="true" className="h-4 w-4 shrink-0 text-stone-400" />
                   <input ref={searchInputRef} name="q" type="search" aria-label="Search saved notes" value={search} onChange={event => setSearch(event.target.value)} placeholder="Search notes…" className="min-w-0 flex-1 bg-transparent py-2 text-sm outline-none" />
-                  {search && <button type="button" aria-label="Clear search" className="rounded-full p-1 text-stone-500 hover:bg-stone-200" onClick={() => { setSearch(''); router.replace(folderId ? `/?${new URLSearchParams({ view: 'all', folder: folderId })}` : showAll ? '/?view=all' : '/'); }}><X className="h-4 w-4" /></button>}
+                  {search && <button type="button" aria-label="Clear search" className="rounded-full p-1 text-stone-500 hover:bg-stone-200" onClick={() => { setSearch(''); router.replace(folderId ? libraryPath({ view: 'all', folder: folderId, q: null }) : showAll ? libraryPath({ view: 'all', q: null }) : libraryPath({ view: null, folder: null, q: null })); }}><X className="h-4 w-4" /></button>}
               </form>
-            </div>
+            </NotesLibraryToolbar>
             {noteFolders.error && <p role="alert" className="mb-2 text-sm text-stone-600">Could not load folders. <button onClick={noteFolders.retry} className="underline">Retry folders</button></p>}
 
             {folderId && folderMembers.error ? <p role="alert" className="py-6 text-sm text-stone-600">Could not load this folder. <button type="button" onClick={folderMembers.retry} className="underline">Retry folder</button></p>
@@ -295,7 +324,7 @@ export function HomeDashboard({
             )}
           </div>
 
-          <NoteFolderDialog open={Boolean(folderDialog)} onOpenChange={open => { if (!open) setFolderDialog(null); }} folder={folderDialog === 'rename' ? folder : undefined} returnFocusRef={folderFormTriggerRef} onCreated={created => router.push(`/?${new URLSearchParams({ view: 'all', folder: created.id })}`)} />
+          <NoteFolderDialog open={Boolean(folderDialog)} onOpenChange={open => { if (!open) setFolderDialog(null); }} folder={folderDialog === 'rename' ? folder : undefined} returnFocusRef={folderFormTriggerRef} onCreated={created => router.push(libraryPath({ view: 'all', folder: created.id, q: null }))} />
           {organizeMeetingId && <MeetingFoldersDialog meetingId={organizeMeetingId} open onOpenChange={open => { if (!open) setOrganizeMeetingId(null); }} />}
           {/* System details */}
           <div className="w-full space-y-5 border-t border-stone-100 pt-4">
@@ -367,6 +396,14 @@ export function HomeDashboard({
           </div>
         </div>
       </div>
+      </div>
+      </div>
+      <AskNotesPanel
+        expanded={askOpen}
+        onExpandedChange={setAskExpanded}
+        chatPath={askChatPath}
+        chatId={askChatId}
+      />
     </div>
   );
 }

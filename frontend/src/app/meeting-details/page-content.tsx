@@ -35,6 +35,7 @@ import { SearchResultSource } from '@/components/MeetingDetails/SearchResultSour
 import type { SavedSearchTarget } from '@/hooks/useSavedSearchMatch';
 import { MeetingFoldersDialog } from '@/components/NoteFolderControls';
 import { MeetingFolderPicker } from '@/components/MeetingFolderPicker';
+import { ChromeDragBar } from '@/components/WindowChrome';
 import { PreviousSummaryDialog } from '@/components/MeetingDetails/PreviousSummaryDialog';
 import { createWriteQueue } from '@/lib/pendingWrites';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
@@ -367,20 +368,18 @@ export default function PageContent({
           if (!draft?.trim()) throw new Error('The enhanced document is not ready. Close this review and try again.');
           return { notes: notesText, draft };
         }} />
-      <div data-note-scroll className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]" aria-label="Meeting document">
-      <div className="document-shell !min-h-0 !max-w-3xl">
-        <div className="flex flex-wrap items-center justify-between gap-4">
+      <ChromeDragBar className="justify-between gap-3 px-5 md:px-8">
           <button
             type="button"
             ref={backButtonRef}
             onClick={() => void handleGoBack()}
-            className="document-back"
+            className="document-back no-drag"
           >
             <ArrowLeft className="h-4 w-4" />
             {backLabel}
           </button>
 
-          <div className="flex flex-wrap items-center justify-end gap-2">
+          <div className="no-drag flex flex-wrap items-center justify-end gap-2">
             <MeetingFolderPicker meetingId={meeting.id} variant="chip" eagerMembership className="shrink-0" />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -412,7 +411,9 @@ export default function PageContent({
             </DropdownMenu>
             <NoteSaveStatus saving={notes.isSaving || meetingData.isSaving || meetingData.isSummarySaving || meetingData.titleSave.status === 'saving'} dirty={meetingData.isSummaryDirty} failed={notes.saveError || meetingData.summarySaveError || meetingData.titleSave.status === 'error'} onRetry={() => { if (meetingData.summarySaveError) void meetingData.saveAllChanges(); else void flushNoteChanges().catch(() => {}); }} />
           </div>
-        </div>
+      </ChromeDragBar>
+      <div data-note-scroll className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]" aria-label="Meeting document">
+      <div className="document-shell !min-h-0 !max-w-3xl">
 
         <div className="mt-3 flex min-h-0 flex-col gap-4 pb-8">
           <section className="flex min-h-0 flex-1 flex-col">

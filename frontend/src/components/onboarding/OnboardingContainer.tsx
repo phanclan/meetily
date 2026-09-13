@@ -44,7 +44,8 @@ export function OnboardingContainer({
 
   return (
     <div className="fixed inset-0 bg-gray-50 flex items-center justify-center z-50 overflow-hidden">
-      <div className={cn('w-full max-w-2xl h-full max-h-screen flex flex-col px-6 py-6', className)}>
+      <div data-tauri-drag-region="deep" aria-hidden className="titlebar absolute inset-x-0 top-0 h-[var(--window-chrome-header-height)]" style={{ left: 'var(--window-traffic-lights-width)' }} />
+      <div className={cn('w-full max-w-2xl h-full max-h-screen flex flex-col px-6 pb-6 pt-[calc(var(--window-chrome-header-height)+0.5rem)]', className)}>
         {/* Progress Indicator with Navigation - Fixed */}
         {step && !hideProgress && (
           <div className="mb-2 relative flex-shrink-0">

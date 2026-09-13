@@ -10,7 +10,15 @@ fn is_generated_or_placeholder_title(title: &str) -> bool {
         return true;
     }
 
-    if matches!(trimmed, "New note" | "Untitled meeting") {
+    if matches!(
+        trimmed,
+        "New note"
+            | "+ New Call"
+            | "Untitled meeting"
+            | "Untitled"
+            | "Untitled Meeting"
+            | "New Meeting"
+    ) {
         return true;
     }
 
@@ -20,7 +28,8 @@ fn is_generated_or_placeholder_title(title: &str) -> bool {
     };
 
     let bytes = rest.as_bytes();
-    bytes.len() == 19
+    // Legacy: YYYY-MM-DD_HH-MM-SS (19 chars)
+    let legacy = bytes.len() == 19
         && bytes[4] == b'-'
         && bytes[7] == b'-'
         && bytes[10] == b'_'
@@ -29,7 +38,22 @@ fn is_generated_or_placeholder_title(title: &str) -> bool {
         && bytes
             .iter()
             .enumerate()
-            .all(|(index, byte)| matches!(index, 4 | 7 | 10 | 13 | 16) || byte.is_ascii_digit())
+            .all(|(index, byte)| matches!(index, 4 | 7 | 10 | 13 | 16) || byte.is_ascii_digit());
+    if legacy {
+        return true;
+    }
+
+    // Current: DD_MM_YY_HH_MM_SS (17 chars)
+    bytes.len() == 17
+        && bytes[2] == b'_'
+        && bytes[5] == b'_'
+        && bytes[8] == b'_'
+        && bytes[11] == b'_'
+        && bytes[14] == b'_'
+        && bytes
+            .iter()
+            .enumerate()
+            .all(|(index, byte)| matches!(index, 2 | 5 | 8 | 11 | 14) || byte.is_ascii_digit())
 }
 
 fn normalize_title_line(line: &str) -> String {
@@ -155,7 +179,7 @@ pub async fn move_meeting_notes<R: Runtime>(
 
 #[cfg(test)]
 mod quality_tests {
-    use super::derive_title_from_notes;
+    use super::{derive_title_from_notes, is_generated_or_placeholder_title};
 
     #[test]
     fn quality_unicode_note_titles_are_truncated_at_character_boundaries() {
@@ -164,5 +188,15 @@ mod quality_tests {
             assert!(title.chars().count() <= 96);
             assert!(text.starts_with(&title));
         }
+    }
+
+    #[test]
+    fn recognizes_current_and_legacy_generated_titles() {
+        assert!(is_generated_or_placeholder_title("Meeting 12_09_26_23_04_55"));
+        assert!(is_generated_or_placeholder_title("Meeting 2026-09-12_23-04-55"));
+        assert!(is_generated_or_placeholder_title("New note"));
+        assert!(is_generated_or_placeholder_title("+ New Call"));
+        assert!(is_generated_or_placeholder_title("Untitled"));
+        assert!(!is_generated_or_placeholder_title("Project sync"));
     }
 }

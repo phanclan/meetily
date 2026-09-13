@@ -4,6 +4,10 @@
  * Afterword builds set NEXT_PUBLIC_FLAVOR=afterword (or afterword-tester) via
  * the tester/dev scripts. Upstream Meetily builds leave it unset / "meetily".
  *
+ * Product defaults (Parakeet STT + Gateway/Luna) live in
+ * `src/constants/modelDefaults.ts` and `src-tauri/src/config.rs`.
+ * See `docs/afterword-product-defaults.md`.
+ *
  * The legacy `meetnola` / `meetnola-*` values still resolve to `afterword` so
  * older shells, scripts, and cached env files keep working.
  */
@@ -25,7 +29,7 @@ function normalizeFlavor(raw: string | undefined): ProductFlavor {
 }
 
 export const productFlavor: ProductFlavor = normalizeFlavor(
-  process.env.NEXT_PUBLIC_FLAVOR
+  typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_FLAVOR : undefined
 )
 
 export const isAfterword = productFlavor === 'afterword'

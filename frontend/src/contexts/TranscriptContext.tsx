@@ -9,6 +9,15 @@ import { recordingService } from '@/services/recordingService';
 import { indexedDBService } from '@/services/indexedDBService';
 import { useRecordingTitle } from '@/hooks/useRecordingTitle';
 import { bindRecordingFolder } from '@/lib/liveMeetingFolder';
+import { compareTranscriptOrder, transcriptSequenceKey } from '@/lib/transcriptSequence';
+import {
+  allocateLiveSessionId,
+  clearLiveSessionId,
+  readAppendTargetMeetingId,
+  readLiveSessionId,
+  RESUME_SEQUENCE_SCOPE_STORAGE_KEY,
+  writeLiveSessionId,
+} from '@/lib/recordingSessionIdentity';
 
 interface TranscriptContextType {
   transcripts: Transcript[];
@@ -20,8 +29,12 @@ interface TranscriptContextType {
   meetingTitle: string;
   setMeetingTitle: (title: string) => void;
   clearTranscripts: () => void;
+  /** Live capture id (`liveSessionId`). Not notesOwnerId. */
   currentMeetingId: string | null;
+  liveSessionId: string | null;
   markMeetingAsSaved: () => Promise<void>;
+  beginResumeTranscriptSession: () => void;
+  abortResumeTranscriptSession: () => void;
 }
 
 const TranscriptContext = createContext<TranscriptContextType | undefined>(undefined);
@@ -46,6 +59,9 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
   // ref instead of depending on `currentMeetingId` state.
   const currentMeetingIdRef = useRef<string | null>(null);
   const resetTranscriptBufferRef = useRef<(() => void) | null>(null);
+  // Native sessions restart sequence_id at 1. Resume keeps prior segments, so each
+  // capture generation needs its own scope or new lines are dropped as duplicates.
+  const sequenceScopeRef = useRef(Number(sessionStorage.getItem(RESUME_SEQUENCE_SCOPE_STORAGE_KEY) || '0') || 0);
 
   // Single writer for the meeting id: the ref updates synchronously for listeners, the
   // state update keeps consumers rendering.
@@ -114,22 +130,29 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
         // Listen for recording-started event
         unlistenRecordingStarted = await recordingService.onRecordingStarted(async () => {
           try {
-            const resumeMeetingId = sessionStorage.getItem('resume_meeting_id');
+            const resumeMeetingId = readAppendTargetMeetingId();
             // Resume keeps prior segments in the buffer; a brand-new session starts empty.
             if (!resumeMeetingId) {
+              sequenceScopeRef.current = 0;
+              sessionStorage.removeItem(RESUME_SEQUENCE_SCOPE_STORAGE_KEY);
               setTranscripts([]);
+            } else if (!sessionStorage.getItem(RESUME_SEQUENCE_SCOPE_STORAGE_KEY)) {
+              sequenceScopeRef.current += 1;
+              sessionStorage.setItem(RESUME_SEQUENCE_SCOPE_STORAGE_KEY, String(sequenceScopeRef.current));
+            } else {
+              const storedScope = Number(sessionStorage.getItem(RESUME_SEQUENCE_SCOPE_STORAGE_KEY));
+              if (Number.isFinite(storedScope)) sequenceScopeRef.current = storedScope;
             }
             // The main listener now outlives a single meeting, so its sequence buffer has
             // to be cleared here instead of by a remount.
             resetTranscriptBufferRef.current?.();
             beginSession();
-            // Generate unique meeting ID (live capture id). Resume still gets a fresh live id
-            // for IndexedDB recovery; SQLite append targets resume_meeting_id on stop.
-            const meetingId = `meeting-${Date.now()}`;
+            // Live capture id only. Resume still gets a fresh live id for IndexedDB
+            // recovery; notes stay on notesOwnerId (append target / persisted meeting).
+            const meetingId = allocateLiveSessionId();
             bindRecordingFolder(meetingId);
 
-            // Store in sessionStorage as fallback for markMeetingAsSaved
-            sessionStorage.setItem('indexeddb_current_meeting_id', meetingId);
+            writeLiveSessionId(meetingId);
             console.log('[Recording Started] 💾 IndexedDB meeting ID stored:', meetingId);
 
             // Capture the title revision before exposing the session to the note editor.
@@ -281,31 +304,23 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
 
       if (allNewTranscripts.length > 0) {
         setTranscripts(prev => {
-          // Create a set of existing sequence_ids for deduplication
-          const existingSequenceIds = new Set(prev.map(t => t.sequence_id).filter(id => id !== undefined));
-
-          // Filter out any new transcripts that already exist
-          const uniqueNewTranscripts = allNewTranscripts.filter(transcript =>
-            transcript.sequence_id !== undefined && !existingSequenceIds.has(transcript.sequence_id)
+          const existingSequenceKeys = new Set(
+            prev.map(transcriptSequenceKey).filter((key): key is string => key !== null)
           );
 
-          // Only combine if we have unique new transcripts
+          const uniqueNewTranscripts = allNewTranscripts.filter(transcript => {
+            const key = transcriptSequenceKey(transcript);
+            return key !== null && !existingSequenceKeys.has(key);
+          });
+
           if (uniqueNewTranscripts.length === 0) {
             console.log('No unique transcripts to add - all were duplicates');
-            return prev; // No new unique transcripts to add
+            return prev;
           }
 
           console.log(`Adding ${uniqueNewTranscripts.length} unique transcripts out of ${allNewTranscripts.length} received`);
 
-          // Merge with existing transcripts, maintaining chronological order
-          const combined = [...prev, ...uniqueNewTranscripts];
-
-          // Sort by chunk_start_time first, then by sequence_id
-          return combined.sort((a, b) => {
-            const chunkTimeDiff = (a.chunk_start_time || 0) - (b.chunk_start_time || 0);
-            if (chunkTimeDiff !== 0) return chunkTimeDiff;
-            return (a.sequence_id || 0) - (b.sequence_id || 0);
-          });
+          return [...prev, ...uniqueNewTranscripts].sort(compareTranscriptOrder);
         });
 
         // Log the processing summary
@@ -357,6 +372,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
             text: update.text,
             timestamp: update.timestamp,
             sequence_id: update.sequence_id,
+            sequence_scope: sequenceScopeRef.current,
             chunk_start_time: update.chunk_start_time,
             is_partial: update.is_partial,
             confidence: update.confidence,
@@ -430,6 +446,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
             text: segment.text,
             timestamp: segment.display_time, // Use display_time for UI
             sequence_id: segment.sequence_id,
+            sequence_scope: sequenceScopeRef.current,
             chunk_start_time: segment.audio_start_time,
             is_partial: false, // History segments are always final
             confidence: segment.confidence,
@@ -450,7 +467,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
           // `recording-started` is what normally hands out the live meeting id, and a
           // reload never sees it. Restoring it after the title lands lets the workspace
           // reattach its notes to the running session instead of editing a draft.
-          const storedMeetingId = sessionStorage.getItem('indexeddb_current_meeting_id');
+          const storedMeetingId = readLiveSessionId();
           if (storedMeetingId) applyCurrentMeetingId(prev => prev ?? storedMeetingId);
         } catch (error) {
           console.error('[Reload Sync] Failed to sync from backend:', error);
@@ -475,6 +492,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
       text: update.text,
       timestamp: update.timestamp,
       sequence_id: update.sequence_id || 0,
+      sequence_scope: sequenceScopeRef.current,
       chunk_start_time: update.chunk_start_time,
       is_partial: update.is_partial,
       confidence: update.confidence,
@@ -495,9 +513,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
         return prev;
       }
 
-      // Add new transcript and sort by sequence_id to maintain order
-      const updated = [...prev, newTranscript];
-      const sorted = updated.sort((a, b) => (a.sequence_id || 0) - (b.sequence_id || 0));
+      const sorted = [...prev, newTranscript].sort(compareTranscriptOrder);
 
       console.log('✅ Added new transcript. New count:', sorted.length);
       console.log('📝 Latest transcript:', {
@@ -543,15 +559,29 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
     // Don't clear currentMeetingId here - it will be set by recording-started event
   }, []);
 
+  const beginResumeTranscriptSession = useCallback(() => {
+    sequenceScopeRef.current += 1;
+    sessionStorage.setItem(RESUME_SEQUENCE_SCOPE_STORAGE_KEY, String(sequenceScopeRef.current));
+  }, []);
+
+  const abortResumeTranscriptSession = useCallback(() => {
+    sequenceScopeRef.current = Math.max(0, sequenceScopeRef.current - 1);
+    if (sequenceScopeRef.current === 0) {
+      sessionStorage.removeItem(RESUME_SEQUENCE_SCOPE_STORAGE_KEY);
+    } else {
+      sessionStorage.setItem(RESUME_SEQUENCE_SCOPE_STORAGE_KEY, String(sequenceScopeRef.current));
+    }
+  }, []);
+
   // Mark current meeting as saved in IndexedDB
   const markMeetingAsSaved = useCallback(async () => {
     // Try the live meeting id first, fallback to sessionStorage
-    const meetingId = currentMeetingIdRef.current || sessionStorage.getItem('indexeddb_current_meeting_id');
+    const meetingId = currentMeetingIdRef.current || readLiveSessionId();
 
     if (!meetingId) {
       console.error('[IndexedDB] ❌ Cannot mark meeting as saved: No meeting ID available!');
       console.error('[IndexedDB] currentMeetingId:', currentMeetingIdRef.current);
-      console.error('[IndexedDB] sessionStorage:', sessionStorage.getItem('indexeddb_current_meeting_id'));
+      console.error('[IndexedDB] sessionStorage:', readLiveSessionId());
       return;
     }
 
@@ -560,7 +590,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
 
       // Clear both sources
       applyCurrentMeetingId(null);
-      sessionStorage.removeItem('indexeddb_current_meeting_id');
+      clearLiveSessionId();
     } catch (error) {
       console.error('[IndexedDB] ❌ Failed to mark meeting as saved:', error);
     }
@@ -577,7 +607,10 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
     setMeetingTitle,
     clearTranscripts,
     currentMeetingId,
+    liveSessionId: currentMeetingId,
     markMeetingAsSaved,
+    beginResumeTranscriptSession,
+    abortResumeTranscriptSession,
   };
 
   return (

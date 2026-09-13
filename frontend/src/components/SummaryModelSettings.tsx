@@ -7,6 +7,7 @@ import { ModelConfig, ModelSettingsModal } from '@/components/ModelSettingsModal
 import { SummaryLanguageSettings } from '@/components/SummaryLanguageSettings';
 import { Switch } from './ui/switch';
 import { useConfig } from '@/contexts/ConfigContext';
+import { SettingsRow } from '@/components/settings/SettingsRow';
 import {
   DEFAULT_SUMMARY_MODEL,
   DEFAULT_SUMMARY_PROVIDER,
@@ -128,15 +129,11 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
 
   return (
     <div className='flex flex-col gap-4'>
-      <div className="border-b border-stone-200 py-5">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-base font-semibold text-stone-900 mb-2">Auto Summary</h3>
-            <p className="text-sm text-stone-600">Generate enhanced notes when a recording stops.</p>
-          </div>
-          <Switch checked={isAutoSummary} onCheckedChange={toggleIsAutoSummary} />
-        </div>
-      </div>
+      <SettingsRow
+        title="Auto Summary"
+        description="Generate enhanced notes when a recording stops."
+        control={<Switch checked={isAutoSummary} onCheckedChange={toggleIsAutoSummary} />}
+      />
 
       <SummaryLanguageSettings />
 

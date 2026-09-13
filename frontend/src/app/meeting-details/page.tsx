@@ -10,6 +10,7 @@ import { LoaderIcon } from "lucide-react";
 import { useConfig } from "@/contexts/ConfigContext";
 import { usePaginatedTranscripts } from "@/hooks/usePaginatedTranscripts";
 import type { SavedSearchTarget } from "@/hooks/useSavedSearchMatch";
+import { createSavedNotePath, shouldKeepMeetingDetailsRoute } from "@/lib/savedNoteRoute";
 import {
   DEFAULT_SUMMARY_MODEL,
   DEFAULT_SUMMARY_PROVIDER,
@@ -45,6 +46,18 @@ function MeetingDetailsContent() {
   const { setCurrentMeeting, refetchMeetings } = useSidebar();
   const { isAutoSummary } = useConfig(); // Get auto-summary toggle state
   const router = useRouter();
+  const keepMeetingDetails = shouldKeepMeetingDetailsRoute({
+    folderId,
+    searchQuery,
+    matchKind: sourceKind === 'notes' || sourceKind === 'transcript' ? sourceKind : null,
+    sourceId,
+    fromFollowUps,
+  });
+
+  useEffect(() => {
+    if (!meetingId || keepMeetingDetails) return;
+    router.replace(createSavedNotePath(meetingId, { folderId }));
+  }, [folderId, keepMeetingDetails, meetingId, router]);
   const [meetingDetails, setMeetingDetails] = useState<MeetingDetailsResponse | null>(null);
   const [meetingSummary, setMeetingSummary] = useState<Summary | null>(null);
   const [summaryStatus, setSummaryStatus] = useState('idle');
@@ -189,6 +202,10 @@ function MeetingDetailsContent() {
   useEffect(() => {
     console.log('MeetingDetails useEffect triggered - meetingId:', meetingId);
 
+    if (!keepMeetingDetails) {
+      return;
+    }
+
     if (!meetingId || meetingId === 'intro-call') {
       console.warn('No valid meeting ID in URL - meetingId:', meetingId);
       setError("No meeting selected");
@@ -321,7 +338,7 @@ function MeetingDetailsContent() {
 
     loadData();
     return () => { cancelled = true; };
-  }, [meetingId]);
+  }, [keepMeetingDetails, meetingId]);
 
   // Auto-generation check: runs when meeting is loaded with no summary
   useEffect(() => {
@@ -345,6 +362,17 @@ function MeetingDetailsContent() {
 
     checkAutoGen();
   }, [meetingDetails, meetingSummary, hasCheckedAutoGen, setupAutoGeneration]);
+
+  if (!keepMeetingDetails) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="flex flex-col items-center space-y-4">
+          <LoaderIcon className="w-8 h-8 animate-spin text-gray-600" />
+          <p className="text-gray-600">Opening note...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (error) {
     return (

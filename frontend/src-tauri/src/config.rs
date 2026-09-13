@@ -33,8 +33,10 @@ pub const DEFAULT_TRANSCRIPT_PROVIDER: &str = "parakeet";
 pub const DEFAULT_TRANSCRIPT_PROVIDER: &str = "groq";
 
 /// Default summary model id for a fresh install.
+/// Afterword: must stay in sync with `AFTERWORD_GATEWAY_MODEL` / Luna.
+/// See `docs/afterword-product-defaults.md`.
 #[cfg(feature = "afterword")]
-pub const DEFAULT_SUMMARY_MODEL: &str = "openai/gpt-4o-mini";
+pub const DEFAULT_SUMMARY_MODEL: &str = "openai/gpt-5.6-luna";
 #[cfg(not(feature = "afterword"))]
 pub const DEFAULT_SUMMARY_MODEL: &str = DEFAULT_GROQ_SUMMARY_MODEL;
 

@@ -8,6 +8,7 @@ import {
   BETA_FEATURE_NAMES,
   BETA_FEATURE_DESCRIPTIONS
 } from "@/types/betaFeatures"
+import { SettingsRow } from "@/components/settings/SettingsRow"
 
 export function BetaSettings() {
   const { betaFeatures, toggleBetaFeature } = useConfig();
@@ -17,55 +18,34 @@ export function BetaSettings() {
 
   return (
     <div className="space-y-6">
-      {/* Yellow Warning Banner */}
-      <div className="flex items-start gap-3 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-        <AlertCircle className="h-5 w-5 text-yellow-600 flex-shrink-0 mt-0.5" />
-        <div className="text-sm text-yellow-800">
+      <div className="flex items-start gap-3 rounded-xl bg-amber-50 px-4 py-3.5">
+        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
+        <div className="text-sm text-amber-900">
           <p className="font-medium">Beta Features</p>
-          <p className="mt-1">
+          <p className="mt-1 text-amber-800">
             These features are still being tested. You may encounter issues, and we appreciate your feedback.
           </p>
         </div>
       </div>
 
-      {/* Dynamic Feature Toggles - Automatically renders all features */}
       {featureOrder.map((featureKey) => (
-        <div
+        <SettingsRow
           key={featureKey}
-          className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm"
-        >
-          <div className="flex items-center justify-between">
-            <div className="flex-1">
-              <div className="flex items-center gap-2 mb-2">
-                <FlaskConical className="h-5 w-5 text-gray-600" />
-                <h3 className="text-lg font-semibold text-gray-900">
-                  {BETA_FEATURE_NAMES[featureKey]}
-                </h3>
-                <span className="px-2 py-0.5 text-xs font-medium bg-yellow-100 text-yellow-800 rounded-full">
-                  BETA
-                </span>
-              </div>
-              <p className="text-sm text-gray-600">
-                {BETA_FEATURE_DESCRIPTIONS[featureKey]}
-              </p>
-            </div>
-
-            <div className="ml-6">
-              <Switch
-                checked={betaFeatures[featureKey]}
-                onCheckedChange={(checked) => toggleBetaFeature(featureKey, checked)}
-              />
-            </div>
-          </div>
-        </div>
+          icon={<FlaskConical />}
+          title={BETA_FEATURE_NAMES[featureKey]}
+          description={BETA_FEATURE_DESCRIPTIONS[featureKey]}
+          control={
+            <Switch
+              checked={betaFeatures[featureKey]}
+              onCheckedChange={(checked) => toggleBetaFeature(featureKey, checked)}
+            />
+          }
+        />
       ))}
 
-      {/* Info Box */}
-      <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-        <p className="text-sm text-blue-800">
-          <strong>Note:</strong> When disabled, beta features will be hidden. Your existing meetings remain unaffected.
-        </p>
-      </div>
+      <p className="px-1 text-xs text-stone-500">
+        When disabled, beta features will be hidden. Your existing meetings remain unaffected.
+      </p>
     </div>
   );
 }

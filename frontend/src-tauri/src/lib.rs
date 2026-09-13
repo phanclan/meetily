@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex as StdMutex;
 // Removed unused import
 
@@ -59,6 +59,7 @@ pub mod summary;
 pub mod tray;
 pub mod utils;
 pub mod whisper_engine;
+mod window_state;
 
 use audio::{list_audio_devices, AudioDevice, trigger_audio_permission};
 use log::{error as log_error, info as log_info};
@@ -70,8 +71,11 @@ use tauri_plugin_store::StoreExt;
 use tokio::sync::RwLock;
 
 static RECORDING_FLAG: AtomicBool = AtomicBool::new(false);
+static WINDOW_STATE_PERSIST_ENABLED: AtomicBool = AtomicBool::new(false);
+static WINDOW_STATE_PERSIST_SEQ: AtomicU64 = AtomicU64::new(0);
 const WINDOW_STATE_STORE: &str = "window-state.json";
 const MAIN_WINDOW_STATE_KEY: &str = "main";
+const WINDOW_STATE_PERSIST_DEBOUNCE: Duration = Duration::from_millis(250);
 
 // Global language preference storage (default to "auto-translate" for automatic translation to English)
 static LANGUAGE_PREFERENCE: std::sync::LazyLock<StdMutex<String>> =
@@ -131,8 +135,23 @@ fn load_main_window_state<R: Runtime>(app: &AppHandle<R>) -> Option<PersistedWin
     serde_json::from_value(value.clone()).ok()
 }
 
-fn persist_main_window_state<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), String> {
+fn persist_main_window_state<R: Runtime>(
+    window: &WebviewWindow<R>,
+    persist_while_hidden: bool,
+) -> Result<(), String> {
     if window.label() != "main" {
+        return Ok(());
+    }
+    if !WINDOW_STATE_PERSIST_ENABLED.load(Ordering::SeqCst) {
+        return Ok(());
+    }
+    // Moved/Resized can fire after tray hide with a junk/offscreen frame.
+    // CloseRequested persists first (persist_while_hidden) so hide cannot
+    // race the last visible inner size + outer position.
+    if !persist_while_hidden && !window.is_visible().unwrap_or(false) {
+        return Ok(());
+    }
+    if window.is_minimized().unwrap_or(false) || window.is_fullscreen().unwrap_or(false) {
         return Ok(());
     }
 
@@ -144,14 +163,33 @@ fn persist_main_window_state<R: Runtime>(window: &WebviewWindow<R>) -> Result<()
     }
 
     // Prefer outer position so the frame returns to the same screen placement.
+    // Overlay title bars: size stays inner/physical; position stays outer/physical.
     let position = window.outer_position().ok();
+    let maximized = window.is_maximized().unwrap_or(false);
+    let monitors = window_monitor_bounds(window);
+    if !window_state::frame_is_persistable(
+        size.width,
+        size.height,
+        position.map(|p| p.x),
+        position.map(|p| p.y),
+        maximized,
+        &monitors,
+    ) {
+        log::debug!(
+            "Skipping persist of implausible main window frame {}x{} at {:?}",
+            size.width,
+            size.height,
+            position
+        );
+        return Ok(());
+    }
 
     let state = PersistedWindowState {
         width: size.width as f64,
         height: size.height as f64,
         x: position.map(|p| p.x as f64),
         y: position.map(|p| p.y as f64),
-        maximized: window.is_maximized().unwrap_or(false),
+        maximized,
     };
 
     let store = window
@@ -169,35 +207,177 @@ fn persist_main_window_state<R: Runtime>(window: &WebviewWindow<R>) -> Result<()
     Ok(())
 }
 
+fn schedule_persist_main_window_state<R: Runtime>(window: &WebviewWindow<R>, immediate: bool) {
+    if immediate {
+        if let Err(e) = persist_main_window_state(window, false) {
+            log::warn!("Failed to persist main window state: {}", e);
+        }
+        return;
+    }
+
+    let seq = WINDOW_STATE_PERSIST_SEQ.fetch_add(1, Ordering::SeqCst) + 1;
+    let window = window.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(WINDOW_STATE_PERSIST_DEBOUNCE).await;
+        if WINDOW_STATE_PERSIST_SEQ.load(Ordering::SeqCst) != seq {
+            return;
+        }
+        if let Err(e) = persist_main_window_state(&window, false) {
+            log::warn!("Failed to persist main window state: {}", e);
+        }
+    });
+}
+
+fn persist_then_hide_main_window<R: Runtime>(window: &WebviewWindow<R>) {
+    // Invalidate in-flight Moved/Resized debounces so they cannot overwrite
+    // this close-path save after hide.
+    WINDOW_STATE_PERSIST_SEQ.fetch_add(1, Ordering::SeqCst);
+    if let Err(e) = persist_main_window_state(window, true) {
+        log::warn!("Failed to persist main window state before hide: {}", e);
+    }
+    if let Err(e) = window.hide() {
+        log::error!("Failed to hide main window on close request: {}", e);
+    } else {
+        log::info!("Main window hidden to tray on close request");
+    }
+}
+
+fn enable_main_window_state_persist<R: Runtime>(window: &WebviewWindow<R>) {
+    WINDOW_STATE_PERSIST_ENABLED.store(true, Ordering::SeqCst);
+    schedule_persist_main_window_state(window, true);
+}
+
 fn restore_main_window_state<R: Runtime>(window: &WebviewWindow<R>) {
     let Some(state) = load_main_window_state(&window.app_handle()) else {
         return;
     };
 
-    if !state.maximized {
-        // Size was captured with `inner_size` (physical pixels). Restoring as
-        // logical points made Retina windows jump to ~2x on every relaunch.
-        if let Err(e) = window.set_size(Size::Physical(PhysicalSize::new(
-            state.width.round().max(1.0) as u32,
-            state.height.round().max(1.0) as u32,
-        ))) {
-            log::warn!("Failed to restore main window size: {}", e);
+    let monitors = window_monitor_bounds(window);
+    let primary = primary_monitor_bounds(window, &monitors);
+    // Size was captured with `inner_size` (physical pixels). Restoring as
+    // logical points made Retina windows jump to ~2x on every relaunch.
+    if let Some(frame) = window_state::sanitize_restored_frame(
+        state.width,
+        state.height,
+        state.x,
+        state.y,
+        &monitors,
+        primary,
+    ) {
+        if state.width.round() as u32 != frame.width
+            || state.height.round() as u32 != frame.height
+            || state.x.map(|x| x.round() as i32) != Some(frame.x)
+            || state.y.map(|y| y.round() as i32) != Some(frame.y)
+        {
+            log::info!(
+                "Clamped restored main window from {}x{} at {:?},{:?} to {}x{} at {},{}",
+                state.width,
+                state.height,
+                state.x,
+                state.y,
+                frame.width,
+                frame.height,
+                frame.x,
+                frame.y
+            );
         }
-
-        if let (Some(x), Some(y)) = (state.x, state.y) {
-            if let Err(e) = window.set_position(Position::Physical(PhysicalPosition::new(
-                x.round() as i32,
-                y.round() as i32,
-            ))) {
-                log::warn!("Failed to restore main window position: {}", e);
-            }
-        }
+        apply_window_frame(window, frame);
+    } else if !state.maximized {
+        log::warn!("Skipping main window restore; no usable display geometry");
     }
 
     if state.maximized {
         if let Err(e) = window.maximize() {
             log::warn!("Failed to restore maximized window state: {}", e);
         }
+    }
+}
+
+fn ensure_main_window_frame_is_sane<R: Runtime>(window: &WebviewWindow<R>) {
+    let Ok(size) = window.inner_size() else {
+        return;
+    };
+    let position = window.outer_position().ok();
+    let Some(origin) = position else {
+        return;
+    };
+    let monitors = window_monitor_bounds(window);
+    let current = window_state::WindowFrame {
+        width: size.width,
+        height: size.height,
+        x: origin.x,
+        y: origin.y,
+    };
+    if !window_state::frame_needs_correction(current, &monitors) {
+        return;
+    }
+
+    let primary = primary_monitor_bounds(window, &monitors);
+    if let Some(frame) = window_state::sanitize_restored_frame(
+        size.width as f64,
+        size.height as f64,
+        Some(origin.x as f64),
+        Some(origin.y as f64),
+        &monitors,
+        primary,
+    ) {
+        log::info!(
+            "Corrected on-screen main window from {}x{} at {},{} to {}x{} at {},{}",
+            current.width,
+            current.height,
+            current.x,
+            current.y,
+            frame.width,
+            frame.height,
+            frame.x,
+            frame.y
+        );
+        apply_window_frame(window, frame);
+    }
+}
+
+fn apply_window_frame<R: Runtime>(window: &WebviewWindow<R>, frame: window_state::WindowFrame) {
+    if let Err(e) = window.set_size(Size::Physical(PhysicalSize::new(frame.width, frame.height))) {
+        log::warn!("Failed to restore main window size: {}", e);
+    }
+    if let Err(e) = window.set_position(Position::Physical(PhysicalPosition::new(frame.x, frame.y)))
+    {
+        log::warn!("Failed to restore main window position: {}", e);
+    }
+}
+
+fn window_monitor_bounds<R: Runtime>(window: &WebviewWindow<R>) -> Vec<window_state::MonitorBounds> {
+    window
+        .available_monitors()
+        .ok()
+        .unwrap_or_default()
+        .iter()
+        .map(monitor_to_bounds)
+        .filter(|monitor| monitor.width > 0 && monitor.height > 0)
+        .collect()
+}
+
+fn primary_monitor_bounds<R: Runtime>(
+    window: &WebviewWindow<R>,
+    fallback: &[window_state::MonitorBounds],
+) -> Option<window_state::MonitorBounds> {
+    window
+        .primary_monitor()
+        .ok()
+        .flatten()
+        .map(|monitor| monitor_to_bounds(&monitor))
+        .filter(|monitor| monitor.width > 0 && monitor.height > 0)
+        .or_else(|| fallback.first().copied())
+}
+
+fn monitor_to_bounds(monitor: &tauri::Monitor) -> window_state::MonitorBounds {
+    let work = monitor.work_area();
+    window_state::MonitorBounds {
+        x: work.position.x,
+        y: work.position.y,
+        width: work.size.width,
+        height: work.size.height,
+        scale_factor: monitor.scale_factor(),
     }
 }
 
@@ -219,6 +399,9 @@ fn frontend_bootstrap_complete<R: Runtime>(app: AppHandle<R>) -> Result<(), Stri
             return Err(format!("Failed to inspect main window visibility: {}", e));
         }
     }
+
+    ensure_main_window_frame_is_sane(&window);
+    enable_main_window_state_persist(&window);
 
     if let Err(e) = window.set_focus() {
         log::warn!("Failed to focus main window after frontend bootstrap: {}", e);
@@ -606,6 +789,8 @@ pub fn run() {
                             if let Err(e) = window_for_bootstrap_timeout.show() {
                                 log::warn!("Failed to show fallback main window: {}", e);
                             }
+                            ensure_main_window_frame_is_sane(&window_for_bootstrap_timeout);
+                            enable_main_window_state_persist(&window_for_bootstrap_timeout);
                         }
                         Err(e) => {
                             log::warn!("Failed to inspect fallback main window visibility: {}", e);
@@ -615,16 +800,14 @@ pub fn run() {
 
                 let window_for_events = window.clone();
                 window.on_window_event(move |event| {
-                    if matches!(
-                        event,
-                        WindowEvent::Resized(_)
-                            | WindowEvent::Moved(_)
-                            | WindowEvent::CloseRequested { .. }
-                            | WindowEvent::Destroyed
-                    ) {
-                        if let Err(e) = persist_main_window_state(&window_for_events) {
-                            log::warn!("Failed to persist main window state: {}", e);
+                    match event {
+                        WindowEvent::Resized(_) | WindowEvent::Moved(_) => {
+                            schedule_persist_main_window_state(&window_for_events, false);
                         }
+                        WindowEvent::Destroyed => {
+                            schedule_persist_main_window_state(&window_for_events, true);
+                        }
+                        _ => {}
                     }
                 });
             }
@@ -731,10 +914,16 @@ pub fn run() {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" {
                     api.prevent_close();
-                    if let Err(e) = window.hide() {
-                        log::error!("Failed to hide main window on close request: {}", e);
-                    } else {
-                        log::info!("Main window hidden to tray on close request");
+                    match window.app_handle().get_webview_window("main") {
+                        Some(main) => persist_then_hide_main_window(&main),
+                        None => {
+                            if let Err(e) = window.hide() {
+                                log::error!(
+                                    "Failed to hide main window on close request: {}",
+                                    e
+                                );
+                            }
+                        }
                     }
                 }
             }

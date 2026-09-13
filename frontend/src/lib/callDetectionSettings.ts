@@ -2,10 +2,17 @@ export const CALL_DETECTION_STORAGE_KEY = 'meetily.callDetectionEnabled';
 
 export function loadCallDetectionPreference(): boolean {
   if (typeof window === 'undefined') {
-    return false;
+    return true;
   }
 
-  return localStorage.getItem(CALL_DETECTION_STORAGE_KEY) === 'true';
+  const stored = localStorage.getItem(CALL_DETECTION_STORAGE_KEY);
+  if (stored === null) {
+    // Default ON — persist so it sticks across restarts / Rust sync
+    saveCallDetectionPreference(true);
+    return true;
+  }
+
+  return stored === 'true';
 }
 
 export function saveCallDetectionPreference(enabled: boolean) {

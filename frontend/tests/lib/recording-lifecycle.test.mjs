@@ -166,6 +166,138 @@ test('the draft surface and the recording workspace are separate routes', () => 
   for (const other of ['/', '/meeting-details', '/recording/extra']) assert.equal(route.isNoteWorkspaceRoute(other), false);
 });
 
+test('resume keeps notesOwnerId on the persisted meeting when a new live capture id is allocated', () => {
+  const identity = loader()('@/lib/recordingSessionIdentity');
+  const persisted = 'meeting-a5ce2dc0-f470-485c-b35d-1b2bd0b49059';
+  const live = identity.allocateLiveSessionId(1788630000001);
+  assert.equal(identity.isLiveSessionId(live), true);
+  assert.equal(identity.isPersistedMeetingId(persisted), true);
+  assert.equal(identity.resolveNotesOwnerId({
+    liveSessionId: live,
+    persistedMeetingId: null,
+    appendTargetMeetingId: null,
+  }), live);
+  assert.equal(identity.resolveNotesOwnerId({
+    liveSessionId: live,
+    persistedMeetingId: persisted,
+    appendTargetMeetingId: persisted,
+  }), persisted);
+  assert.equal(identity.resolveNotesOwnerId({
+    liveSessionId: live,
+    persistedMeetingId: persisted,
+    appendTargetMeetingId: null,
+  }), persisted);
+});
+
+test('note workspace seed plan does not reseed or rebind on resume append', () => {
+  const session = loader()('@/lib/noteWorkspaceSession');
+  assert.equal(session.workspaceRouteKey('recording', 'folder-a', 'saved-1'), 'recording|folder-a|saved-1');
+  const replayed = session.draftForWorkspaceRoute({
+    isRecordingWorkspace: true,
+    stored: { title: 'Draft', content: 'keep me', updatedAt: 1, folderId: 'folder-a', saveId: 'save-1' },
+    requestedFolderId: 'folder-b',
+  });
+  assert.equal(replayed.title, 'New note');
+  assert.equal(replayed.content, '');
+  assert.equal(replayed.updatedAt, null);
+  assert.equal(replayed.folderId, 'folder-b');
+  assert.equal(replayed.saveId, 'save-1');
+  assert.equal(
+    session.draftForWorkspaceRoute({
+      isRecordingWorkspace: true,
+      stored: { title: 'Draft', content: 'keep me', updatedAt: 1, folderId: 'folder-a', saveId: null },
+      requestedFolderId: 'folder-b',
+    }).content,
+    'keep me',
+  );
+  assert.equal(session.isAttachableRecordingSession({ status: 'recording' }, false), true);
+  assert.equal(session.isAttachableRecordingSession({ status: 'stopped' }, false), false);
+  assert.equal(session.isAttachableRecordingSession(null, true), true);
+  const resumePlan = session.planSessionSeed({
+    resumeAppend: true,
+    attachedToRunning: false,
+    meetingTitle: 'Live title',
+    noteTitle: 'New note',
+    draftContent: 'should not seed',
+    fallbackSeed: { title: 'Draft', content: 'draft body' },
+    blocksEmpty: true,
+  });
+  assert.equal(resumePlan.kind, 'resume-append');
+  assert.equal(session.planSessionSeed({
+    resumeAppend: false,
+    attachedToRunning: true,
+    meetingTitle: 'Live title',
+    noteTitle: 'New note',
+    draftContent: 'draft body',
+    fallbackSeed: { title: 'Draft', content: 'draft body' },
+    blocksEmpty: true,
+  }).kind, 'attach-running');
+  const seeded = session.planSessionSeed({
+    resumeAppend: false,
+    attachedToRunning: false,
+    meetingTitle: 'Meeting 12_09_26_23_04_55',
+    noteTitle: 'New note',
+    draftContent: 'Seeded notes',
+    fallbackSeed: null,
+    blocksEmpty: true,
+  });
+  assert.equal(seeded.kind, 'seed');
+  assert.equal(seeded.title, 'Meeting 12_09_26_23_04_55');
+  assert.equal(seeded.content, 'Seeded notes');
+  assert.equal(seeded.syncTitleToSession, true);
+  const placeholderSeed = session.planSessionSeed({
+    resumeAppend: false,
+    attachedToRunning: false,
+    meetingTitle: '',
+    noteTitle: 'New note',
+    draftContent: 'Seeded notes',
+    fallbackSeed: null,
+    blocksEmpty: true,
+  });
+  assert.equal(placeholderSeed.syncTitleToSession, false);
+});
+
+test('Afterword saved notes use /recording?saved= except search-source and follow-ups', () => {
+  const route = loader()('@/lib/savedNoteRoute');
+  const id = 'meeting-a5ce2dc0-f470-485c-b35d-1b2bd0b49059';
+  assert.equal(route.createSavedNotePath(id, { flavor: 'afterword' }), `/recording?saved=${id}`);
+  assert.equal(
+    route.createSavedNotePath(id, { flavor: 'afterword', folderId: 'folder-a' }),
+    `/recording?saved=${id}&folder=folder-a`,
+  );
+  assert.equal(
+    route.createSavedNotePath(id, { flavor: 'meetily', folderId: 'folder-a', source: 'recording' }),
+    `/meeting-details?id=${id}&folder=folder-a&source=recording`,
+  );
+  assert.match(
+    route.createSavedNotePath(id, {
+      flavor: 'afterword',
+      searchQuery: 'alpha',
+      matchKind: 'transcript',
+      sourceId: 'src-1',
+    }),
+    /^\/meeting-details\?/,
+  );
+  assert.match(
+    route.createSavedNotePath(id, { flavor: 'afterword', fromFollowUps: true }),
+    /^\/meeting-details\?/,
+  );
+});
+
+test('UI and tray post-stop share one orchestrator handler', async () => {
+  const calls = [];
+  const orchestrator = loader()('@/lib/recordingStopOrchestrator');
+  orchestrator.registerRecordingStopHandler(async (complete, options) => {
+    calls.push({ complete, autoNavigate: options?.autoNavigate, append: options?.appendToMeetingId });
+    return 'meeting-saved';
+  });
+  orchestrator.registerRecordingStopOptions({ autoNavigate: false, appendToMeetingId: 'meeting-saved' });
+  assert.equal(await orchestrator.requestRecordingPostStop(true, { showToast: false }), 'meeting-saved');
+  assert.deepEqual(calls, [{ complete: true, autoNavigate: false, append: 'meeting-saved' }]);
+  const leftover = orchestrator.consumeRecordingStopOptions();
+  assert.equal(leftover.appendToMeetingId, undefined);
+});
+
 test('folder entry is encoded and an existing draft keeps its original folder', () => {
   const localStorage = storage();
   const load = loader({}, { localStorage, window: { sessionStorage: storage() } });
@@ -674,6 +806,32 @@ test('recording service returns native stop result and invokes registered sessio
   assert.deepEqual(calls.map(c => c.command), ['stop_recording', 'get_meeting_session', 'update_meeting_session_title']);
 });
 
+
+test('useMeetingNotes keyed by notesOwnerId keeps SQLite notes when a new live id appears', async () => {
+  const persisted = 'meeting-a5ce2dc0-f470-485c-b35d-1b2bd0b49059';
+  const live = 'meeting-1788630000001';
+  const effects = [];
+  const loads = [];
+  const load = loader({
+    react: { ...quietReact, useEffect: effect => effects.push(effect) },
+    sonner: { toast: { error: noop } },
+    '@/afterword/ipc': {
+      getMeetingNotes: async received => { loads.push(received); return { notes_json: JSON.stringify(blocks) }; },
+      saveMeetingNotes: async () => {},
+    },
+  }, { localStorage: storage() });
+  const identity = load('@/lib/recordingSessionIdentity');
+  const notesOwnerId = identity.resolveNotesOwnerId({
+    liveSessionId: live,
+    persistedMeetingId: persisted,
+    appendTargetMeetingId: persisted,
+  });
+  assert.equal(notesOwnerId, persisted);
+  const hook = load('@/hooks/useMeetingNotes').useMeetingNotes(notesOwnerId);
+  effects.forEach(effect => effect());
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(loads, [persisted]);
+});
 
 test('saved meeting UUIDs load and save through SQLite rather than the live-draft cache', async () => {
   const localStorage = storage();
@@ -1992,6 +2150,14 @@ function dockFixture(globals = {}) {
     onSend: () => sends++, onClear: noop, onStop: noop, canSend: true, recipes: [] };
   return { runner, props, sent: () => sends };
 }
+
+test('expanded empty composer shows recipe chips', () => {
+  const { runner, props } = dockFixture();
+  props.input = '';
+  props.recipes = [{ label: 'Recent follow-ups', onSelect: noop }];
+  const chips = elements(runner.render(props), element => element.type === 'button' && element.props.children === 'Recent follow-ups');
+  assert.ok(chips.length >= 1);
+});
 
 test('source review is explicitly scoped and preserves the conversation and composer', () => {
   const { runner, props, sent } = dockFixture();

@@ -4,7 +4,7 @@
 //! `custom-openai` transport pointed at the Vercel AI Gateway. Existing installs that
 //! already chose Groq are left alone — these helpers only apply on missing/fresh config.
 
-use crate::config::{DEFAULT_PARAKEET_MODEL, DEFAULT_WHISPER_MODEL};
+use crate::config::{DEFAULT_PARAKEET_MODEL, DEFAULT_SUMMARY_MODEL, DEFAULT_WHISPER_MODEL};
 use crate::database::repositories::setting::SettingsRepository;
 use crate::summary::CustomOpenAIConfig;
 use sqlx::SqlitePool;
@@ -13,9 +13,8 @@ use sqlx::SqlitePool;
 pub const SUMMARY_PROVIDER: &str = "custom-openai";
 
 /// Documented OpenAI-compatible model id on Vercel AI Gateway
-/// (`GET https://ai-gateway.vercel.sh/v1/models`). Chosen as a cheap, capable
-/// default for meeting summaries; users can change it in Settings.
-pub const GATEWAY_MODEL: &str = "openai/gpt-5.6-luna";
+/// (`GET https://ai-gateway.vercel.sh/v1/models`). SSOT with `config::DEFAULT_SUMMARY_MODEL`.
+pub const GATEWAY_MODEL: &str = DEFAULT_SUMMARY_MODEL;
 
 /// OpenAI-compatible Chat Completions base URL for Vercel AI Gateway.
 pub const GATEWAY_ENDPOINT: &str = "https://ai-gateway.vercel.sh/v1";

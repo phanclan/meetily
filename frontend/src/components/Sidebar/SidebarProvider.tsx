@@ -54,6 +54,8 @@ interface SidebarContextType {
 
 }
 
+const SIDEBAR_EXPANDED_STORAGE_KEY = 'afterword:sidebar-expanded';
+
 const SidebarContext = createContext<SidebarContextType | null>(null);
 
 export const useSidebar = () => {
@@ -132,8 +134,25 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   ];
 
 
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(SIDEBAR_EXPANDED_STORAGE_KEY);
+      if (saved === '1') setIsCollapsed(false);
+    } catch {
+      // Ignore quota / private-mode failures; stay on the compact default.
+    }
+  }, []);
+
   const toggleCollapse = () => {
-    setIsCollapsed(!isCollapsed);
+    setIsCollapsed(previous => {
+      const next = !previous;
+      try {
+        window.localStorage.setItem(SIDEBAR_EXPANDED_STORAGE_KEY, next ? '0' : '1');
+      } catch {
+        // Ignore quota / private-mode failures.
+      }
+      return next;
+    });
   };
 
   // Update current meeting when on home page

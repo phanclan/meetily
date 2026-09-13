@@ -9,6 +9,8 @@ export interface Transcript {
   text: string;
   timestamp: string; // Wall-clock time (e.g., "14:30:05")
   sequence_id?: number;
+  /** Native recording session generation; resume starts a new scope so sequence_ids can restart at 1. */
+  sequence_scope?: number;
   chunk_start_time?: number; // Legacy field
   is_partial?: boolean;
   confidence?: number;

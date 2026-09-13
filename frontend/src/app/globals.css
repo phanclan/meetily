@@ -240,6 +240,201 @@
   .assistant-markdown blockquote { @apply my-2 border-l-2 border-stone-300 pl-3 text-stone-600; }
 }
 
+/* Overlay title bar: traffic lights sit in the content header. Unlayered so
+   drag-region geometry is not fighting component layers.
+
+   Tauri 2.11 drag.js: a bare `data-tauri-drag-region` only matches the event
+   *target* itself. Focused WKWebView therefore ignores clicks on titles,
+   wrappers, and empty flex children — unfocused macOS Overlay drag still
+   works, which is the reported split. Use `deep` plus pointer-events so the
+   chrome node is the hit target. Leave the traffic-light cluster uncovered. */
+:root {
+  --window-traffic-lights-width: 4.875rem;
+  --window-chrome-header-height: 2.25rem;
+  /* Primary Rail (component-specs): 48px collapsed / 176px expanded.
+     Icon centers stay at 24px from the rail's left edge in both states. */
+  --sidebar-collapsed-width: 3rem;
+  --sidebar-expanded-width: 11rem;
+  --sidebar-icon-slot: 3rem;
+}
+
+[data-tauri-drag-region] {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+.titlebar {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+[data-tauri-drag-region="false"],
+.no-drag,
+[data-tauri-drag-region] a,
+[data-tauri-drag-region] button,
+[data-tauri-drag-region] input,
+[data-tauri-drag-region] textarea,
+[data-tauri-drag-region] select,
+[data-tauri-drag-region] [role="button"],
+[data-tauri-drag-region] [role="combobox"] {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+/* Make the drag node the mousedown target (Tauri self-only + WKWebView). */
+[data-tauri-drag-region]:not([data-tauri-drag-region='false']) > * {
+  pointer-events: none;
+}
+
+[data-tauri-drag-region] .no-drag,
+[data-tauri-drag-region] .no-drag *,
+[data-tauri-drag-region] [data-tauri-drag-region='false'],
+[data-tauri-drag-region] [data-tauri-drag-region='false'] * {
+  pointer-events: auto;
+}
+
+.window-chrome-drag-strip {
+  position: fixed;
+  top: 0;
+  right: 0;
+  /* Native traffic lights sit in this left inset; do not cover them. */
+  left: var(--window-traffic-lights-width);
+  z-index: 20;
+  height: var(--window-chrome-header-height);
+  pointer-events: auto;
+  user-select: none;
+  -webkit-user-select: none;
+  /* WKWebView skips hit-testing fully transparent nodes when focused. */
+  background-color: rgba(255, 255, 255, 0.01);
+}
+
+.window-chrome-traffic-lights {
+  width: var(--window-traffic-lights-width);
+  height: 100%;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+.window-chrome-header {
+  position: relative;
+  z-index: 30;
+  min-height: var(--window-chrome-header-height);
+}
+
+.window-chrome-toolbar {
+  min-height: var(--window-chrome-header-height);
+}
+
+.window-chrome-inset-left {
+  padding-left: var(--window-traffic-lights-width);
+}
+
+/* Collapsed rail is narrower than the traffic-light cluster. Leave this strip
+   uncovered so native lights keep receiving clicks (no drag region). */
+.window-chrome-collapsed-clearance {
+  width: calc(var(--window-traffic-lights-width) - var(--sidebar-collapsed-width));
+  min-height: var(--window-chrome-header-height);
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+/* Primary rail: width change only. Icon slot is always --sidebar-icon-slot so
+   glyph centers do not bounce. No vertical divider (Granola / app-shell low-chrome). */
+.sidebar-rail {
+  width: var(--sidebar-collapsed-width);
+  transition: width 140ms ease;
+}
+
+.sidebar-rail[data-expanded='true'] {
+  width: var(--sidebar-expanded-width);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-rail {
+    transition: none;
+  }
+}
+
+.rail-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 2.5rem;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 0.375rem;
+}
+
+.rail-item-icon {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: var(--sidebar-icon-slot);
+  min-height: 2.5rem;
+}
+
+.rail-item-label {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  padding-right: 0.75rem;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 18px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Real layout inset around the scrollport. WKWebView ignores scrollbar-track
+   margin, which left the thumb flush against the window edge. */
+.notes-scroll-frame {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  /* Near-zero top so "Your notes" sits under chrome; keep a little bottom inset. */
+  padding-block: 0 10px;
+  overflow: hidden;
+}
+
+.notes-scroll-frame > .notes-scrollbar {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.notes-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #d6d3d1 transparent;
+}
+
+.notes-scrollbar:hover {
+  scrollbar-color: #a8a29e transparent;
+}
+
+.notes-scrollbar::-webkit-scrollbar {
+  width: 10px;
+}
+
+.notes-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.notes-scrollbar::-webkit-scrollbar-thumb {
+  background-color: #e7e5e4;
+  border-radius: 999px;
+  border-left: 3px solid transparent;
+  border-right: 3px solid transparent;
+  background-clip: padding-box;
+}
+
+.notes-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: #a8a29e;
+}
+
 /* Search paints editor text without inserting marks into saved BlockNote data. */
 ::highlight(note-find-all) { background-color: #fef08a; color: #292524; }
 ::highlight(note-find-current) { background-color: #fb923c; color: #1c1917; }

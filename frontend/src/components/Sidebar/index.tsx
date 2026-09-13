@@ -2,8 +2,8 @@
 import { NoteFolderSidebar } from '@/components/NoteFolderControls';
 
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { File, Settings, PanelLeftClose, PanelLeftOpen, Home, Trash2, Mic, Pencil, SearchIcon, X, Upload, FolderOpen, ChevronDown, MoreHorizontal, MessageCircle } from 'lucide-react';
-import { useRouter, usePathname } from 'next/navigation';
+import { File, Settings, Home, Trash2, Mic, Pencil, SearchIcon, X, Upload, FolderOpen, ChevronDown, MoreHorizontal, MessageCircle, PanelLeftClose } from 'lucide-react';
+import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { useSidebar } from './SidebarProvider';
 import type { CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
 import { ConfirmationModal } from '../ConfirmationModel/confirmation-modal';
@@ -36,12 +36,63 @@ import {
 import { VisuallyHidden } from "@/components/ui/visually-hidden"
 
 import { MessageToast } from '../MessageToast';
-import Logo from '../Logo';
 import Info from '../Info';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import { ComplianceNotification } from '../ComplianceNotification';
-import { Input } from '../ui/input';
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '../ui/input-group';
+import { cn } from '@/lib/utils';
+import { homeAskPath, isHomeAskOpen } from '@/lib/askRoute';
+import { createSavedNotePath } from '@/lib/savedNoteRoute';
+import { RECORDING_ROUTE } from '@/lib/quickNoteRoute';
+
+function RailItem({
+  icon,
+  label,
+  collapsed,
+  onClick,
+  active = false,
+  className,
+  ariaLabel,
+  ariaCurrent,
+  ariaExpanded,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  collapsed: boolean;
+  onClick: () => void;
+  active?: boolean;
+  className?: string;
+  ariaLabel?: string;
+  ariaCurrent?: 'page';
+  ariaExpanded?: boolean;
+}) {
+  const button = (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={ariaLabel ?? label}
+      aria-current={ariaCurrent}
+      aria-expanded={ariaExpanded}
+      className={cn(
+        'rail-item text-sm transition-colors',
+        active ? 'bg-gray-100 font-medium text-gray-900' : 'text-gray-700 hover:bg-gray-100',
+        className,
+      )}
+    >
+      <span className="rail-item-icon">{icon}</span>
+      {!collapsed && <span className="rail-item-label">{label}</span>}
+    </button>
+  );
+
+  if (!collapsed) return button;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{button}</TooltipTrigger>
+      <TooltipContent side="right"><p>{label}</p></TooltipContent>
+    </Tooltip>
+  );
+}
 
 interface SidebarItem {
   id: string;
@@ -53,6 +104,8 @@ interface SidebarItem {
 const Sidebar: React.FC = () => {
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const askOpen = isHomeAskOpen(pathname, searchParams.toString());
   const {
     currentMeeting,
     setCurrentMeeting,
@@ -498,7 +551,10 @@ const Sidebar: React.FC = () => {
   };
 
   const renderItem = (item: SidebarItem, depth = 0) => {
-    const isActive = pathname === '/meeting-details' && currentMeeting?.id === item.id;
+    const savedId = searchParams.get('saved');
+    const isActive =
+      (pathname === '/meeting-details' && currentMeeting?.id === item.id) ||
+      (pathname === RECORDING_ROUTE && savedId === item.id);
     const isMeetingItem = item.type === 'file' && item.id.includes('-') && !item.id.startsWith('intro-call');
     const matchingResult = isMeetingItem ? findMatchingSnippet(item.id) : null;
     const hasTranscriptMatch = !!matchingResult;
@@ -518,7 +574,7 @@ const Sidebar: React.FC = () => {
               }`}
               onClick={() => {
                 setCurrentMeeting({ id: item.id, title: item.title });
-                const path = item.id.startsWith('intro-call') ? '/' : `/meeting-details?id=${item.id}`;
+                const path = item.id.startsWith('intro-call') ? '/' : createSavedNotePath(item.id);
                 router.push(path);
               }}
             >
@@ -544,7 +600,7 @@ const Sidebar: React.FC = () => {
             aria-current={isActive ? 'page' : undefined}
             onClick={() => {
               setCurrentMeeting({ id: item.id, title: item.title });
-              const path = item.id.startsWith('intro-call') ? '/' : `/meeting-details?id=${item.id}`;
+              const path = item.id.startsWith('intro-call') ? '/' : createSavedNotePath(item.id);
               router.push(path);
             }}
           >
@@ -580,45 +636,47 @@ const Sidebar: React.FC = () => {
     <>
     <nav
       aria-label="Main navigation"
-      className={`sticky top-0 h-screen flex-shrink-0 bg-background border-r border-stone-200 flex flex-col transition-all duration-300 overflow-hidden z-40 [&_button:focus-visible]:outline [&_button:focus-visible]:outline-2 [&_button:focus-visible]:outline-stone-700 [&_button:focus-visible]:-outline-offset-2 ${
-        isCollapsed ? 'w-14' : 'w-64'
-      }`}
+      data-expanded={isCollapsed ? 'false' : 'true'}
+      className="sidebar-rail sticky top-0 z-40 flex h-screen flex-shrink-0 flex-col overflow-hidden bg-background [&_button:focus-visible]:-outline-offset-2 [&_button:focus-visible]:outline [&_button:focus-visible]:outline-2 [&_button:focus-visible]:outline-stone-700"
     >
-        {/* Header: Logo + toggle button */}
-        <div className="flex items-center justify-between px-2 py-2 flex-shrink-0">
-          {!isCollapsed && <Logo isCollapsed={false} />}
-          <button
-            onClick={toggleCollapse}
-            className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500 flex-shrink-0 transition-colors"
-            aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            aria-expanded={!isCollapsed}
-          >
-            {isCollapsed
-              ? <PanelLeftOpen className="w-4 h-4" />
-              : <PanelLeftClose className="w-4 h-4" />}
-          </button>
+        {/* Overlay chrome: lights are native. Expanded row is collapse only.
+            Search lives in the rail body (field) or as a collapsed rail icon — never in chrome. */}
+        <div className="window-chrome-toolbar pointer-events-none flex shrink-0">
+          <div className="window-chrome-traffic-lights" aria-hidden />
+          {!isCollapsed && (
+            <div
+              data-tauri-drag-region="deep"
+              className="titlebar window-chrome-toolbar pointer-events-auto flex min-w-0 flex-1 items-center pr-1"
+            >
+              <div className="no-drag flex items-center">
+                <button
+                  type="button"
+                  onClick={toggleCollapse}
+                  className="rounded-md p-1.5 text-stone-500 hover:bg-stone-100 hover:text-stone-800"
+                  aria-label="Collapse sidebar"
+                  aria-expanded="true"
+                >
+                  <PanelLeftClose className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* Search */}
-        <div ref={searchContainerRef} className="px-2 mb-1 flex-shrink-0">
-          {isCollapsed ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  onClick={() => { focusSearchOnExpand.current = true; toggleCollapse(); }}
-                  aria-label="Search meetings"
-                  className="flex items-center justify-center w-full p-2 rounded-lg hover:bg-gray-100 text-gray-500 transition-colors"
-                >
-                  <SearchIcon className="w-4 h-4" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="right"><p>Search</p></TooltipContent>
-            </Tooltip>
-          ) : (
-            <InputGroup>
+        {isCollapsed ? (
+          <RailItem
+            collapsed
+            label="Search"
+            ariaLabel="Search meetings"
+            icon={<SearchIcon className="h-4 w-4" />}
+            onClick={() => { focusSearchOnExpand.current = true; toggleCollapse(); }}
+          />
+        ) : (
+          <div ref={searchContainerRef} className="flex min-h-10 shrink-0 items-center px-2">
+            <InputGroup className="h-8">
               <InputGroupInput
                 aria-label="Search meeting content"
-                placeholder='Search meeting content...'
+                placeholder="Search…"
                 value={searchQuery}
                 onChange={(e) => handleSearchChange(e.target.value)}
               />
@@ -632,85 +690,54 @@ const Sidebar: React.FC = () => {
                 </InputGroupAddon>
               )}
             </InputGroup>
-          )}
-        </div>
+          </div>
+        )}
 
-        {/* Top nav items */}
-        <div className="flex-shrink-0 px-2 space-y-0.5">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={() => router.push('/')}
-                aria-label="Home"
-                aria-current={isHomePage ? 'page' : undefined}
-                className={`flex items-center gap-2 px-2 py-1.5 rounded-md w-full text-sm transition-colors ${
-                  isHomePage ? 'bg-gray-100 font-medium text-gray-900' : 'hover:bg-gray-100 text-gray-700'
-                }`}
-              >
-                <Home className="w-4 h-4 flex-shrink-0" />
-                {!isCollapsed && <span>Home</span>}
-              </button>
-            </TooltipTrigger>
-            {isCollapsed && <TooltipContent side="right"><p>Home</p></TooltipContent>}
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={handleRecordingToggle}
-                aria-label={isRecording ? 'Open recording' : 'Start recording'}
-                className={`flex items-center gap-2 px-2 py-1.5 rounded-md w-full text-sm transition-colors ${
-                  isRecording
-                    ? 'text-red-500 bg-red-50 hover:bg-red-100'
-                    : 'text-gray-700 hover:bg-red-50 hover:text-red-600'
-                }`}
-              >
-                <Mic className="w-4 h-4 flex-shrink-0" />
-                {!isCollapsed && (
-                  <span>{isRecording ? 'Open recording' : 'Start Recording'}</span>
-                )}
-              </button>
-            </TooltipTrigger>
-            {isCollapsed && (
-              <TooltipContent side="right">
-                <p>{isRecording ? 'Open recording' : 'Start Recording'}</p>
-              </TooltipContent>
-            )}
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button type="button" onClick={() => router.push('/ask')} aria-label="Ask your notes" aria-current={pathname === '/ask' ? 'page' : undefined}
-                className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm ${pathname === '/ask' ? 'bg-gray-100 font-medium text-gray-900' : 'text-gray-700 hover:bg-gray-100'}`}>
-                <MessageCircle className="h-4 w-4 shrink-0" />{!isCollapsed && <span>Ask your notes</span>}
-              </button>
-            </TooltipTrigger>
-            {isCollapsed && <TooltipContent side="right"><p>Ask your notes</p></TooltipContent>}
-          </Tooltip>
+        <div className="shrink-0">
+          <RailItem
+            collapsed={isCollapsed}
+            label="Home"
+            icon={<Home className="h-4 w-4" />}
+            active={isHomePage && !askOpen}
+            ariaCurrent={isHomePage && !askOpen ? 'page' : undefined}
+            onClick={() => router.push('/')}
+          />
+          <RailItem
+            collapsed={isCollapsed}
+            label={isRecording ? 'Open recording' : 'Start Recording'}
+            icon={<Mic className="h-4 w-4" />}
+            className={isRecording ? 'bg-red-50 text-red-500 hover:bg-red-100' : 'hover:bg-red-50 hover:text-red-600'}
+            onClick={handleRecordingToggle}
+          />
+          <RailItem
+            collapsed={isCollapsed}
+            label="Ask your notes"
+            icon={<MessageCircle className="h-4 w-4" />}
+            active={askOpen}
+            ariaCurrent={askOpen ? 'page' : undefined}
+            ariaExpanded={pathname === '/' ? askOpen : undefined}
+            onClick={() => {
+              if (isHomePage && askOpen) return;
+              router.push(isHomePage ? homeAskPath(searchParams.toString()) : homeAskPath('', searchParams.get('chat')));
+            }}
+          />
         </div>
 
         {/* Meetings section */}
-        <div className="flex-1 flex flex-col min-h-0 mt-2 overflow-hidden">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           {isCollapsed ? (
-            // Collapsed: single Meetings icon, clicking expands sidebar + ensures meetings list is open
-            <div className="px-2">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    onClick={() => {
-                      focusMeetingsOnExpand.current = true;
-                      setMeetingsExpanded(true);
-                      toggleCollapse();
-                    }}
-                    aria-label="Show meetings"
-                    aria-expanded={false}
-                    className="flex items-center gap-2 px-2 py-1.5 rounded-md w-full text-sm hover:bg-gray-100 text-gray-500 transition-colors"
-                  >
-                    <FolderOpen className="w-4 h-4 flex-shrink-0" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="right"><p>Meetings</p></TooltipContent>
-              </Tooltip>
-            </div>
+            <RailItem
+              collapsed
+              label="Meetings"
+              ariaLabel="Show meetings"
+              ariaExpanded={false}
+              icon={<FolderOpen className="h-4 w-4" />}
+              onClick={() => {
+                focusMeetingsOnExpand.current = true;
+                setMeetingsExpanded(true);
+                toggleCollapse();
+              }}
+            />
           ) : (
             <>
               <NoteFolderSidebar />
@@ -769,42 +796,24 @@ const Sidebar: React.FC = () => {
         </div>
 
         {/* Footer */}
-        <div className="flex-shrink-0 border-t border-gray-100 px-2 py-1.5 space-y-0.5">
+        <div className="shrink-0 border-t border-gray-100 py-1">
           {betaFeatures.importAndRetranscribe && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  onClick={() => openImportDialog()}
-                  aria-label="Import audio"
-                  className="flex items-center gap-2 px-2 py-1.5 rounded-md w-full text-sm hover:bg-gray-100 text-gray-700 transition-colors"
-                >
-                  <Upload className="w-4 h-4 flex-shrink-0" />
-                  {!isCollapsed && <span>Import Audio</span>}
-                </button>
-              </TooltipTrigger>
-              {isCollapsed && <TooltipContent side="right"><p>Import Audio</p></TooltipContent>}
-            </Tooltip>
+            <RailItem
+              collapsed={isCollapsed}
+              label="Import Audio"
+              icon={<Upload className="h-4 w-4" />}
+              onClick={() => openImportDialog()}
+            />
           )}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={() => router.push('/settings')}
-                aria-label="Settings"
-                aria-current={pathname === '/settings' ? 'page' : undefined}
-                className={`flex items-center gap-2 px-2 py-1.5 rounded-md w-full text-sm transition-colors ${
-                  pathname === '/settings' ? 'bg-gray-100 font-medium text-gray-900' : 'hover:bg-gray-100 text-gray-700'
-                }`}
-              >
-                <Settings className="w-4 h-4 flex-shrink-0" />
-                {!isCollapsed && <span>Settings</span>}
-              </button>
-            </TooltipTrigger>
-            {isCollapsed && <TooltipContent side="right"><p>Settings</p></TooltipContent>}
-          </Tooltip>
+          <RailItem
+            collapsed={isCollapsed}
+            label="Settings"
+            icon={<Settings className="h-4 w-4" />}
+            active={pathname === '/settings'}
+            ariaCurrent={pathname === '/settings' ? 'page' : undefined}
+            onClick={() => router.push('/settings')}
+          />
           <Info isCollapsed={isCollapsed} />
-            <div className="w-full flex items-center justify-center px-3 py-1 text-xs text-gray-400">
-              v0.4.0
-            </div>
         </div>
       </nav>
 

@@ -2,6 +2,7 @@
 
 import { useSidebar } from "@/components/Sidebar/SidebarProvider";
 import { useRouter } from "next/navigation"
+import { createSavedNotePath } from "@/lib/savedNoteRoute";
 
 
 
@@ -12,9 +13,8 @@ export const useNavigation = (meetingId: string, meetingTitle: string) => {
 
     const handleNavigation = () => {
         setCurrentMeeting({ id: meetingId, title: meetingTitle });
-        router.push(`/meeting-details?id=${meetingId}`);
+        router.push(createSavedNotePath(meetingId));
     };
 
     return handleNavigation;
 };
-

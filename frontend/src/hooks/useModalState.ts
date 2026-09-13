@@ -4,7 +4,6 @@ import { toast } from 'sonner';
 import { TranscriptModelProps } from '@/components/TranscriptSettings';
 
 export type ModalType =
-  | 'modelSettings'
   | 'deviceSettings'
   | 'languageSettings'
   | 'modelSelector'
@@ -12,7 +11,6 @@ export type ModalType =
   | 'chunkDropWarning';
 
 interface ModalState {
-  modelSettings: boolean;
   deviceSettings: boolean;
   languageSettings: boolean;
   modelSelector: boolean;
@@ -46,7 +44,6 @@ interface UseModalStateReturn {
 export function useModalState(transcriptModelConfig?: TranscriptModelProps): UseModalStateReturn {
   // Modal visibility state
   const [modals, setModals] = useState<ModalState>({
-    modelSettings: false,
     deviceSettings: false,
     languageSettings: false,
     modelSelector: false,
@@ -84,7 +81,6 @@ export function useModalState(transcriptModelConfig?: TranscriptModelProps): Use
   // Hide all modals
   const hideAllModals = useCallback(() => {
     setModals({
-      modelSettings: false,
       deviceSettings: false,
       languageSettings: false,
       modelSelector: false,

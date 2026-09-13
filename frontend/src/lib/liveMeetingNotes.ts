@@ -1,9 +1,6 @@
 import type { Block } from '@blocknote/core';
 
-// IndexedDB uses meeting-<timestamp>; SQLite uses meeting-<UUID> or meeting-recording-<source ID>.
-export function isLiveMeetingId(id: string) {
-  return /^meeting-\d+$/.test(id) || id.startsWith('session-');
-}
+export { isLiveMeetingId, isLiveSessionId, isPersistedMeetingId } from '@/lib/recordingSessionIdentity';
 
 // Storage key keeps the legacy `meetnola.` prefix so unsaved live notes written
 // before the Afterword rename are still recoverable.
