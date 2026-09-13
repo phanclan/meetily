@@ -45,6 +45,21 @@ export function isAttachableRecordingSession(
   );
 }
 
+/**
+ * What to send as `resumeBaselineCount` when stopping a resumed session.
+ *
+ * The in-memory count is only trustworthy in the tab that started the resume. A
+ * reload mid-resume rebuilds the hook with the ref back at 0 while the append
+ * target still comes from sessionStorage - and because `0` is a number,
+ * `useRecordingStop` would take it over `readResumeBaselineCount()` and re-append
+ * every segment the saved meeting already has. Returning `undefined` hands the
+ * decision to the storage fallback. A genuine baseline of 0 is written to storage
+ * as "0" by `writeResumeIdentity`, so nothing is lost by deferring.
+ */
+export function resumeBaselineToSend(inMemoryCount: number): number | undefined {
+  return inMemoryCount > 0 ? inMemoryCount : undefined;
+}
+
 export type SessionSeedPlan =
   | { kind: 'resume-append' }
   | { kind: 'attach-running'; title: string }

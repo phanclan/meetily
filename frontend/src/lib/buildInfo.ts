@@ -8,6 +8,12 @@ export interface BuildInfo {
   buildId: string;
   channel: string;
   flavor: string;
+  /**
+   * Product the Rust binary was compiled as (`afterword` | `meetily`), from the
+   * `afterword` Cargo feature. `flavor` is only build metadata, so compare this
+   * one against `isAfterword` from `@/flavor`.
+   */
+  nativeFlavor: string;
   displayName: string;
 }
 
@@ -20,6 +26,7 @@ const fallbackBuildInfo = async (): Promise<BuildInfo> => {
     buildId: 'unknown',
     channel: 'unknown',
     flavor: 'meetily',
+    nativeFlavor: 'unknown',
     displayName: `Afterword v${version}`,
   };
 };

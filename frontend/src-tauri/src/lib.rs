@@ -106,6 +106,10 @@ struct BuildInfo {
     build_id: String,
     channel: String,
     flavor: String,
+    /// Which product the binary was actually compiled as, from the `afterword`
+    /// Cargo feature. `flavor` above is only build metadata (an env var), so the
+    /// two can disagree; the frontend asserts they match at startup.
+    native_flavor: String,
     display_name: String,
 }
 
@@ -115,6 +119,11 @@ fn get_build_info() -> BuildInfo {
     let build_id = env!("AFTERWORD_BUILD_ID").to_string();
     let channel = env!("AFTERWORD_BUILD_CHANNEL").to_string();
     let flavor = env!("AFTERWORD_BUILD_FLAVOR").to_string();
+    let native_flavor = if cfg!(feature = "afterword") {
+        "afterword".to_string()
+    } else {
+        "meetily".to_string()
+    };
 
     let flavor_label = "Afterword";
 
@@ -125,6 +134,7 @@ fn get_build_info() -> BuildInfo {
         build_id,
         channel,
         flavor,
+        native_flavor,
         display_name,
     }
 }

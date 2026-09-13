@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
-use sysinfo::System;
+use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
 use tauri::{AppHandle, Emitter, Runtime};
 use tracing::info;
 
@@ -73,9 +73,17 @@ fn match_conferencing_app(name: &str) -> Option<&'static str> {
 }
 
 /// Returns the set of conferencing apps currently running (by display name).
-fn detect_conferencing_apps() -> HashSet<String> {
-    let mut sys = System::new_all();
-    sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+///
+/// Takes the `System` so the caller can keep one across polls. Only process names
+/// are read, so the refresh asks for nothing else: `System::new_all()` plus a full
+/// refresh also collected CPU, memory, disk usage, env, and cwd for every process
+/// on the machine, every 15 seconds, all of it discarded here.
+fn detect_conferencing_apps(sys: &mut System) -> HashSet<String> {
+    sys.refresh_processes_specifics(
+        ProcessesToUpdate::All,
+        true,
+        ProcessRefreshKind::new(),
+    );
 
     let mut found = HashSet::new();
     for (_pid, proc_) in sys.processes() {
@@ -115,6 +123,7 @@ pub fn start_detection<R: Runtime>(app: AppHandle<R>) {
     tauri::async_runtime::spawn(async move {
         info!("Call detection started");
         let mut last_detected: HashSet<String> = HashSet::new();
+        let mut sys = System::new();
 
         loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(15)).await;
@@ -130,7 +139,7 @@ pub fn start_detection<R: Runtime>(app: AppHandle<R>) {
                 continue;
             }
 
-            let detected = detect_conferencing_apps();
+            let detected = detect_conferencing_apps(&mut sys);
 
             let new_apps: HashSet<String> = detected
                 .difference(&last_detected)

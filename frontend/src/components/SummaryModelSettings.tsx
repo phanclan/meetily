@@ -7,6 +7,7 @@ import { ModelConfig, ModelSettingsModal } from '@/components/ModelSettingsModal
 import { SummaryLanguageSettings } from '@/components/SummaryLanguageSettings';
 import { Switch } from './ui/switch';
 import { useConfig } from '@/contexts/ConfigContext';
+import { isAfterword } from '@/flavor';
 import { SettingsRow } from '@/components/settings/SettingsRow';
 import {
   DEFAULT_SUMMARY_MODEL,
@@ -129,11 +130,16 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
 
   return (
     <div className='flex flex-col gap-4'>
-      <SettingsRow
-        title="Auto Summary"
-        description="Generate enhanced notes when a recording stops."
-        control={<Switch checked={isAutoSummary} onCheckedChange={toggleIsAutoSummary} />}
-      />
+      {/* Only /meeting-details reads isAutoSummary. Afterword enhances on demand from
+          NoteWorkspace's "Enhance notes" action, so the switch would do nothing here.
+          See docs/afterword-preferences-map.md. */}
+      {!isAfterword && (
+        <SettingsRow
+          title="Auto Summary"
+          description="Generate enhanced notes when a recording stops."
+          control={<Switch checked={isAutoSummary} onCheckedChange={toggleIsAutoSummary} />}
+        />
+      )}
 
       <SummaryLanguageSettings />
 

@@ -30,6 +30,7 @@ import {
   draftForWorkspaceRoute,
   isAttachableRecordingSession,
   planSessionSeed,
+  resumeBaselineToSend,
   workspaceRouteKey,
   type NoteWorkspaceMode,
 } from '@/lib/noteWorkspaceSession';
@@ -62,6 +63,7 @@ export function useNoteWorkspaceSession(
     meetingTitle,
     setMeetingTitle,
     transcriptsRef,
+    clearTranscripts,
     beginResumeTranscriptSession,
     abortResumeTranscriptSession,
   } = useTranscripts();
@@ -392,12 +394,21 @@ export function useNoteWorkspaceSession(
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const savePath = `${dataDir}/recording-${timestamp}.wav`;
       const stopResult = await recordingService.stopRecording(savePath);
+      // Only the tray path emits `recording-stop-result`, so a UI-initiated stop has
+      // to surface its own partial result or it ends silently. This is the only
+      // notifier for this path - do not also emit the event from Rust's stop_recording
+      // or both listeners would fire for one stop.
+      if (stopResult.status !== 'complete') {
+        toast.error('Recording stopped with incomplete transcript', {
+          description: stopResult.message,
+        });
+      }
       const appendToMeetingId = appendTargetMeetingIdRef.current || readAppendTargetMeetingId() || undefined;
       const meetingId = await requestRecordingPostStop(stopResult.status === 'complete', {
         autoNavigate: false,
         showToast: false,
         appendToMeetingId,
-        resumeBaselineCount: appendToMeetingId ? resumeBaselineCountRef.current : undefined,
+        resumeBaselineCount: appendToMeetingId ? resumeBaselineToSend(resumeBaselineCountRef.current) : undefined,
         onSaved: async (nextMeetingId) => {
           appendTargetMeetingIdRef.current = null;
           resumeBaselineCountRef.current = 0;
@@ -432,7 +443,7 @@ export function useNoteWorkspaceSession(
       autoNavigate: false,
       showToast: false,
       appendToMeetingId,
-      resumeBaselineCount: appendToMeetingId ? resumeBaselineCountRef.current : undefined,
+      resumeBaselineCount: appendToMeetingId ? resumeBaselineToSend(resumeBaselineCountRef.current) : undefined,
       onSaved: async (nextMeetingId) => {
         appendTargetMeetingIdRef.current = null;
         resumeBaselineCountRef.current = 0;
@@ -480,6 +491,11 @@ export function useNoteWorkspaceSession(
     appendTargetMeetingIdRef.current = null;
     resumeBaselineCountRef.current = 0;
     clearResumeIdentity();
+    // Starting from a saved note leaves that note's hydrated segments in the buffer
+    // until `recording-started` lands. Copy, the transcript sheet, and Ask read the
+    // buffer, so clear it now rather than showing the previous note's transcript
+    // during startup (or forever, if the start request fails).
+    clearTranscripts();
     onNewRecordingSessionRef.current?.();
     // The seed plan reads live `noteTitle` ahead of the fallback seed, so the saved
     // note's title has to be cleared here too, not just in the fallback.

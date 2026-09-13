@@ -465,6 +465,10 @@ Check these first:
 Stop-flow contract:
 - Rust `stop_recording` returns `status`, `reason`, `chunks_remaining`, and `message`
 - Rust emits `recording-stop-result` and `recording-stopped`
+- `recording-stop-result` is emitted by the **tray path only** (`tray.rs`). A UI-initiated
+  stop gets the same `status` as the `stop_recording` return value and toasts it itself in
+  `handleStopSession` (`useNoteWorkspaceSession.ts`). One owner per path: do not also emit
+  `recording-stop-result` from the non-tray Rust path or both would toast for one stop.
 - Tray-driven stop emits `recording-stop-complete`
 - Frontend must only save meetings when stop result is `status === "complete"`
 - Partial/error stop paths should do cleanup and UI recovery, not continue waiting for save

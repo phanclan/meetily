@@ -257,6 +257,24 @@ test('note workspace seed plan does not reseed or rebind on resume append', () =
   assert.equal(placeholderSeed.syncTitleToSession, false);
 });
 
+test('a stale in-memory resume baseline defers to the sessionStorage baseline', () => {
+  const session = loader()('@/lib/noteWorkspaceSession');
+  // The tab that started the resume knows the count.
+  assert.equal(session.resumeBaselineToSend(12), 12);
+  // After a reload mid-resume the ref is back at 0 while sessionStorage still holds
+  // the real baseline. Sending 0 would beat the storage fallback in useRecordingStop
+  // and re-append every saved segment.
+  assert.equal(session.resumeBaselineToSend(0), undefined);
+
+  const identity = loader({}, { sessionStorage: storage() })('@/lib/recordingSessionIdentity');
+  const store = storage();
+  identity.writeResumeIdentity('meeting-sqlite-1', 12, store);
+  assert.equal(identity.readResumeBaselineCount(store), 12);
+  // A genuine baseline of 0 round-trips through storage, so deferring loses nothing.
+  identity.writeResumeIdentity('meeting-sqlite-2', 0, store);
+  assert.equal(identity.readResumeBaselineCount(store), 0);
+});
+
 test('Afterword saved notes use /recording?saved= except search-source and follow-ups', () => {
   const route = loader()('@/lib/savedNoteRoute');
   const id = 'meeting-a5ce2dc0-f470-485c-b35d-1b2bd0b49059';

@@ -24,7 +24,19 @@ on Home was removed; do not reopen it.
 | summary-model | `api_get/save_model_config` | Rust/SQLite | `/settings` AI Enhancement |
 | transcript-language | `primaryLanguage`; `set_language_preference` | localStorage + Rust | leftover language modal (transcript panel) |
 | confidence-indicator | `showConfidenceIndicator` | localStorage | leftover `modelSelector` footer |
-| auto-summary | `isAutoSummary` | localStorage | `/settings` AI Enhancement |
+| auto-summary | `isAutoSummary` | localStorage | **Meetily only** - `/settings` AI Enhancement, hidden on Afterword |
+
+## Meetily-only preferences
+
+`auto-summary` is the only entry that is not an Afterword preference. Only
+`/meeting-details` reads `isAutoSummary`, and Afterword's saved-note surface is
+`NoteWorkspace` (`/recording?saved=`), which enhances on demand through
+`EnhanceNotesCta`. The switch in `SummaryModelSettings` is therefore hidden when
+`isAfterword`, rather than left in `/settings` doing nothing.
+
+The key and `ConfigContext.toggleIsAutoSummary` stay in the codebase for the
+Meetily path. Do not wire auto-summary into `NoteWorkspace` to "make the toggle
+work" - that is a product decision, not a wiring gap.
 
 ## Related, not the same key
 

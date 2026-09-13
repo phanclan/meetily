@@ -6,6 +6,8 @@
  * Do not add a second writer for a key without updating this map.
  */
 
+import type { ProductFlavor } from '@/flavor';
+
 export type PreferenceUi =
   | '/settings general'
   | '/settings recording'
@@ -25,6 +27,12 @@ export type PreferenceEntry = {
   keys: readonly string[];
   backend: string;
   ui: readonly PreferenceUi[];
+  /**
+   * Which product exposes this preference. Omitted means both. `meetily` entries
+   * are still in the codebase but their UI is hidden on Afterword, so the key
+   * keeps whatever value it last had and nothing reads it.
+   */
+  flavor?: ProductFlavor;
   notes: string;
 };
 
@@ -146,10 +154,12 @@ export const PREFERENCES = [
   },
   {
     id: 'auto-summary',
-    label: 'Auto summary',
+    label: 'Auto summary (Meetily only)',
     keys: ['localStorage:isAutoSummary'],
     backend: 'localStorage via ConfigContext.toggleIsAutoSummary',
     ui: ['/settings AI enhancement'],
-    notes: 'SummaryModelSettings switch. Meeting-details may skip auto-summary until a key exists; that is runtime gating, not a second store.',
+    flavor: 'meetily',
+    notes:
+      'Only /meeting-details reads isAutoSummary. Afterword enhances on demand via EnhanceNotesCta in NoteWorkspace, so the switch is hidden in SummaryModelSettings on Afterword rather than sitting there inert. Do not wire it into NoteWorkspace without a product decision.',
   },
 ] as const satisfies readonly PreferenceEntry[];

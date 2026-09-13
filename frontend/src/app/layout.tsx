@@ -33,6 +33,7 @@ import { useConsoleBridge } from '@/hooks/useConsoleBridge'
 import { useAppQuitLifecycle } from '@/hooks/useAppQuitLifecycle'
 import { useImportDropRuntime } from '@/hooks/useImportDropRuntime'
 import { useRecordingToastListeners } from '@/hooks/useRecordingToastListeners'
+import { useFlavorAgreement } from '@/hooks/useFlavorAgreement'
 
 const sourceSans3 = Source_Sans_3({
   subsets: ['latin'],
@@ -85,6 +86,7 @@ export default function RootLayout({
   useConsoleBridge()
   useAppQuitLifecycle(isStartupReady, quitDialog)
   useRecordingToastListeners()
+  useFlavorAgreement()
   const {
     showDropOverlay,
     showImportDialog,
