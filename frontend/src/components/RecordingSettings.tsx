@@ -175,7 +175,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
         <SettingsRow
           icon={<Radio />}
           title="Detect meetings"
-          description="Offer to start a note when Zoom, Teams, Slack, and other meeting apps are running"
+          description="Offer to start a note when a meeting app is in an active call (microphone in use)"
           control={
             <Switch
               checked={callDetectionEnabled}

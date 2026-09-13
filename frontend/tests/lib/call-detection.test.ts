@@ -31,7 +31,7 @@ describe('callDetectionCopy', () => {
     );
   });
 
-  test('uses honest copy after recording the same still-running app', () => {
+  test('uses honest copy after recording the same still-active meeting', () => {
     assert.equal(
       announcementAfterRecordStop({
         appStillPresent: 'Microsoft Teams',
@@ -41,11 +41,11 @@ describe('callDetectionCopy', () => {
     );
     assert.equal(
       callDetectionBannerCopy('Microsoft Teams', 'running'),
-      'Microsoft Teams is running. Record?',
+      'Microsoft Teams meeting still active. Record?',
     );
     assert.equal(
       callDetectionBannerCopy('Zoom', 'detected'),
-      'Zoom detected. Record?',
+      'Zoom meeting. Record?',
     );
   });
 

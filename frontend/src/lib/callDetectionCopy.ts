@@ -18,13 +18,13 @@ export function callDetectionBannerCopy(
   announcement: CallDetectionAnnouncement,
 ): string {
   if (announcement === 'running') {
-    return `${appName} is running. Record?`;
+    return `${appName} meeting still active. Record?`;
   }
-  return `${appName} detected. Record?`;
+  return `${appName} meeting. Record?`;
 }
 
 /**
- * After Stop, the same conferencing app is not a fresh detection.
+ * After Stop, the same active meeting is not a fresh detection.
  * A different app (or first sighting) may still announce as "detected".
  */
 export function announcementAfterRecordStop(opts: {

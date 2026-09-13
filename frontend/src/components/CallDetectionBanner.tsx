@@ -42,7 +42,7 @@ export function CallDetectionBanner({ onStartRecording }: CallDetectionBannerPro
         />
         <p className="min-w-0 truncate whitespace-nowrap">
           <span className="font-semibold text-stone-900">{lastDetected}</span>
-          {announcement === 'running' ? ' is running. Record?' : ' detected. Record?'}
+          {announcement === 'running' ? ' meeting still active. Record?' : ' meeting. Record?'}
         </p>
         {onStartRecording && (
           <button
