@@ -95,7 +95,7 @@ export function TranscriptPanel({
           <PermissionWarning
             hasMicrophone={hasMicrophone}
             hasSystemAudio={hasSystemAudio}
-            onRecheck={checkPermissions}
+            onRecheck={() => { void checkPermissions(true); }}
             isRechecking={isChecking}
           />
         </div>

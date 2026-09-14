@@ -15,7 +15,7 @@ is unchanged: resume still starts a new `sequence_scope`.
 | --- | --- | --- | --- |
 | `liveSessionId` | `TranscriptContext` (capture / IndexedDB recovery) | React state + `indexeddb_current_meeting_id` | One native start, including each resume generation |
 | `persistedMeetingId` | SQLite (`meeting-*` UUID / `meeting-recording-*`) | DB + `/recording?saved=` (Afterword) | After the first successful save |
-| `notesOwnerId` | `useMeetingNotes` | live: `meetnola.live-notes.<id>`; saved: SQLite | Must **not** change across resume/append |
+| `notesOwnerId` | `useMeetingNotes` | live: `afterword.live-notes.<id>`; saved: SQLite | Must **not** change across resume/append |
 | `appendTargetMeetingId` | Resume/append | `resume_meeting_id` | From Resume until that generation is saved |
 
 Helpers live in `frontend/src/lib/recordingSessionIdentity.ts`.

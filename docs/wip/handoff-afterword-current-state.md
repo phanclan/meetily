@@ -2,10 +2,10 @@
 
 Last updated: 2026-09-09
 
-> **Rename note.** This fork is now called **Afterword** (previously Meetnola). Code,
-> scripts, Cargo features, the Tauri plugin namespace, and build env vars all use
-> `afterword`. The bundle id stays `com.meetnola.tester` so app data and macOS TCC
-> grants survive. Historical paragraphs below keep their original wording, including
+> **Rename note.** This fork is now called **Afterword** (previously Meetnola).
+> Product identity is `com.afterword.app` with app data under
+> `~/Library/Application Support/com.afterword.app/`. Historical paragraphs below
+> keep their original wording, including `com.meetnola.tester`,
 > `/private/tmp/meetnola-*` log paths, past build IDs, and note titles such as
 > **Meetnola Luna long-source review** that literally exist with those names. Only
 > commands and current-state facts were updated.
@@ -477,7 +477,7 @@ This handoff captures the latest product, packaging, routing, UI, and macOS test
   - or `cd frontend && pnpm run tauri:build:afterword`
 - Tauri config override:
   - `frontend/src-tauri/tauri.afterword.tester.conf.json`
-- `pnpm run tauri:dev:meetnola` / `tauri:build:meetnola` still exist as thin aliases.
+- Dev and packaged Afterword builds use `tauri:dev:afterword` / `tauri:build:afterword`.
 
 ## Recording entry path is unified
 

@@ -2,7 +2,7 @@
 
 ## Now
 - [ ] Fix DMG bundling in `bundle_dmg.sh` so peer distribution is drag-install ready.
-- [ ] Verify a true first-run packaged tester flow on clean `com.meetnola.tester` app data.
+- [ ] Verify a true first-run packaged tester flow on clean `com.afterword.app` app data.
 
 ## Next
 - [ ] Remove remaining safe user-facing `Meetily` strings where they still appear in the UI.

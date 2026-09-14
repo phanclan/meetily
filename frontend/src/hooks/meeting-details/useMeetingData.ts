@@ -3,8 +3,11 @@ import { Transcript, Summary } from '@/types';
 import { BlockNoteSummaryViewRef } from '@/components/AISummary/BlockNoteSummaryView';
 import { CurrentMeeting, useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { invoke as invokeTauri } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { toast } from 'sonner';
 import { useMeetingTitleSave } from '@/hooks/useMeetingTitleSave';
+import { shouldApplySuggestedMeetingTitle } from '@/lib/meetingTitle';
+import { safelyUnlisten } from '@/lib/tauriEvents';
 
 interface UseMeetingDataProps {
   meeting: { id: string; title: string; transcripts: Transcript[] };
@@ -32,6 +35,38 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
 
   // Sidebar context
   const { setCurrentMeeting, setMeetings, meetings: sidebarMeetings } = useSidebar();
+  const meetingTitleRef = useRef(meetingTitle);
+  meetingTitleRef.current = meetingTitle;
+  const isEditingTitleRef = useRef(isEditingTitle);
+  isEditingTitleRef.current = isEditingTitle;
+
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: UnlistenFn | undefined;
+
+    const setup = async () => {
+      unlisten = await listen<{ meeting_id: string; title: string; previous_title: string }>(
+        'meeting-title-suggested',
+        (event) => {
+          if (event.payload?.meeting_id !== meeting.id) return;
+          if (isEditingTitleRef.current) return;
+          const suggested = event.payload.title?.trim();
+          if (!suggested) return;
+          if (!shouldApplySuggestedMeetingTitle(meetingTitleRef.current, event.payload.previous_title ?? '', suggested)) {
+            return;
+          }
+          setMeetingTitle(suggested);
+        },
+      );
+      if (cancelled) safelyUnlisten(unlisten, 'meeting-details:meeting-title-suggested');
+    };
+
+    void setup();
+    return () => {
+      cancelled = true;
+      safelyUnlisten(unlisten, 'meeting-details:meeting-title-suggested');
+    };
+  }, [meeting.id]);
 
   // Sync aiSummary state when summaryData prop changes (fixes display of fetched summaries)
   useEffect(() => {

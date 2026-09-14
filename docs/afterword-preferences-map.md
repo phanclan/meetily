@@ -13,7 +13,7 @@ on Home was removed; do not reopen it.
 
 | Id | Keys | Backend | UI owner |
 | --- | --- | --- | --- |
-| call-detection | `meetily.callDetectionEnabled`; `set_call_detection_enabled` | localStorage + Rust runtime | `/settings` Recording; layout bootstrap via `callDetectionStore` |
+| call-detection | `afterword.callDetectionEnabled`; `set_call_detection_enabled` | localStorage + Rust runtime | `/settings` Recording; layout bootstrap via `callDetectionStore` |
 | recording-preferences | `recording_preferences.json` `preferences` | Tauri store via `set_recording_preferences` | `/settings` Recording; leftover device modal writes the same `preferred_*` fields |
 | recording-start-toast | `preferences.json` `show_recording_notification` | Tauri plugin-store | `/settings` Recording + in-app toast “Don’t show again” |
 | os-notifications | `get/set_notification_settings` | Rust `notifications.json` | `/settings` General (`PreferenceSettings`) |

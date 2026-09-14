@@ -5,6 +5,14 @@ use tauri::{
     AppHandle, Manager, Runtime,
 };
 
+#[cfg(target_os = "macos")]
+fn macos_tray_icon() -> tauri::image::Image<'static> {
+    // Black quotation marks + alpha. macOS recolors template images to match
+    // the menu bar, so the cream app icon is not used here.
+    tauri::image::Image::from_bytes(include_bytes!("../icons/tray_icon.png"))
+        .expect("bundled Afterword tray icon")
+}
+
 #[derive(Debug, Clone)]
 pub enum RecordingState {
     Stopped,
@@ -21,12 +29,17 @@ pub fn create_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     // Pass can_record=true initially, will be updated by update_tray_menu immediately
     let menu = build_menu(app, RecordingState::Stopped, true)?;
 
-    TrayIconBuilder::with_id("main-tray")
+    let builder = TrayIconBuilder::with_id("main-tray")
         .menu(&menu)
         .tooltip("Afterword")
-        .icon(app.default_window_icon().unwrap().clone())
-        .on_menu_event(|app, event| handle_menu_event(app, event.id.as_ref()))
-        .build(app)?;
+        .on_menu_event(|app, event| handle_menu_event(app, event.id.as_ref()));
+
+    #[cfg(target_os = "macos")]
+    let builder = builder.icon(macos_tray_icon()).icon_as_template(true);
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.icon(app.default_window_icon().unwrap().clone());
+
+    builder.build(app)?;
 
     // Update tray menu with actual recording state after creation
     update_tray_menu(app);

@@ -1,5 +1,5 @@
 {
-    "name": "meetily",
+    "name": "afterword",
     "version": "0.4.0",
     "private": true,
     "main": "electron/main.js",
@@ -14,9 +14,6 @@
         "tauri:dev:afterword:attach": "node scripts/tauri-auto.js dev --config src-tauri/tauri.afterword.tester.conf.json --config src-tauri/tauri.external-frontend.conf.json",
         "tauri:build": "node scripts/tauri-auto.js build",
         "tauri:build:afterword": "node scripts/tauri-auto.js build --config src-tauri/tauri.afterword.tester.conf.json",
-        "tauri:dev:meetnola": "pnpm run tauri:dev:afterword",
-        "tauri:dev:meetnola:attach": "pnpm run tauri:dev:afterword:attach",
-        "tauri:build:meetnola": "pnpm run tauri:build:afterword",
         "tauri:dev:cpu": "tauri dev",
         "tauri:dev:cuda": "tauri dev -- --features cuda",
         "tauri:dev:vulkan": "tauri dev -- --features vulkan",
@@ -35,7 +32,7 @@
         "typecheck": "tsc --noEmit --incremental false",
         "test:recording": "node --test tests/lib/recording-lifecycle.test.mjs",
         "test:markdown": "node --require ./scripts/register-typescript-tests.cjs --test tests/lib/blocknote-markdown.test.ts",
-        "test:lib": "node --require ./scripts/register-typescript-tests.cjs --test tests/lib/ask-route.test.ts tests/lib/call-detection.test.ts tests/lib/meeting-title.test.ts tests/lib/settings-nav.test.ts"
+        "test:lib": "node --require ./scripts/register-typescript-tests.cjs --test tests/lib/ask-route.test.ts tests/lib/call-detection.test.ts tests/lib/meeting-title.test.ts tests/lib/migrate-product-storage-keys.test.ts tests/lib/settings-nav.test.ts"
     },
     "dependencies": {
         "@blocknote/core": "0.36.0",

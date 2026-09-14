@@ -1,10 +1,11 @@
 import { appendFrontendLog as appendFrontendLogIpc } from '@/afterword/ipc'
+import { migrateProductStorageKeys } from '@/lib/migrateProductStorageKeys'
 
 // Console → Rust log bridge tuning. Logs are buffered and flushed on this interval
 // instead of each console call awaiting its own IPC round-trip.
 export const CONSOLE_BRIDGE_FLUSH_MS = 250
 export const CONSOLE_BRIDGE_MAX_PENDING = 1000
-export const CONSOLE_BRIDGE_OPT_IN_KEY = 'meetily:console-bridge'
+export const CONSOLE_BRIDGE_OPT_IN_KEY = 'afterword:console-bridge'
 
 /**
  * The bridge is a debugging tool. It runs in development builds, and in any build where
@@ -15,11 +16,14 @@ export function isConsoleBridgeEnabled(): boolean {
     return false
   }
 
+  migrateProductStorageKeys()
+
   if (process.env.NODE_ENV !== 'production') {
     return true
   }
 
   try {
+    migrateProductStorageKeys()
     return window.localStorage.getItem(CONSOLE_BRIDGE_OPT_IN_KEY) === '1'
   } catch {
     return false

@@ -22,8 +22,7 @@ export function BuildIdentityBadge() {
     };
   }, []);
 
-  // `meetnola-tester` is the legacy flavor label from before the Afterword rename.
-  const testerFlavors = ['afterword-tester', 'meetnola-tester'];
+  const testerFlavors = ['afterword-tester'];
   if (!buildInfo || !testerFlavors.includes(buildInfo.flavor)) {
     return null;
   }

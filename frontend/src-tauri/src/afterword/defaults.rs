@@ -16,6 +16,9 @@ pub const SUMMARY_PROVIDER: &str = "custom-openai";
 /// (`GET https://ai-gateway.vercel.sh/v1/models`). SSOT with `config::DEFAULT_SUMMARY_MODEL`.
 pub const GATEWAY_MODEL: &str = DEFAULT_SUMMARY_MODEL;
 
+/// Cheap non-reasoning model for background meeting titles. Enhance stays on Luna.
+pub const TITLE_MODEL: &str = "openai/gpt-5-nano";
+
 /// OpenAI-compatible Chat Completions base URL for Vercel AI Gateway.
 pub const GATEWAY_ENDPOINT: &str = "https://ai-gateway.vercel.sh/v1";
 

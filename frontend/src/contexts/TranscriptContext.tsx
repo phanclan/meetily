@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useRef, useCallback, ReactNode, MutableRefObject } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback, useMemo, ReactNode, MutableRefObject } from 'react';
 import { Transcript, TranscriptUpdate } from '@/types';
 import { toast } from 'sonner';
 import { useRecordingState } from './RecordingStateContext';
@@ -60,7 +60,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
   const [currentMeetingId, setCurrentMeetingId] = useState<string | null>(null);
 
   // Recording state context - provides backend-synced state
-  const recordingState = useRecordingState();
+  const { isRecording } = useRecordingState();
 
   // Refs for transcript management
   const transcriptsRef = useRef<Transcript[]>(transcripts);
@@ -177,7 +177,6 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
             bindRecordingFolder(meetingId);
 
             writeLiveSessionId(meetingId);
-            console.log('[Recording Started] 💾 IndexedDB meeting ID stored:', meetingId);
 
             // Capture the title revision before exposing the session to the note editor.
             const titleInitialization = syncMeetingTitle(async () => {
@@ -250,11 +249,9 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
     return () => {
       if (unlistenRecordingStarted) {
         unlistenRecordingStarted();
-        console.log('🧹 Recording started listener cleaned up');
       }
       if (unlistenRecordingStopped) {
         unlistenRecordingStopped();
-        console.log('🧹 Recording stopped listener cleaned up');
       }
     };
     // `currentMeetingId` is intentionally absent: these listeners must survive the meeting
@@ -295,7 +292,6 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
           // Force flush mode: process ALL remaining transcripts regardless of timing
           forceFlushTranscripts.push(transcript);
           transcriptBuffer.delete(sequenceId);
-          console.log(`Force flush: processing transcript with sequence_id ${sequenceId}`);
         } else {
           const transcriptAge = now - parseInt(transcript.id.split('-')[0]);
           if (transcriptAge > staleThreshold) {
@@ -306,7 +302,6 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
             // Process immediately (0ms threshold with serial workers)
             recentTranscripts.push(transcript);
             transcriptBuffer.delete(sequenceId);
-            console.log(`Processing transcript with sequence_id ${sequenceId}, age: ${transcriptAge}ms`);
           }
         }
       }
@@ -338,20 +333,11 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
           });
 
           if (uniqueNewTranscripts.length === 0) {
-            console.log('No unique transcripts to add - all were duplicates');
             return prev;
           }
 
-          console.log(`Adding ${uniqueNewTranscripts.length} unique transcripts out of ${allNewTranscripts.length} received`);
-
           return [...prev, ...uniqueNewTranscripts].sort(compareTranscriptOrder);
         });
-
-        // Log the processing summary
-        const logMessage = forceFlush
-          ? `Force flush processed ${allNewTranscripts.length} transcripts (${sortedTranscripts.length} sequential, ${forceFlushTranscripts.length} forced)`
-          : `Processed ${allNewTranscripts.length} transcripts (${sortedTranscripts.length} sequential, ${recentTranscripts.length} recent, ${staleTranscripts.length} stale)`;
-        console.log(logMessage);
       }
     };
 
@@ -372,25 +358,11 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
 
     const setupListener = async () => {
       try {
-        console.log('🔥 Setting up MAIN transcript listener during component initialization...');
         unlistenFn = await transcriptService.onTranscriptUpdate((update) => {
-          const now = Date.now();
-          console.log('🎯 MAIN LISTENER: Received transcript update:', {
-            sequence_id: update.sequence_id,
-            text: update.text.substring(0, 50) + '...',
-            timestamp: update.timestamp,
-            is_partial: update.is_partial,
-            received_at: new Date(now).toISOString(),
-            buffer_size_before: transcriptBuffer.size
-          });
-
-          // Check for duplicate sequence_id before processing
           if (transcriptBuffer.has(update.sequence_id)) {
-            console.log('🚫 MAIN LISTENER: Duplicate sequence_id, skipping buffer:', update.sequence_id);
             return;
           }
 
-          // Create transcript for buffer with NEW timestamp fields
           const newTranscript: Transcript = {
             id: `${Date.now()}-${transcriptCounter++}`,
             text: update.text,
@@ -400,50 +372,38 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
             chunk_start_time: update.chunk_start_time,
             is_partial: update.is_partial,
             confidence: update.confidence,
-            // NEW: Recording-relative timestamps for playback sync
             audio_start_time: update.audio_start_time,
             audio_end_time: update.audio_end_time,
             duration: update.duration,
           };
 
-          // Add to buffer
           transcriptBuffer.set(update.sequence_id, newTranscript);
-          console.log(`✅ MAIN LISTENER: Buffered transcript with sequence_id ${update.sequence_id}. Buffer size: ${transcriptBuffer.size}, Last processed: ${lastProcessedSequence}`);
 
-          // Save to IndexedDB (non-blocking) against the meeting that is live right now
           const meetingId = currentMeetingIdRef.current;
           if (meetingId) {
             indexedDBService.saveTranscript(meetingId, update)
               .catch(err => console.warn('IndexedDB save failed:', err));
           }
 
-          // Clear any existing timer and set a new one
           if (processingTimer) {
             clearTimeout(processingTimer);
           }
 
-          // Process buffer with minimal delay for immediate UI updates (serial workers = sequential order)
           processingTimer = setTimeout(processBufferedTranscripts, 10);
         });
-        console.log('✅ MAIN transcript listener setup complete');
       } catch (error) {
-        console.error('❌ Failed to setup MAIN transcript listener:', error);
-        alert('Failed to setup transcript listener. Check console for details.');
+        console.error('Failed to setup transcript listener:', error);
       }
     };
 
     setupListener();
-    console.log('Started enhanced listener setup');
 
     return () => {
-      console.log('🧹 CLEANUP: Cleaning up MAIN transcript listener...');
       if (processingTimer) {
         clearTimeout(processingTimer);
-        console.log('🧹 CLEANUP: Cleared processing timer');
       }
       if (unlistenFn) {
         unlistenFn();
-        console.log('🧹 CLEANUP: MAIN transcript listener cleaned up');
       }
     };
     // Registered once for the provider's lifetime. Depending on `currentMeetingId` here
@@ -456,13 +416,9 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const syncFromBackend = async () => {
       // If recording is active and we have no local transcripts, sync from backend
-      if (recordingState.isRecording && transcripts.length === 0) {
+      if (isRecording && transcripts.length === 0) {
         try {
-          console.log('[Reload Sync] Recording active after reload, syncing transcript history...');
-
-          // Fetch transcript history from backend
           const history = await transcriptService.getTranscriptHistory();
-          console.log(`[Reload Sync] Retrieved ${history.length} transcript segments from backend`);
 
           // Convert backend format to frontend Transcript format
           const formattedTranscripts: Transcript[] = history.map((segment: any) => ({
@@ -480,7 +436,6 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
           }));
 
           setTranscripts(formattedTranscripts);
-          console.log('[Reload Sync] ✅ Transcript history synced successfully');
 
           // The session holds edited titles; the recording manager retains its folder name.
           await syncMeetingTitle(async () => {
@@ -500,17 +455,10 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
     };
 
     syncFromBackend();
-  }, [recordingState.isRecording, syncMeetingTitle, applyCurrentMeetingId]); // Run when recording state changes
+  }, [isRecording, syncMeetingTitle, applyCurrentMeetingId]);
 
   // Manual transcript update handler (for RecordingControls component)
   const addTranscript = useCallback((update: TranscriptUpdate) => {
-    console.log('🎯 addTranscript called with:', {
-      sequence_id: update.sequence_id,
-      text: update.text.substring(0, 50) + '...',
-      timestamp: update.timestamp,
-      is_partial: update.is_partial
-    });
-
     const newTranscript: Transcript = {
       id: update.sequence_id ? update.sequence_id.toString() : Date.now().toString(),
       text: update.text,
@@ -526,27 +474,14 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
     };
 
     setTranscripts(prev => {
-      console.log('📊 Current transcripts count before update:', prev.length);
-
-      // Check if this transcript already exists
       const exists = prev.some(
         t => t.text === update.text && t.timestamp === update.timestamp
       );
       if (exists) {
-        console.log('🚫 Duplicate transcript detected, skipping:', update.text.substring(0, 30) + '...');
         return prev;
       }
 
-      const sorted = [...prev, newTranscript].sort(compareTranscriptOrder);
-
-      console.log('✅ Added new transcript. New count:', sorted.length);
-      console.log('📝 Latest transcript:', {
-        id: newTranscript.id,
-        text: newTranscript.text.substring(0, 30) + '...',
-        sequence_id: newTranscript.sequence_id
-      });
-
-      return sorted;
+      return [...prev, newTranscript].sort(compareTranscriptOrder);
     });
   }, []);
 
@@ -572,7 +507,6 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
   // Force flush buffer (for final transcript processing)
   const flushBuffer = useCallback(() => {
     if (finalFlushRef.current) {
-      console.log('🔄 Flushing transcript buffer...');
       finalFlushRef.current();
     }
   }, []);
@@ -595,7 +529,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
     // A live capture owns the buffer; never overwrite it. Otherwise this call is the
     // authority for what the buffer holds, so an empty saved meeting clears it rather
     // than leaving the previously opened note's segments behind.
-    if (recordingState.isRecording || currentMeetingIdRef.current) return false;
+    if (isRecording || currentMeetingIdRef.current) return false;
 
     sequenceScopeRef.current = 0;
     if (typeof sessionStorage !== 'undefined') {
@@ -616,7 +550,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
 
     setTranscripts(hydrated);
     return true;
-  }, [recordingState.isRecording]);
+  }, [isRecording]);
 
   const beginResumeTranscriptSession = useCallback(() => {
     sequenceScopeRef.current += 1;
@@ -655,7 +589,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
     }
   }, [applyCurrentMeetingId]);
 
-  const value: TranscriptContextType = {
+  const value = useMemo<TranscriptContextType>(() => ({
     transcripts,
     transcriptsRef,
     addTranscript,
@@ -671,7 +605,20 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
     markMeetingAsSaved,
     beginResumeTranscriptSession,
     abortResumeTranscriptSession,
-  };
+  }), [
+    abortResumeTranscriptSession,
+    addTranscript,
+    beginResumeTranscriptSession,
+    clearTranscripts,
+    copyTranscript,
+    currentMeetingId,
+    flushBuffer,
+    hydrateSavedTranscripts,
+    markMeetingAsSaved,
+    meetingTitle,
+    setMeetingTitle,
+    transcripts,
+  ]);
 
   return (
     <TranscriptContext.Provider value={value}>

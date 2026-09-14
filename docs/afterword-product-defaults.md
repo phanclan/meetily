@@ -16,8 +16,8 @@ onboarding call `apply_fresh_install_defaults`; they do not write Groq or
 `gpt-4o-mini`.
 
 `pnpm tauri:dev:afterword` sets both the flavor env and the Cargo feature via
-`scripts/tauri-auto.js` + `tauri.afterword.tester.conf.json`. Do not change the
-tester bundle id (`com.meetnola.tester`).
+`scripts/tauri-auto.js` + `tauri.afterword.tester.conf.json`. Bundle id is
+`com.afterword.app`.
 
 Existing installs that already chose Groq are left alone; helpers only fill
 missing/fresh config.

@@ -9,7 +9,8 @@ Decision: 2026-09-05. Afterword is maintained as an independent product fork wit
 - Do not routinely rebase the product branch onto upstream releases. Stashes are temporary conveniences, not release handoffs.
 - Review upstream security, platform, audio, and transcription fixes. Adopt product/UI changes only when wanted.
 - Integrate approved upstream changes into local `main`. Use `git cherry-pick -x` for self-contained commits; port changes explicitly when their dependencies do not fit. Preserve source attribution and existing license notices.
-- Afterword tester builds disable the upstream updater feed. Distribute a verified fork build manually until a dedicated signed release feed is established.
+- Afterword tester builds disable the upstream updater feed. Distribute a verified fork build by hand until a dedicated signed release feed is established. See [Sharing Afterword](afterword-sharing.md).
+- Product identity is `com.afterword.app`. App data lives in `~/Library/Application Support/com.afterword.app/`. Default recordings go to `~/Movies/afterword-recordings/`. Changing the bundle id again orphans data and macOS TCC grants.
 - Validate changes with the checks below before committing. Publishing/pushing is a separate operation.
 
 ## Supported baseline
@@ -140,6 +141,6 @@ cargo test --offline -p meetily --lib --features afterword quality_
 git diff --check
 ```
 
-Use a packaged tester for macOS audio validation. The release bundle can be built with `frontend/build-afterword.sh`; when only an app is needed, pass `--bundles app` to the Tauri build command. Do not launch a dev instance and packaged tester with the same bundle ID simultaneously.
+Use a packaged tester for macOS audio validation. The release bundle can be built with `frontend/build-afterword.sh`; when only an app is needed, pass `--bundles app` to the Tauri build command. Do not launch a dev instance and packaged tester with the same bundle ID simultaneously. To zip and send that `.app`, follow [Sharing Afterword](afterword-sharing.md).
 
 Verify **New note** opens a draft without recording, **Start recording** begins capture, synthetic speech produces a transcript, notes/title/transcript survive leaving the workspace, **Stop** saves once, and reopening shows the saved content. Edit the saved note and reopen again. Repeat a recording to catch stale session state. Check the visible build badge against the intended build.

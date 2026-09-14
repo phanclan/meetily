@@ -70,12 +70,12 @@ function gitShortSha() {
 
 const shortSha = gitShortSha();
 const defaultBuildId = [timestampBuildId(), shortSha].filter(Boolean).join('-');
-// AFTERWORD_BUILD_* is primary; MEETNOLA_BUILD_* is honored as a legacy fallback.
-env.AFTERWORD_BUILD_ID = env.AFTERWORD_BUILD_ID || env.MEETNOLA_BUILD_ID || defaultBuildId;
+// AFTERWORD_BUILD_* identifies channel, flavor, and build id.
+env.AFTERWORD_BUILD_ID = env.AFTERWORD_BUILD_ID || defaultBuildId;
 env.AFTERWORD_BUILD_CHANNEL =
-  env.AFTERWORD_BUILD_CHANNEL || env.MEETNOLA_BUILD_CHANNEL || (command === 'build' ? 'bundle' : 'dev');
+  env.AFTERWORD_BUILD_CHANNEL || (command === 'build' ? 'bundle' : 'dev');
 env.AFTERWORD_BUILD_FLAVOR =
-  env.AFTERWORD_BUILD_FLAVOR || env.MEETNOLA_BUILD_FLAVOR || (testerConfig ? 'afterword-tester' : 'meetily');
+  env.AFTERWORD_BUILD_FLAVOR || (testerConfig ? 'afterword-tester' : 'meetily');
 
 // Frontend flavor gate (Afterword ipc / UI extensions)
 if (testerConfig) {

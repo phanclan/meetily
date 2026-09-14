@@ -529,6 +529,11 @@ fn frontend_bootstrap_complete<R: Runtime>(app: AppHandle<R>) -> Result<(), Stri
         log::warn!("Failed to focus main window after frontend bootstrap: {}", e);
     }
 
+    let app_for_preload = app.clone();
+    tauri::async_runtime::spawn(async move {
+        audio::transcription::preload_transcription_model(&app_for_preload).await;
+    });
+
     Ok(())
 }
 

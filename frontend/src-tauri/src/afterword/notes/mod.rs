@@ -1,135 +1,54 @@
+use crate::afterword::meeting_title::{
+    derive_title_from_notes, is_generated_or_placeholder_title, schedule_generated_title,
+};
 use crate::database::models::MeetingNotes;
 use crate::database::repositories::meeting::MeetingsRepository;
 use crate::database::repositories::notes::NotesRepository;
 use crate::state::AppState;
-use tauri::Runtime;
-
-fn is_generated_or_placeholder_title(title: &str) -> bool {
-    let trimmed = title.trim();
-    if trimmed.is_empty() {
-        return true;
-    }
-
-    if matches!(
-        trimmed,
-        "New note"
-            | "+ New Call"
-            | "Untitled meeting"
-            | "Untitled"
-            | "Untitled Meeting"
-            | "New Meeting"
-    ) {
-        return true;
-    }
-
-    let rest = match trimmed.strip_prefix("Meeting ") {
-        Some(rest) => rest,
-        None => return false,
-    };
-
-    let bytes = rest.as_bytes();
-    // Legacy: YYYY-MM-DD_HH-MM-SS (19 chars)
-    let legacy = bytes.len() == 19
-        && bytes[4] == b'-'
-        && bytes[7] == b'-'
-        && bytes[10] == b'_'
-        && bytes[13] == b'-'
-        && bytes[16] == b'-'
-        && bytes
-            .iter()
-            .enumerate()
-            .all(|(index, byte)| matches!(index, 4 | 7 | 10 | 13 | 16) || byte.is_ascii_digit());
-    if legacy {
-        return true;
-    }
-
-    // Current: DD_MM_YY_HH_MM_SS (17 chars)
-    bytes.len() == 17
-        && bytes[2] == b'_'
-        && bytes[5] == b'_'
-        && bytes[8] == b'_'
-        && bytes[11] == b'_'
-        && bytes[14] == b'_'
-        && bytes
-            .iter()
-            .enumerate()
-            .all(|(index, byte)| matches!(index, 2 | 5 | 8 | 11 | 14) || byte.is_ascii_digit())
-}
-
-fn normalize_title_line(line: &str) -> String {
-    let trimmed = line.trim();
-    let without_heading = trimmed.trim_start_matches('#').trim();
-    let without_bullet = without_heading
-        .trim_start_matches("- ")
-        .trim_start_matches("* ")
-        .trim_start_matches("> ")
-        .trim_start_matches("[ ] ")
-        .trim_start_matches("[x] ")
-        .trim();
-
-    let without_numbered = without_bullet
-        .find(". ")
-        .filter(|index| without_bullet[..*index].chars().all(|c| c.is_ascii_digit()))
-        .map(|index| without_bullet[index + 2..].trim())
-        .unwrap_or(without_bullet);
-
-    without_numbered
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-fn derive_title_from_notes(notes_markdown: &str) -> Option<String> {
-    for line in notes_markdown.lines() {
-        let candidate = normalize_title_line(line);
-        if candidate.len() < 4 {
-            continue;
-        }
-        if candidate.starts_with("http://") || candidate.starts_with("https://") {
-            continue;
-        }
-
-        let mut title = candidate;
-        if title.len() > 96 {
-            title = title.chars().take(96).collect::<String>().trim().to_string();
-            if let Some(last_space) = title.rfind(' ') {
-                title.truncate(last_space);
-            }
-        }
-
-        if !title.is_empty() {
-            return Some(title);
-        }
-    }
-
-    None
-}
+use tauri::{AppHandle, Runtime};
 
 /// Create a saved note without starting an audio recording.
 #[tauri::command]
-pub async fn create_note(
-    state: tauri::State<'_, AppState>, draft_id: String, title: String,
-    notes_markdown: String, notes_json: String, folder_id: Option<String>,
+pub async fn create_note<R: Runtime>(
+    app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    draft_id: String,
+    title: String,
+    notes_markdown: String,
+    notes_json: String,
+    folder_id: Option<String>,
 ) -> Result<String, String> {
+    let pool = state.db_manager.pool().clone();
     let title = if is_generated_or_placeholder_title(&title) {
         derive_title_from_notes(&notes_markdown).unwrap_or_else(|| "New note".into())
-    } else { title.trim().to_owned() };
-    NotesRepository::create_note(state.db_manager.pool(), &draft_id, &title,
-        &notes_markdown, &notes_json, folder_id.as_deref()).await
+    } else {
+        title.trim().to_owned()
+    };
+    let meeting_id = NotesRepository::create_note(
+        &pool,
+        &draft_id,
+        &title,
+        &notes_markdown,
+        &notes_json,
+        folder_id.as_deref(),
+    )
+    .await?;
+    schedule_generated_title(app, pool, meeting_id.clone());
+    Ok(meeting_id)
 }
 
 /// Save (upsert) plain-text and BlockNote representations for an existing note.
 #[tauri::command]
 pub async fn save_meeting_notes<R: Runtime>(
-    _app: tauri::AppHandle<R>,
+    app: AppHandle<R>,
     state: tauri::State<'_, AppState>,
     meeting_id: String,
     notes_markdown: Option<String>,
     notes_json: Option<String>,
 ) -> Result<(), String> {
-    let pool = state.db_manager.pool();
+    let pool = state.db_manager.pool().clone();
     NotesRepository::save_notes(
-        pool,
+        &pool,
         &meeting_id,
         notes_markdown.as_deref(),
         notes_json.as_deref(),
@@ -141,13 +60,14 @@ pub async fn save_meeting_notes<R: Runtime>(
         .as_deref()
         .and_then(derive_title_from_notes)
     {
-        if let Ok(Some(meeting)) = MeetingsRepository::get_meeting_metadata(pool, &meeting_id).await {
+        if let Ok(Some(meeting)) = MeetingsRepository::get_meeting_metadata(&pool, &meeting_id).await {
             if is_generated_or_placeholder_title(&meeting.title) && meeting.title.trim() != candidate_title {
-                let _ = MeetingsRepository::update_meeting_title(pool, &meeting_id, &candidate_title).await;
+                let _ = MeetingsRepository::update_meeting_title(&pool, &meeting_id, &candidate_title).await;
             }
         }
     }
 
+    schedule_generated_title(app, pool, meeting_id);
     Ok(())
 }
 

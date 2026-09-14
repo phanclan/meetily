@@ -514,7 +514,7 @@ export default function PageContent({
               </div>
               {activeView === 'notes' && (notes.isReady ? (
                 <div className="document-editor [&_.bn-editor]:!px-0">
-                  <Editor key={meeting.id} initialContent={notes.blocks} onChange={notes.saveNotes} editable />
+                  <Editor key={meeting.id} initialContent={notes.blocks} contentEpoch={notes.contentEpoch} onChange={notes.saveNotes} editable />
                 </div>
               ) : (
                 <div className="flex h-full min-h-[240px] items-center justify-center rounded-lg bg-white/76 ring-1 ring-stone-200/60">

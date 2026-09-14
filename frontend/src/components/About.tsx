@@ -22,6 +22,7 @@ export function About() {
     }, []);
 
     const handleContactClick = async () => {
+        if (isAfterword) return;
         try {
             await invoke('open_external_url', { url: 'https://meetily.zackriya.com/#about' });
         } catch (error) {
@@ -128,6 +129,7 @@ export function About() {
             </div>
 
             {/* CTA Section - Compact */}
+            {!isAfterword && (
             <div className="text-center space-y-2">
                 <h3 className="text-medium font-semibold text-gray-800">Ready to push your business further?</h3>
                 <p className="text-s text-gray-600">
@@ -140,11 +142,12 @@ export function About() {
                     Chat with the Zackriya team
                 </button>
             </div>
+            )}
 
             {/* Footer - Compact */}
             <div className="pt-2 border-t border-gray-200 text-center">
                 <p className="text-xs text-gray-400">
-                    Built by Zackriya Solutions
+                    {isAfterword ? 'Afterword' : 'Built by Zackriya Solutions'}
                 </p>
                 {buildInfo && (
                     <p className="mt-1 text-[11px] text-gray-400">

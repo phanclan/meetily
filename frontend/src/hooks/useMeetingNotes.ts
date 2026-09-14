@@ -9,6 +9,8 @@ import { toast } from 'sonner';
 import { createWriteQueue, registerBeforeQuit } from '@/lib/pendingWrites';
 
 const DEBOUNCE_MS = 2000;
+/** Push typed blocks into React at most this often. The editor keeps its own document. */
+const BLOCKS_UI_MS = 300;
 
 /**
  * Persist notes for `notesOwnerId`. Callers must pass the resolved notes owner
@@ -16,6 +18,7 @@ const DEBOUNCE_MS = 2000;
  */
 export function useMeetingNotes(meetingId: string | null) {
   const [blocks, setBlocks] = useState<Block[]>([]);
+  const [contentEpoch, setContentEpoch] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
   const [isReady, setIsReady] = useState(false);
   const [saveError, setSaveError] = useState(false);
@@ -24,8 +27,31 @@ export function useMeetingNotes(meetingId: string | null) {
   const loadedFor = useRef<string | null>(null);
   const failedFor = useRef<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const blocksUiTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestBlocksRef = useRef<Block[]>([]);
   const hasPendingSaveRef = useRef(false);
+
+  const bumpEpoch = useCallback(() => {
+    setContentEpoch(value => value + 1);
+  }, []);
+
+  const scheduleBlocksUi = useCallback(() => {
+    if (blocksUiTimerRef.current) return;
+    blocksUiTimerRef.current = setTimeout(() => {
+      blocksUiTimerRef.current = null;
+      setBlocks(latestBlocksRef.current);
+    }, BLOCKS_UI_MS);
+  }, []);
+
+  const applyAuthoritativeBlocks = useCallback((next: Block[]) => {
+    if (blocksUiTimerRef.current) {
+      clearTimeout(blocksUiTimerRef.current);
+      blocksUiTimerRef.current = null;
+    }
+    latestBlocksRef.current = next;
+    setBlocks(next);
+    bumpEpoch();
+  }, [bumpEpoch]);
 
   const flushSave = useCallback(async (
     blocksToSave: Block[],
@@ -72,17 +98,15 @@ export function useMeetingNotes(meetingId: string | null) {
     setSaveError(false);
     setIsSaving(false);
     if (!meetingId) {
-      setBlocks([]);
+      applyAuthoritativeBlocks([]);
       setIsReady(false);
-      latestBlocksRef.current = [];
       hasPendingSaveRef.current = false;
       return;
     }
 
     if (!isPersistedMeetingId(meetingId)) {
       const restored = readLiveMeetingNotes(meetingId) ?? [];
-      setBlocks(restored);
-      latestBlocksRef.current = restored;
+      applyAuthoritativeBlocks(restored);
       loadedFor.current = meetingId;
       setIsReady(true);
       hasPendingSaveRef.current = false;
@@ -90,9 +114,8 @@ export function useMeetingNotes(meetingId: string | null) {
     }
 
     let cancelled = false;
-    setBlocks([]);
+    applyAuthoritativeBlocks([]);
     setIsReady(false);
-    latestBlocksRef.current = [];
     hasPendingSaveRef.current = false;
     getMeetingNotes<{ notes_json?: string | null; notes_markdown?: string | null } | null>(meetingId)
       .then(result => {
@@ -100,8 +123,7 @@ export function useMeetingNotes(meetingId: string | null) {
 
         const parsedBlocks = parseStoredMeetingNotesJson(result?.notes_json);
         const restored = parsedBlocks.length ? parsedBlocks : plainTextToBlocks(result?.notes_markdown || '');
-        setBlocks(restored);
-        latestBlocksRef.current = restored;
+        applyAuthoritativeBlocks(restored);
         loadedFor.current = meetingId;
         setIsReady(true);
       })
@@ -116,7 +138,7 @@ export function useMeetingNotes(meetingId: string | null) {
     return () => {
       cancelled = true;
     };
-  }, [meetingId, loadAttempt]);
+  }, [meetingId, loadAttempt, applyAuthoritativeBlocks]);
 
   // A load retry must never replace successfully loaded or locally edited notes.
   const retryLoad = useCallback(() => {
@@ -127,11 +149,16 @@ export function useMeetingNotes(meetingId: string | null) {
   }, [meetingId]);
 
   const queueSave = useCallback(
-    (updatedBlocks: Block[], immediate = false) => {
+    (updatedBlocks: Block[], options: { persistNow?: boolean; replaceDocument?: boolean } = {}) => {
       if (!meetingId) return;
 
-      setBlocks(updatedBlocks);
       latestBlocksRef.current = updatedBlocks;
+      if (options.replaceDocument) {
+        applyAuthoritativeBlocks(updatedBlocks);
+      } else {
+        scheduleBlocksUi();
+      }
+
       if (isLiveMeetingId(meetingId)) {
         writeLiveMeetingNotes(meetingId, updatedBlocks);
         return;
@@ -144,7 +171,7 @@ export function useMeetingNotes(meetingId: string | null) {
 
       hasPendingSaveRef.current = true;
       setIsSaving(true);
-      if (immediate) {
+      if (options.persistNow) {
         void flushSave(updatedBlocks, meetingId).catch(() => {});
         return;
       }
@@ -154,22 +181,29 @@ export function useMeetingNotes(meetingId: string | null) {
         await flushSave(updatedBlocks, meetingId).catch(() => {});
       }, DEBOUNCE_MS);
     },
-    [flushSave, meetingId],
+    [applyAuthoritativeBlocks, flushSave, meetingId, scheduleBlocksUi],
   );
 
   const saveNotes = useCallback(
     (updatedBlocks: Block[]) => {
-      queueSave(updatedBlocks, false);
+      queueSave(updatedBlocks);
     },
     [queueSave],
   );
 
   const replaceNotes = useCallback(
     (updatedBlocks: Block[], options?: { immediate?: boolean }) => {
-      queueSave(updatedBlocks, options?.immediate === true);
+      queueSave(updatedBlocks, {
+        replaceDocument: true,
+        persistNow: options?.immediate === true,
+      });
     },
     [queueSave],
   );
+
+  const getNoteText = useCallback(() => {
+    return blocksToPlainText(latestBlocksRef.current);
+  }, []);
 
   const flushPendingSave = useCallback(async (trackState = false) => {
     if (!meetingId || !hasPendingSaveRef.current) return;
@@ -177,6 +211,11 @@ export function useMeetingNotes(meetingId: string | null) {
     if (debounceRef.current) {
       clearTimeout(debounceRef.current);
       debounceRef.current = null;
+    }
+    if (blocksUiTimerRef.current) {
+      clearTimeout(blocksUiTimerRef.current);
+      blocksUiTimerRef.current = null;
+      setBlocks(latestBlocksRef.current);
     }
 
     await flushSave(latestBlocksRef.current, meetingId, trackState);
@@ -190,6 +229,10 @@ export function useMeetingNotes(meetingId: string | null) {
         clearTimeout(debounceRef.current);
         debounceRef.current = null;
       }
+      if (blocksUiTimerRef.current) {
+        clearTimeout(blocksUiTimerRef.current);
+        blocksUiTimerRef.current = null;
+      }
 
       if (meetingId && hasPendingSaveRef.current) {
         void flushSave(latestBlocksRef.current, meetingId, false).catch(() => {});
@@ -197,7 +240,18 @@ export function useMeetingNotes(meetingId: string | null) {
     };
   }, [flushSave, meetingId]);
 
-  return { blocks, saveNotes, replaceNotes, flushPendingSave, isSaving,
-    isReady: isReady && loadedFor.current === meetingId, saveError,
-    loadError: loadError && failedFor.current === meetingId, retryLoad };
+  return {
+    blocks,
+    contentEpoch,
+    blocksRef: latestBlocksRef,
+    getNoteText,
+    saveNotes,
+    replaceNotes,
+    flushPendingSave,
+    isSaving,
+    isReady: isReady && loadedFor.current === meetingId,
+    saveError,
+    loadError: loadError && failedFor.current === meetingId,
+    retryLoad,
+  };
 }

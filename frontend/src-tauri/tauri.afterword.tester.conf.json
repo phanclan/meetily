@@ -1,6 +1,6 @@
 {
   "productName": "Afterword",
-  "identifier": "com.meetnola.tester",
+  "identifier": "com.afterword.app",
   "plugins": {
     "updater": {
       "endpoints": []

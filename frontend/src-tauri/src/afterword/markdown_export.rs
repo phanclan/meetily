@@ -6,10 +6,7 @@ use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_store::StoreExt;
 
-/// Store filename intentionally keeps the legacy `meetnola-` prefix: renaming it
-/// would drop the export folder a user already picked. Same data-continuity
-/// reason the bundle id stays `com.meetnola.tester`.
-const STORE: &str = "meetnola-export.json";
+const STORE: &str = "afterword-export.json";
 
 #[tauri::command]
 pub fn get_export_folder<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<Option<String>, String> {

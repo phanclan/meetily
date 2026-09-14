@@ -6,6 +6,7 @@ import {
   isPlaceholderMeetingTitle,
   resolvePersistedMeetingTitle,
   resolveSeededMeetingTitle,
+  shouldApplySuggestedMeetingTitle,
   shouldPersistTitleOnAppend,
 } from '../../src/lib/meetingTitle';
 
@@ -106,6 +107,41 @@ describe('meetingTitle placeholders', () => {
         databaseTitle: null,
       }),
       true,
+    );
+  });
+
+  test('applies Gateway titles to placeholders and first-line names, not custom edits', () => {
+    assert.equal(
+      shouldApplySuggestedMeetingTitle(
+        'Meeting 14_09_26_07_00_00',
+        'Meeting 14_09_26_07_00_00',
+        'Navi UI redesign with Cynthia',
+      ),
+      true,
+    );
+    assert.equal(
+      shouldApplySuggestedMeetingTitle(
+        'Ship Navi iframe removal by Friday',
+        'Ship Navi iframe removal by Friday',
+        'Navi UI redesign with Cynthia',
+      ),
+      true,
+    );
+    assert.equal(
+      shouldApplySuggestedMeetingTitle(
+        'Custom customer meeting',
+        'Meeting 14_09_26_07_00_00',
+        'Navi UI redesign with Cynthia',
+      ),
+      false,
+    );
+    assert.equal(
+      shouldApplySuggestedMeetingTitle(
+        'Navi UI redesign with Cynthia',
+        'Meeting 14_09_26_07_00_00',
+        'Navi UI redesign with Cynthia',
+      ),
+      false,
     );
   });
 

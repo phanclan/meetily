@@ -1,5 +1,6 @@
 'use client'
 
+import '@/lib/migrateProductStorageKeys'
 import './globals.css'
 import { Source_Sans_3 } from 'next/font/google'
 import { usePathname, useRouter } from 'next/navigation'

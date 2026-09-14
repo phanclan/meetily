@@ -14,6 +14,7 @@ pub mod library_search;
 pub mod library_chats;
 pub mod meeting_detection;
 pub mod notes;
+pub mod meeting_title;
 pub mod note_folders;
 pub mod previous_summary;
 pub mod trash;
@@ -83,7 +84,7 @@ pub fn start_after_database<R: Runtime>(app: &AppHandle<R>) {
 
     #[cfg(feature = "afterword-automation")]
     {
-        if std::env::var("MEETILY_AUTOMATION").as_deref() == Ok("1") {
+        if std::env::var("AFTERWORD_AUTOMATION").as_deref() == Ok("1") {
             if let Some(app_state) = app.try_state::<crate::state::AppState>() {
                 let db = app_state.db_manager.clone();
                 tauri::async_runtime::spawn(automation::start(db));

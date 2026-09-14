@@ -43,6 +43,6 @@ export function useConsoleBridge() {
   // This is a debugging aid, not a production feature: every forwarded call costs a
   // JSON serialization plus a Tauri IPC round-trip, and the hot transcript path logs
   // several times per segment. It is therefore off in production builds unless a
-  // tester explicitly opts in with `localStorage['meetily:console-bridge'] = '1'`.
+  // tester explicitly opts in with `localStorage['afterword:console-bridge'] = '1'`.
   useEffect(() => installConsoleBridge(), [])
 }

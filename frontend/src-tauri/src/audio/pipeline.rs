@@ -17,6 +17,14 @@ use super::vad::{ContinuousVadProcessor};
 /// waiting for VAD to detect the end of the utterance. Continuous speech still reaches
 /// the transcript roughly every this many milliseconds.
 const MAX_LIVE_UTTERANCE_MS: u32 = 8000;
+/// Mix when either stream has this much audio. 600ms is the working live-transcript
+/// window: 50ms mixed fine on paper but VAD emitted zero speech segments in real
+/// recordings (16s of saved audio, 0 chunks queued). Do not shrink this without a
+/// spoken-resume check.
+const MIX_WINDOW_MS: f32 = 600.0;
+/// How many mix windows to retain before dropping the oldest samples (4.8s at 600ms).
+/// Core Audio can stall ~1s at stream start; a 400ms cap dropped mic speech.
+const MIX_MAX_BUFFER_WINDOWS: usize = 8;
 
 /// Ring buffer for synchronized audio mixing
 /// Accumulates samples from mic and system streams until we have aligned windows
@@ -24,24 +32,21 @@ struct AudioMixerRingBuffer {
     mic_buffer: VecDeque<f32>,
     system_buffer: VecDeque<f32>,
     window_size_samples: usize,  // Fixed mixing window (e.g., 50ms)
-    max_buffer_size: usize,  // Safety limit (e.g., 100ms)
+    max_buffer_size: usize,  // Safety limit (400ms at 50ms windows)
 }
 
 impl AudioMixerRingBuffer {
     fn new(sample_rate: u32) -> Self {
-        // Use 50ms windows for mixing
-        let window_ms = 600.0;
+        let window_ms = MIX_WINDOW_MS;
         let window_size_samples = (sample_rate as f32 * window_ms / 1000.0) as usize;
 
-        // CRITICAL FIX: Increase max buffer to 400ms for system audio stability
-        // System audio (especially Core Audio on macOS) can have significant jitter
-        // due to sample-by-sample streaming → batching → channel transmission
-        // Accounts for: RNNoise buffering + Core Audio jitter + processing delays
-        let max_buffer_size = window_size_samples * 8;  // 400ms (was 200ms)
+        // System audio (especially Core Audio on macOS) can jitter across the mix
+        // window. Hold several seconds so a slow Core Audio start does not drop mic.
+        let max_buffer_size = window_size_samples * MIX_MAX_BUFFER_WINDOWS;
 
         info!("🔊 Ring buffer initialized: window={}ms ({} samples), max={}ms ({} samples)",
               window_ms, window_size_samples,
-              window_ms * 8.0, max_buffer_size);
+              window_ms * MIX_MAX_BUFFER_WINDOWS as f32, max_buffer_size);
 
         Self {
             mic_buffer: VecDeque::with_capacity(max_buffer_size),
@@ -80,7 +85,7 @@ impl AudioMixerRingBuffer {
                   self.system_buffer.len() - self.max_buffer_size);
         }
 
-        // Safety: prevent buffer overflow (keep only last 200ms)
+        // Safety: prevent unbounded growth if one stream stalls.
         while self.mic_buffer.len() > self.max_buffer_size {
             self.mic_buffer.pop_front();
         }
@@ -1083,5 +1088,16 @@ impl AudioPipelineManager {
 impl Default for AudioPipelineManager {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mix_window_stays_at_the_working_live_transcript_size() {
+        assert_eq!(MIX_WINDOW_MS, 600.0);
+        assert_eq!(MIX_MAX_BUFFER_WINDOWS, 8);
     }
 }

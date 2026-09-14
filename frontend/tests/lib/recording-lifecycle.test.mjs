@@ -655,7 +655,7 @@ test('legacy text notes load into the editor and a failed edit can be retried in
       useState: value => {
         const index = state.length;
         state.push(value);
-        return [value, next => { state[index] = next; }];
+        return [value, next => { state[index] = typeof next === 'function' ? next(state[index]) : next; }];
       },
     },
     '@/afterword/ipc': {
@@ -673,11 +673,11 @@ test('legacy text notes load into the editor and a failed edit can be retried in
   assert.equal(state[0][0].content[0].text, 'Existing legacy note');
   hook.saveNotes(blocks);
   await assert.rejects(hook.flushPendingSave(true));
-  assert.equal(state[3], true);
+  assert.equal(state[4], true);
   fail = false;
   await hook.flushPendingSave(true);
-  assert.equal(state[3], false);
-  assert.equal(state[1], false);
+  assert.equal(state[4], false);
+  assert.equal(state[2], false);
   assert.equal(writes.at(-1).notesMarkdown, 'Synthetic recovery note');
 });
 
@@ -1405,7 +1405,7 @@ test('quitting flushes actual meeting-note edits before the two-second debounce 
   const cleanups = effects.map(fn => fn());
   await new Promise(setImmediate);
   hook.saveNotes(blocks);
-  assert.equal(timers.size, 1);
+  assert.equal(timers.size, 2);
   assert.deepEqual(saved, []);
   let finished = false;
   const quitting = load('@/lib/pendingWrites').flushPendingWrites().then(() => { finished = true; });
@@ -1608,7 +1608,7 @@ test('failed notes can retry once without overwriting loaded or newly edited not
   assert.equal(notes.isReady, true); assert.equal(notes.blocks[0].id, 'note-1');
   notes.saveNotes([{ ...blocks[0], id: 'edited' }]);
   notes.retryLoad(); notes = runner.render('saved-A');
-  assert.equal(requests.length, 2); assert.equal(notes.blocks[0].id, 'edited');
+  assert.equal(requests.length, 2); assert.equal(notes.blocksRef.current[0].id, 'edited');
   assert.equal(runner.render('saved-B').isReady, false);
   requests[2].resolve(null); await new Promise(setImmediate);
   notes = runner.render('saved-B');
@@ -1822,7 +1822,9 @@ test('reopening an active recording restores lifecycle status and keeps its sett
   const restored = f.render();
   assert.equal(restored.status, 'recording'); assert.equal(restored.isRecording, true);
   assert.equal(restored.setStatus, before.setStatus);
-  f.reads[1].resolve(backendRecording()); await new Promise(setImmediate);
+  assert.equal('recordingDuration' in restored, false);
+  assert.equal('activeDuration' in restored, false);
+  f.reads[1].resolve({ ...backendRecording(), recording_duration: 12, active_duration: 12 }); await new Promise(setImmediate);
   assert.equal(f.render(), restored, 'Unchanged backend values should not rerender every consumer');
   f.runner.unmount();
 });

@@ -1,6 +1,6 @@
 'use client';
 
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { invoke } from '@tauri-apps/api/core';
@@ -193,6 +193,8 @@ export function NoteWorkspace({ mode }: { mode: NoteWorkspaceMode }) {
     setIsTranscriptOpen,
     notesOwnerId,
     blocks,
+    contentEpoch,
+    getNoteText,
     saveNotes,
     replaceNotes,
     flushPendingSave,
@@ -391,13 +393,14 @@ export function NoteWorkspace({ mode }: { mode: NoteWorkspaceMode }) {
   }, [aiSummary, isPostRecording]);
 
   const handleCopyNote = async () => {
-    if (!noteText.trim()) {
+    const liveNoteText = getNoteText() || noteText;
+    if (!liveNoteText.trim()) {
       toast.error('Live note is empty');
       return;
     }
 
     try {
-      await navigator.clipboard.writeText(`${noteTitle.trim() || 'New note'}\n\n${noteText}`);
+      await navigator.clipboard.writeText(`${noteTitle.trim() || 'New note'}\n\n${liveNoteText}`);
       toast.success('Live note copied');
     } catch (error) {
       toast.error('Failed to copy live note');
@@ -499,7 +502,7 @@ export function NoteWorkspace({ mode }: { mode: NoteWorkspaceMode }) {
   const handleRecipe = (recipe: Recipe) => {
     if (!notesSourceReady || isChatLoading) return;
     setIsAiComposerOpen(true);
-    const source = buildMeetingAnswerContext(transcripts, noteText, recipe.scope);
+    const source = buildMeetingAnswerContext(transcripts, getNoteText() || noteText, recipe.scope);
     if (!source.context.trim()) {
       toast.error('Add notes or record a transcript before asking about this meeting.');
       return;
@@ -511,7 +514,7 @@ export function NoteWorkspace({ mode }: { mode: NoteWorkspaceMode }) {
     if (!notesSourceReady || isChatLoading) return;
     setIsAiComposerOpen(true);
     const userPrompt = chatInput.trim();
-    const source = buildMeetingAnswerContext(transcripts, noteText);
+    const source = buildMeetingAnswerContext(transcripts, getNoteText() || noteText);
     if (!userPrompt) return;
     if (!source.context) {
       toast.error('Add notes or record a transcript before asking about this meeting.');
@@ -521,10 +524,9 @@ export function NoteWorkspace({ mode }: { mode: NoteWorkspaceMode }) {
     setChatInput('');
   };
 
-  const handleEditorChange = (updatedBlocks: Block[]) => {
-    setUpdatedAt(Date.now());
+  const handleEditorChange = useCallback((updatedBlocks: Block[]) => {
     saveNotes(updatedBlocks);
-  };
+  }, [saveNotes]);
 
   // Recording controls must remain visible even when WebKit stalls an animation.
   const dockLeadingClassName = 'h-[52px] rounded-full bg-white px-4 text-stone-900 shadow-sm ring-1 ring-stone-200 hover:bg-stone-50';
@@ -718,6 +720,7 @@ export function NoteWorkspace({ mode }: { mode: NoteWorkspaceMode }) {
                     <Editor
                       key={notesOwnerId || 'quick-note-draft'}
                       initialContent={blocks}
+                      contentEpoch={contentEpoch}
                       onChange={handleEditorChange}
                       editable={true}
                     />
@@ -772,6 +775,7 @@ export function NoteWorkspace({ mode }: { mode: NoteWorkspaceMode }) {
                     <Editor
                       key={notesOwnerId || 'quick-note-draft'}
                       initialContent={blocks}
+                      contentEpoch={contentEpoch}
                       onChange={handleEditorChange}
                       editable={true}
                     />

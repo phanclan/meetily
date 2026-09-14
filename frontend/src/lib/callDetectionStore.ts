@@ -9,6 +9,7 @@ import {
   type CallDetectionAnnouncement,
   announcementAfterRecordStop,
 } from '@/lib/callDetectionCopy';
+import { migrateProductStorageKeys } from '@/lib/migrateProductStorageKeys';
 import { safelyUnlisten } from '@/lib/tauriEvents';
 
 export type CallDetectionState = {
@@ -86,8 +87,11 @@ export async function setCallDetectionEnabledPref(enabled: boolean) {
 
 export async function syncCallDetectionEnabledToNative() {
   hydrateEnabled();
-  if (typeof window !== 'undefined' && localStorage.getItem(CALL_DETECTION_STORAGE_KEY) === null) {
-    saveCallDetectionPreference(true);
+  if (typeof window !== 'undefined') {
+    migrateProductStorageKeys();
+    if (localStorage.getItem(CALL_DETECTION_STORAGE_KEY) === null) {
+      saveCallDetectionPreference(true);
+    }
   }
   const enabled = loadCallDetectionPreference();
   setState({ enabled });

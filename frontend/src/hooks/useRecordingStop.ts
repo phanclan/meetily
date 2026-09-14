@@ -6,7 +6,6 @@ import { useTranscripts } from '@/contexts/TranscriptContext';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateContext';
 import { storageService } from '@/services/storageService';
-import { transcriptService } from '@/services/transcriptService';
 import Analytics from '@/lib/analytics';
 import { readLiveMeetingNotes, clearLiveMeetingNotes } from '@/lib/liveMeetingNotes';
 import { blocksToPlainText } from '@/lib/meetingNotes';
@@ -84,7 +83,7 @@ let stopProcessing = false;
  * Handles the complex stop sequence: transcription wait → buffer flush → SQLite save → navigation.
  *
  * Features:
- * - Transcription completion confirmation (bounded 5s safety net, 250ms interval)
+ * - Bounded wait for last `transcript-update` events to land in React state
  * - Transcript buffer flush coordination
  * - SQLite meeting save with folder_path from sessionStorage
  * - Comprehensive analytics tracking (duration, word count, activation)
@@ -214,80 +213,20 @@ export function useRecordingStop(
       });
 
       // Note: stop_recording is already called by RecordingControls.stopRecordingAction
-      // This function only handles post-stop processing (transcription wait, API call, navigation)
-      console.log('Recording already stopped by RecordingControls, processing transcription...');
-
-      // Confirm transcription is finished.
-      //
-      // Rust's stop_recording awaits the whole transcription task before it returns, and
-      // both callers await it before calling this handler, so this is a confirmation
-      // rather than a wait. (The old code also listened for a `transcription-complete`
-      // event that only dead Rust code ever emitted, then slept unconditionally.)
       setStatus(RecordingStatus.PROCESSING_TRANSCRIPTS, 'Finishing transcription...');
-
-      const MAX_WAIT_TIME = 5000; // Safety net only - the native stop already drained the queue
-      const POLL_INTERVAL = 250;
-      let elapsedTime = 0;
-      let transcriptionComplete = false;
-
-      while (elapsedTime < MAX_WAIT_TIME) {
-        try {
-          const status = await transcriptService.getTranscriptionStatus();
-
-          if (!status.is_processing && status.chunks_in_queue === 0) {
-            transcriptionComplete = true;
-            break;
-          }
-
-          console.log(`Processing ${status.chunks_in_queue} remaining audio chunks...`);
-          setStatus(RecordingStatus.PROCESSING_TRANSCRIPTS, `Processing ${status.chunks_in_queue} remaining chunks...`);
-        } catch (error) {
-          console.error('Error checking transcription status:', error);
-          break;
-        }
-
-        await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
-        elapsedTime += POLL_INTERVAL;
-      }
-
-      if (!transcriptionComplete) {
-        console.warn('⚠️ Native transcription status never reported an idle queue after', elapsedTime, 'ms - saving anyway');
-      }
-
-      // Final buffer flush: process ALL remaining transcripts regardless of timing
-      const flushStartTime = Date.now();
-      console.log('🔄 Final buffer flush: forcing processing of any remaining transcripts...', {
-        flush_started_at: new Date(flushStartTime).toISOString(),
-        time_since_stop: flushStartTime - stopStartTime,
-        current_transcript_count: transcriptsRef.current.length
-      });
-      setStatus(RecordingStatus.PROCESSING_TRANSCRIPTS, 'Flushing transcript buffer...');
       flushBuffer();
 
       // React state (and therefore transcriptsRef) updates asynchronously, and a late
       // segment can still arrive. Wait for the count to stop moving instead of sleeping.
+      // Rust's stop_recording already drained the native transcription queue.
       await waitForTranscriptsToSettle(() => transcriptsRef.current.length);
-
-      const flushEndTime = Date.now();
-      console.log('✅ Final buffer flush completed', {
-        flush_duration: flushEndTime - flushStartTime,
-        total_time_since_stop: flushEndTime - stopStartTime,
-        final_transcript_count: transcriptsRef.current.length
-      });
 
       // NOTE: Status remains PROCESSING_TRANSCRIPTS until we start saving
 
-      // Save to SQLite.
-      // The meeting is ALWAYS persisted when the native stop reported a usable recording.
-      // An unconfirmed transcription status warns the user; it never silently skips the
-      // save, which used to leave the meeting only in IndexedDB for manual recovery.
+      // Save to SQLite. Native stop already drained the transcription queue, so a
+      // usable recording is always persisted here. Skipping save used to leave the
+      // meeting only in IndexedDB for manual recovery.
       if (isCallApi) {
-        if (!transcriptionComplete) {
-          toast.warning('Transcript may be incomplete', {
-            description: 'The meeting was saved, but transcription did not report a clean finish.',
-          });
-        }
-
         setStatus(RecordingStatus.SAVING, 'Saving meeting to database...');
 
         // Get fresh transcript state (ALL transcripts including late ones)

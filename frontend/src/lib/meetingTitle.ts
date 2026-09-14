@@ -115,3 +115,19 @@ export function shouldPersistTitleOnAppend(options: {
   if (!dbTitle) return true;
   return title !== dbTitle;
 }
+
+/**
+ * Apply a background Gateway title to the open editor only when the user has
+ * not typed a custom name. The meeting list always takes the suggested title.
+ */
+export function shouldApplySuggestedMeetingTitle(
+  currentTitle: string,
+  previousTitle: string,
+  suggestedTitle?: string | null,
+): boolean {
+  const current = currentTitle.trim();
+  const previous = previousTitle.trim();
+  const suggested = (suggestedTitle ?? '').trim();
+  if (!suggested || current === suggested) return false;
+  return isPlaceholderMeetingTitle(current) || current === previous;
+}

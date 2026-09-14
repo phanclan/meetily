@@ -4,8 +4,9 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useRouter, useSearchParams } from 'next/navigation';
 import { appDataDir } from '@tauri-apps/api/path';
 import { invoke } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { toast } from 'sonner';
-import { isNamedDraftPlaceholder } from '@/lib/meetingTitle';
+import { isNamedDraftPlaceholder, shouldApplySuggestedMeetingTitle } from '@/lib/meetingTitle';
 import { useTranscripts } from '@/contexts/TranscriptContext';
 import { RecordingStatus, useRecordingState } from '@/contexts/RecordingStateContext';
 import { useMeetingNotes } from '@/hooks/useMeetingNotes';
@@ -26,6 +27,7 @@ import {
 } from '@/lib/recordingStopOrchestrator';
 import { blocksToPlainText, plainTextToBlocks } from '@/lib/meetingNotes';
 import { recordingService } from '@/services/recordingService';
+import { safelyUnlisten } from '@/lib/tauriEvents';
 import {
   draftForWorkspaceRoute,
   isAttachableRecordingSession,
@@ -88,6 +90,8 @@ export function useNoteWorkspaceSession(
   });
   const {
     blocks,
+    contentEpoch,
+    getNoteText,
     saveNotes,
     replaceNotes,
     flushPendingSave,
@@ -105,6 +109,14 @@ export function useNoteWorkspaceSession(
   const savedHydrationRef = useRef<string | null>(null);
   const titleSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const titleSave = useMeetingTitleSave(savedMeetingId);
+  const noteTitleRef = useRef(noteTitle);
+  noteTitleRef.current = noteTitle;
+  const notesOwnerIdRef = useRef(notesOwnerId);
+  notesOwnerIdRef.current = notesOwnerId;
+  const savedMeetingIdRef = useRef(savedMeetingId);
+  savedMeetingIdRef.current = savedMeetingId;
+  const currentMeetingIdRef = useRef(currentMeetingId);
+  currentMeetingIdRef.current = currentMeetingId;
   const handleTitleChange = (title: string) => {
     setNoteTitle(title);
     void titleSave.save(title).catch(error => {
@@ -355,6 +367,35 @@ export function useNoteWorkspaceSession(
     setNoteTitle(sessionTitle);
   }, [currentMeetingId, isLiveSessionVisible, meetingTitle, noteTitle, savedMeetingId]);
 
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: UnlistenFn | undefined;
+
+    const setup = async () => {
+      unlisten = await listen<{ meeting_id: string; title: string; previous_title: string }>(
+        'meeting-title-suggested',
+        (event) => {
+          const meetingId = event.payload?.meeting_id;
+          const suggested = event.payload?.title?.trim();
+          const previous = event.payload?.previous_title ?? '';
+          if (!meetingId || !suggested) return;
+          const openIds = [notesOwnerIdRef.current, savedMeetingIdRef.current, currentMeetingIdRef.current];
+          if (!openIds.includes(meetingId)) return;
+          if (!shouldApplySuggestedMeetingTitle(noteTitleRef.current, previous, suggested)) return;
+          setNoteTitle(suggested);
+          setMeetingTitle(suggested);
+        },
+      );
+      if (cancelled) safelyUnlisten(unlisten, 'workspace:meeting-title-suggested');
+    };
+
+    void setup();
+    return () => {
+      cancelled = true;
+      safelyUnlisten(unlisten, 'workspace:meeting-title-suggested');
+    };
+  }, [setMeetingTitle]);
+
   const noteText = useMemo(() => {
     if (notesOwnerId && isReady) {
       return blocksToPlainText(blocks);
@@ -582,6 +623,8 @@ export function useNoteWorkspaceSession(
     hydratedSessionId,
     notesOwnerId,
     blocks,
+    contentEpoch,
+    getNoteText,
     saveNotes,
     replaceNotes,
     flushPendingSave,

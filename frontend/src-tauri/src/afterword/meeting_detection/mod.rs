@@ -216,7 +216,9 @@ mod macos {
     use cidre::core_audio::hardware::{Device, System};
     use cidre::core_audio::PropSelector;
     use cidre::ns;
-    use std::process::Command;
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
 
     /// True when any physical input **or** output device is running somewhere
     /// (status only — never opens a capture/playback stream for detection).
@@ -306,12 +308,13 @@ mod macos {
     }
 
     /// Apps with live in-meeting UI evidence (window title / menu bar). No audio.
-    pub fn scan_in_meeting_ui_apps() -> HashSet<String> {
+    /// Only probes apps that NSWorkspace already reported as running.
+    pub fn scan_in_meeting_ui_apps(running_apps: &HashSet<String>) -> HashSet<String> {
         let mut found = HashSet::new();
-        if teams_in_meeting_via_ui() {
+        if running_apps.contains("Microsoft Teams") && teams_in_meeting_via_ui() {
             found.insert("Microsoft Teams".to_string());
         }
-        if zoom_in_meeting_via_ui() {
+        if running_apps.contains("Zoom") && zoom_in_meeting_via_ui() {
             found.insert("Zoom".to_string());
         }
         found
@@ -375,22 +378,60 @@ end tell
         }
     }
 
+    const OSASCRIPT_TIMEOUT: Duration = Duration::from_millis(400);
+
     fn run_osascript(script: &str) -> Option<String> {
-        match Command::new("osascript").arg("-e").arg(script).output() {
-            Ok(output) if output.status.success() => {
-                Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
-            }
-            Ok(output) => {
-                debug!(
-                    "meeting detection: osascript exited {:?}: {}",
-                    output.status.code(),
-                    String::from_utf8_lossy(&output.stderr).trim()
-                );
-                None
-            }
+        let mut child = match Command::new("osascript")
+            .arg("-e")
+            .arg(script)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+        {
+            Ok(child) => child,
             Err(e) => {
                 debug!("meeting detection: osascript spawn failed: {e}");
-                None
+                return None;
+            }
+        };
+
+        let deadline = Instant::now() + OSASCRIPT_TIMEOUT;
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    let mut stdout = String::new();
+                    if let Some(mut out) = child.stdout.take() {
+                        let _ = out.read_to_string(&mut stdout);
+                    }
+                    if !status.success() {
+                        debug!(
+                            "meeting detection: osascript exited {:?}: {}",
+                            status.code(),
+                            {
+                                let mut stderr = String::new();
+                                if let Some(mut err) = child.stderr.take() {
+                                    let _ = err.read_to_string(&mut stderr);
+                                }
+                                stderr.trim().to_string()
+                            }
+                        );
+                        return None;
+                    }
+                    return Some(stdout.trim().to_string());
+                }
+                Ok(None) if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                Ok(None) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    debug!("meeting detection: osascript timed out after {:?}", OSASCRIPT_TIMEOUT);
+                    return None;
+                }
+                Err(e) => {
+                    debug!("meeting detection: osascript wait failed: {e}");
+                    return None;
+                }
             }
         }
     }
@@ -409,7 +450,7 @@ mod platform {
         HashSet::new()
     }
 
-    pub fn scan_in_meeting_ui_apps() -> HashSet<String> {
+    pub fn scan_in_meeting_ui_apps(_running_apps: &HashSet<String>) -> HashSet<String> {
         HashSet::new()
     }
 }
@@ -418,6 +459,40 @@ mod platform {
 use macos::{any_media_device_running, scan_in_meeting_ui_apps, scan_meeting_apps};
 #[cfg(not(target_os = "macos"))]
 use platform::{any_media_device_running, scan_in_meeting_ui_apps, scan_meeting_apps};
+
+fn needs_in_meeting_ui_probe(apps: &HashSet<String>) -> bool {
+    apps.contains("Microsoft Teams") || apps.contains("Zoom")
+}
+
+struct DetectionScan {
+    apps: HashSet<String>,
+    media_now: bool,
+    in_meeting_ui_apps: HashSet<String>,
+}
+
+fn scan_detection_state(in_call: bool) -> DetectionScan {
+    let apps = scan_meeting_apps();
+    if apps.is_empty() && !in_call {
+        return DetectionScan {
+            apps,
+            media_now: false,
+            in_meeting_ui_apps: HashSet::new(),
+        };
+    }
+
+    let media_now = any_media_device_running();
+    let in_meeting_ui_apps = if needs_in_meeting_ui_probe(&apps) {
+        scan_in_meeting_ui_apps(&apps)
+    } else {
+        HashSet::new()
+    };
+
+    DetectionScan {
+        apps,
+        media_now,
+        in_meeting_ui_apps,
+    }
+}
 
 /// Start the background poll loop. Emits `call-detected` / `call-ended` events.
 ///
@@ -459,7 +534,21 @@ pub fn start_detection<R: Runtime>(app: AppHandle<R>) {
                 continue;
             }
 
-            let media_now = any_media_device_running();
+            let was_in_call = in_call;
+            let scan = match tokio::task::spawn_blocking(move || scan_detection_state(was_in_call)).await
+            {
+                Ok(scan) => scan,
+                Err(e) => {
+                    warn!("meeting detection: scan task failed: {e}");
+                    continue;
+                }
+            };
+            let DetectionScan {
+                apps,
+                media_now,
+                in_meeting_ui_apps,
+            } = scan;
+
             if media_now {
                 if media_active_since.is_none() {
                     media_active_since = Some(Instant::now());
@@ -482,9 +571,6 @@ pub fn start_detection<R: Runtime>(app: AppHandle<R>) {
             let media_idle_for_grace = media_idle_since
                 .map(|t| t.elapsed() >= MEDIA_END_GRACE)
                 .unwrap_or(false);
-
-            let apps = scan_meeting_apps();
-            let in_meeting_ui_apps = scan_in_meeting_ui_apps();
 
             // While holding, evaluate against the announced app (not a newly preferred one).
             let (meeting_app, in_meeting_ui) = if in_call {
@@ -772,5 +858,16 @@ mod tests {
             Some("Microsoft Teams")
         );
         assert_eq!(match_conferencing_app_process("ModuleHost"), None);
+    }
+
+    #[test]
+    fn ui_probes_only_run_for_teams_or_zoom() {
+        let idle: HashSet<String> = ["Slack".into(), "Discord".into()].into_iter().collect();
+        assert!(!needs_in_meeting_ui_probe(&idle));
+        let teams: HashSet<String> = ["Microsoft Teams".into()].into_iter().collect();
+        assert!(needs_in_meeting_ui_probe(&teams));
+        let zoom: HashSet<String> = ["Zoom".into()].into_iter().collect();
+        assert!(needs_in_meeting_ui_probe(&zoom));
+        assert!(!needs_in_meeting_ui_probe(&HashSet::new()));
     }
 }

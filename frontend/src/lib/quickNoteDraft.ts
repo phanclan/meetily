@@ -1,3 +1,5 @@
+import { migrateProductStorageKeys } from '@/lib/migrateProductStorageKeys';
+
 export interface QuickNoteDraft {
   title: string;
   content: string;
@@ -6,11 +8,11 @@ export interface QuickNoteDraft {
   saveId: string | null;
 }
 
-const QUICK_NOTE_TITLE_KEY = 'meetily.quick_note.title';
-const QUICK_NOTE_CONTENT_KEY = 'meetily.quick_note.content';
-const QUICK_NOTE_UPDATED_KEY = 'meetily.quick_note.updated_at';
-const QUICK_NOTE_FOLDER_KEY = 'meetily.quick_note.folder_id';
-const QUICK_NOTE_SAVE_KEY = 'meetily.quick_note.save_id';
+const QUICK_NOTE_TITLE_KEY = 'afterword.quick_note.title';
+const QUICK_NOTE_CONTENT_KEY = 'afterword.quick_note.content';
+const QUICK_NOTE_UPDATED_KEY = 'afterword.quick_note.updated_at';
+const QUICK_NOTE_FOLDER_KEY = 'afterword.quick_note.folder_id';
+const QUICK_NOTE_SAVE_KEY = 'afterword.quick_note.save_id';
 
 export function loadQuickNoteDraft(): QuickNoteDraft {
   if (typeof window === 'undefined') {
@@ -22,6 +24,8 @@ export function loadQuickNoteDraft(): QuickNoteDraft {
       saveId: null,
     };
   }
+
+  migrateProductStorageKeys();
 
   return {
     title: localStorage.getItem(QUICK_NOTE_TITLE_KEY) || 'New note',

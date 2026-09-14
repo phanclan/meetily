@@ -1,23 +1,33 @@
 import type { Block } from '@blocknote/core';
+import { migrateProductStorageKeys } from '@/lib/migrateProductStorageKeys';
 
 export { isLiveMeetingId, isLiveSessionId, isPersistedMeetingId } from '@/lib/recordingSessionIdentity';
 
-// Storage key keeps the legacy `meetnola.` prefix so unsaved live notes written
-// before the Afterword rename are still recoverable.
-const key = (id: string) => `meetnola.live-notes.${id}`;
+const key = (id: string) => `afterword.live-notes.${id}`;
+
+function withMigratedStorage<T>(read: () => T): T {
+  if (typeof window !== 'undefined') migrateProductStorageKeys();
+  return read();
+}
 
 export function readLiveMeetingNotes(id: string): Block[] | null {
-  const stored = localStorage.getItem(key(id));
-  if (!stored) return null;
-  const blocks: unknown = JSON.parse(stored);
-  if (!Array.isArray(blocks)) throw new Error('Invalid saved live notes');
-  return blocks as Block[];
+  return withMigratedStorage(() => {
+    const stored = localStorage.getItem(key(id));
+    if (!stored) return null;
+    const blocks: unknown = JSON.parse(stored);
+    if (!Array.isArray(blocks)) throw new Error('Invalid saved live notes');
+    return blocks as Block[];
+  });
 }
 
 export function writeLiveMeetingNotes(id: string, blocks: Block[]) {
-  localStorage.setItem(key(id), JSON.stringify(blocks));
+  withMigratedStorage(() => {
+    localStorage.setItem(key(id), JSON.stringify(blocks));
+  });
 }
 
 export function clearLiveMeetingNotes(id: string) {
-  localStorage.removeItem(key(id));
+  withMigratedStorage(() => {
+    localStorage.removeItem(key(id));
+  });
 }

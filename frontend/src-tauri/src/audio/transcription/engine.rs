@@ -145,6 +145,15 @@ pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) 
     }
 }
 
+/// Load the configured local transcription model in the background so the first
+/// Record click does not wait on Metal/CPU allocation. Missing models are skipped.
+pub async fn preload_transcription_model<R: Runtime>(app: &AppHandle<R>) {
+    match validate_transcription_model_ready(app).await {
+        Ok(()) => info!("Transcription model preloaded and ready for the next recording"),
+        Err(e) => info!("Skipping transcription model preload: {}", e),
+    }
+}
+
 /// Get or initialize the appropriate transcription engine based on provider configuration
 pub async fn get_or_init_transcription_engine<R: Runtime>(
     app: &AppHandle<R>,

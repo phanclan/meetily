@@ -9,50 +9,52 @@ import "@blocknote/core/fonts/inter.css";
 
 interface EditorProps {
   initialContent?: Block[];
+  /**
+   * Increment when the parent has a new authoritative document (load, clear,
+   * restore). Typing must not change this, or the editor will replace its own
+   * document on every keystroke.
+   */
+  contentEpoch?: number;
   onChange?: (blocks: Block[]) => void;
   editable?: boolean;
 }
 
-export default function Editor({ initialContent, onChange, editable = true }: EditorProps) {
-  console.log('📝 EDITOR: Initializing BlockNote editor with blocks:', {
-    hasContent: !!initialContent,
-    blocksCount: initialContent?.length || 0,
-    editable
-  });
-
-  const lastContentRef = useRef(initialContent);
+export default function Editor({
+  initialContent,
+  contentEpoch = 0,
+  onChange,
+  editable = true,
+}: EditorProps) {
+  const lastEpochRef = useRef(contentEpoch);
   const replacingRef = useRef(false);
   const editor = useCreateBlockNote({
     initialContent: initialContent?.length ? initialContent as PartialBlock[] : undefined,
   });
 
-  console.log('📝 EDITOR: BlockNote editor created successfully');
-
-  // Parent replacements (such as Clear) must update the mounted editor too.
+  // Parent replacements (load / clear / restore) must update the mounted editor.
+  // Compare epoch, not document JSON — stringify of the full note on every parent
+  // render is what made typing hitch.
   useEffect(() => {
-    if (initialContent === lastContentRef.current) return;
-    lastContentRef.current = initialContent;
-    if (JSON.stringify(initialContent) === JSON.stringify(editor.document)) return;
+    if (contentEpoch === lastEpochRef.current) return;
+    lastEpochRef.current = contentEpoch;
     replacingRef.current = true;
     try {
-      editor.replaceBlocks(editor.document, initialContent?.length
-        ? initialContent as PartialBlock[]
-        : [{ type: "paragraph", content: [] }]);
+      editor.replaceBlocks(
+        editor.document,
+        initialContent?.length
+          ? initialContent as PartialBlock[]
+          : [{ type: "paragraph", content: [] }],
+      );
     } finally {
       replacingRef.current = false;
     }
-  }, [editor, initialContent]);
+  }, [editor, initialContent, contentEpoch]);
 
-  // Handle content changes
   useEffect(() => {
     if (!onChange) return;
 
     const handleChange = () => {
       if (replacingRef.current) return;
-      lastContentRef.current = editor.document;
-      console.log('📝 EDITOR: Content changed, notifying parent...', {
-        blocksCount: editor.document.length
-      });
       onChange(editor.document);
     };
 
@@ -60,7 +62,6 @@ export default function Editor({ initialContent, onChange, editable = true }: Ed
 
     return () => {
       if (typeof unsubscribe === 'function') {
-        console.log('📝 EDITOR: Cleaning up onChange listener');
         unsubscribe();
       }
     };

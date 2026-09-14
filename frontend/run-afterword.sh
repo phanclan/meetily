@@ -5,9 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
 TMP_LOG_DIR="${TMP_LOG_DIR:-/tmp/afterword}"
-# Bundle id stays com.meetnola.tester so app data and macOS TCC grants survive
-# the Meetnola -> Afterword rename.
-TESTER_APP_SUPPORT_DIR="$HOME/Library/Application Support/com.meetnola.tester"
+TESTER_APP_SUPPORT_DIR="$HOME/Library/Application Support/com.afterword.app"
 
 mkdir -p "$TMP_LOG_DIR"
 mkdir -p "$TESTER_APP_SUPPORT_DIR/logs"

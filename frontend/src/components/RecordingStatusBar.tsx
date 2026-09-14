@@ -1,7 +1,7 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { useRecordingState } from '@/contexts/RecordingStateContext';
+import { useRecordingDuration } from '@/contexts/RecordingStateContext';
 import { useEffect, useState } from 'react';
 
 interface RecordingStatusBarProps {
@@ -11,7 +11,7 @@ interface RecordingStatusBarProps {
 export const RecordingStatusBar: React.FC<RecordingStatusBarProps> = ({ isPaused = false }) => {
   // Get recording duration from backend-synced context (in seconds)
   // Backend polls every 500ms, providing smooth updates
-  const { activeDuration, isRecording } = useRecordingState();
+  const { activeDuration } = useRecordingDuration();
 
   // Display state synced from backend
   const [displaySeconds, setDisplaySeconds] = useState(0);

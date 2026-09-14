@@ -263,7 +263,6 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
           <Editor
             initialContent={data.summary_json}
             onChange={(blocks) => {
-              console.log('📝 Editor blocks changed:', blocks.length);
               handleEditorChange(blocks);
             }}
             editable={!isGenerating}

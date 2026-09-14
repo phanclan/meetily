@@ -433,19 +433,19 @@ $env:RUST_LOG="debug"; ./clean_run_windows.bat
 
 ## Afterword fork notes
 
-Afterword is this fork's tester/product flavor of Meetily. It was previously called
-Meetnola; the name is gone from code and scripts, but the bundle id is deliberately
-unchanged (see below).
+Afterword is this fork's product. Meetily code stays in-tree for selective upstream
+adoption. Shipped identity is Afterword, not Meetily or Meetnola.
 
-- Stock app data (Meetily): `~/Library/Application Support/com.meetily.ai/`
-- Tester app data (Afterword): `~/Library/Application Support/com.meetnola.tester/`
-- Tester bundle id: `com.meetnola.tester` — **do not change it.** Changing the identifier orphans Application Support data and macOS TCC (mic / screen recording) grants.
-- Packaged tester: prefer `frontend/build-afterword.sh` / `Afterword.app` for macOS system-audio permission testing (`tauri dev` is not trustworthy for TCC)
+- Afterword bundle id: `com.afterword.app`
+- Afterword app data: `~/Library/Application Support/com.afterword.app/`
+- Afterword DB: `~/Library/Application Support/com.afterword.app/meeting_minutes.sqlite`
+- Default recordings: `~/Movies/afterword-recordings/`
+- Changing the bundle id orphans Application Support data and macOS TCC (mic / screen recording) grants.
+- Packaged app: prefer `frontend/build-afterword.sh` / `Afterword.app` for macOS system-audio permission testing (`tauri dev` is not trustworthy for TCC)
+- Sharing with others: [docs/afterword-sharing.md](docs/afterword-sharing.md) (zip the `.app`; testers follow [docs/afterword-tester-readme.md](docs/afterword-tester-readme.md))
 - WIP handoffs live under `docs/wip/` (see `handoff-afterword-current-state.md`)
 
-Other identifiers kept on the legacy `meetnola` name for the same data-continuity
-reason: the export-folder store file (`meetnola-export.json`) and the live-note /
-live-folder `localStorage` key prefixes.
+The Rust crate name remains `meetily` so upstream cherry-picks stay tractable.
 
 ### Recording / UI stability debugging
 
@@ -453,8 +453,7 @@ When the app shows an error and then all buttons stop working, treat it as a fro
 
 Primary log locations:
 - `frontend/logs/clean-run-*.log` — combined Next.js + Tauri dev logs from `clean_run.sh`
-- `~/Library/Application Support/com.meetnola.tester/logs/frontend-runtime.log` — tester frontend runtime logs
-- `~/Library/Application Support/com.meetily.ai/logs/frontend-runtime.log` — stock Meetily runtime logs
+- `~/Library/Application Support/com.afterword.app/logs/frontend-runtime.log` — Afterword frontend runtime logs
 
 Check these first:
 - Whether backend recording is still active via `get_recording_state` / `is_recording`
@@ -500,11 +499,11 @@ The recommended way to run the app when debugging, especially for Rust-side issu
 
 ```bash
 cd frontend
-MEETILY_AUTOMATION=1 RUST_LOG=debug ./clean_run.sh 2>&1 | tee /tmp/meetily-dev.log
+AFTERWORD_AUTOMATION=1 RUST_LOG=debug ./clean_run.sh 2>&1 | tee /tmp/afterword-dev.log
 ```
 
 - `2>&1 | tee` captures both stdout and stderr (Rust logs) to a file you can inspect
-- `MEETILY_AUTOMATION=1` starts the automation HTTP server on port 21734 (see below)
+- `AFTERWORD_AUTOMATION=1` starts the automation HTTP server on port 21734 (see below)
 - `RUST_LOG=debug` is now respected — the hardcoded `LevelFilter::Info` clamp was removed
 - `clean_run.sh` now **pre-warms Next.js** before starting Tauri: it starts `pnpm dev`, polls `localhost:3118` until the home page compiles (~6s), kills it, then starts Tauri. This prevents the ChunkLoadError on first webview load caused by on-demand compilation timing.
 - Use `--no-clean` only when iterating quickly and you have NOT changed `layout.tsx` or other Next.js files. After any layout change, delete `.next/` first or run without `--no-clean`.
@@ -513,8 +512,8 @@ MEETILY_AUTOMATION=1 RUST_LOG=debug ./clean_run.sh 2>&1 | tee /tmp/meetily-dev.l
 - All `console.log/warn/error` calls in React components are forwarded to Rust via `append_frontend_log` (buffered, flushed every 250ms)
 - These appear in terminal as `INFO app_lib::frontend_logging [frontend] <message>`
 - DB-layer transcript config reads/writes log at `info` level — look for `[settings]` prefix
-- `frontend-runtime.log` is also written to `~/Library/Application Support/com.meetily.ai/logs/`
-- **The console bridge is development-only.** It costs one IPC round-trip per log line, and the transcript path logs several times per segment. In a packaged (production) build it is off unless a tester opts in from DevTools: `localStorage.setItem('meetily:console-bridge', '1')` then reload. Uncaught errors and unhandled rejections are always logged, bridge or not.
+- `frontend-runtime.log` is also written to `~/Library/Application Support/com.afterword.app/logs/`
+- **The console bridge is development-only.** It costs one IPC round-trip per log line, and the transcript path logs several times per segment. In a packaged (production) build it is off unless a tester opts in from DevTools: `localStorage.setItem('afterword:console-bridge', '1')` then reload. Uncaught errors and unhandled rejections are always logged, bridge or not.
 
 ### Afterword Tester Build (Preferred for macOS audio / peer testing)
 
@@ -527,10 +526,10 @@ open -n '../target/release/bundle/macos/Afterword.app'
 ```
 
 Important paths:
-- Packaged app: `target/release/bundle/macos/Afterword.app` (bundle name follows `productName`; older builds on disk are still named `meetnola Tester.app`)
-- Bundle id: `com.meetnola.tester` (unchanged by the Afterword rename)
-- Tester app data: `~/Library/Application Support/com.meetnola.tester/`
-- Tester DB: `~/Library/Application Support/com.meetnola.tester/meeting_minutes.sqlite`
+- Packaged app: `target/release/bundle/macos/Afterword.app`
+- Bundle id: `com.afterword.app`
+- App data: `~/Library/Application Support/com.afterword.app/`
+- DB: `~/Library/Application Support/com.afterword.app/meeting_minutes.sqlite`
 
 Why this matters:
 - `tauri dev` is not reliable for macOS TCC / System Audio Recording permission validation
@@ -541,20 +540,21 @@ Tester builds also expose a visible build badge in the UI. Use it to confirm the
 
 Operational note:
 - The `.app` bundle is currently the peer-test artifact; the `.dmg` step still fails in this branch.
+- `docs/afterword-sharing.md` is how to package and send a tester build.
 - `docs/afterword-tester-readme.md` is the current setup/troubleshooting guide for testers.
 - `frontend/build-gpu.sh` now normalizes executable bits on `*.app/Contents/MacOS/*` after build so the packaged bundle is less fragile if DMG bundling fails later.
 
 ### Automation HTTP API (Testing & Scripting)
 
 An opt-in HTTP API for programmatic testing, bound to `127.0.0.1:21734` only.
-Enable by setting `MEETILY_AUTOMATION=1` before launching the app.
+Enable by setting `AFTERWORD_AUTOMATION=1` before launching the app.
 
 **Endpoints**:
 - `GET  /health` — returns `{"status":"ok","version":"..."}`
 - `GET  /v1/config/transcript` — returns current provider/model/apiKey from DB
 - `PUT  /v1/config/transcript` — writes provider/model/apiKey to DB (requires Bearer token)
 
-**Token**: printed to stderr on startup. Override with `MEETILY_AUTOMATION_TOKEN=mytoken`.
+**Token**: printed to stderr on startup. Override with `AFTERWORD_AUTOMATION_TOKEN=mytoken`.
 
 **Test scripts** (in `scripts/`):
 ```bash
@@ -564,6 +564,6 @@ Enable by setting `MEETILY_AUTOMATION=1` before launching the app.
 ./scripts/test-transcript-config.sh reset
 ./scripts/test-transcript-config.sh test-groq   # full write/verify/restore cycle
 
-# End-to-end HTTP API test (app must be running with MEETILY_AUTOMATION=1)
-MEETILY_AUTOMATION_TOKEN=<token-from-stderr> ./scripts/test-automation-api.sh
+# End-to-end HTTP API test (app must be running with AFTERWORD_AUTOMATION=1)
+AFTERWORD_AUTOMATION_TOKEN=<token-from-stderr> ./scripts/test-automation-api.sh
 ```

@@ -78,8 +78,6 @@ fn main() {
 fn emit_build_metadata() {
     for suffix in ["ID", "CHANNEL", "FLAVOR"] {
         println!("cargo:rerun-if-env-changed=AFTERWORD_BUILD_{}", suffix);
-        // Legacy Meetnola env names, still honored as a fallback.
-        println!("cargo:rerun-if-env-changed=MEETNOLA_BUILD_{}", suffix);
     }
 
     let build_id = build_env("ID", "local-dev");
@@ -91,19 +89,20 @@ fn emit_build_metadata() {
     println!("cargo:rustc-env=AFTERWORD_BUILD_FLAVOR={}", flavor);
 }
 
-/// Reads `AFTERWORD_BUILD_<suffix>`, falling back to the legacy
-/// `MEETNOLA_BUILD_<suffix>` name before the default.
 fn build_env(suffix: &str, default: &str) -> String {
-    std::env::var(format!("AFTERWORD_BUILD_{}", suffix))
-        .or_else(|_| std::env::var(format!("MEETNOLA_BUILD_{}", suffix)))
-        .unwrap_or_else(|_| default.to_string())
+    std::env::var(format!("AFTERWORD_BUILD_{}", suffix)).unwrap_or_else(|_| default.to_string())
 }
 
 /// Detects GPU acceleration capabilities and provides build guidance
 fn detect_and_report_gpu_capabilities() {
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
 
-    println!("cargo:warning=🚀 Building Meetily for: {}", target_os);
+    let product = if cfg!(feature = "afterword") {
+        "Afterword"
+    } else {
+        "Meetily"
+    };
+    println!("cargo:warning=🚀 Building {} for: {}", product, target_os);
 
     match target_os.as_str() {
         "macos" => {

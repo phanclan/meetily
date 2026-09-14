@@ -7,22 +7,13 @@
  * Product defaults (Parakeet STT + Gateway/Luna) live in
  * `src/constants/modelDefaults.ts` and `src-tauri/src/config.rs`.
  * See `docs/afterword-product-defaults.md`.
- *
- * The legacy `meetnola` / `meetnola-*` values still resolve to `afterword` so
- * older shells, scripts, and cached env files keep working.
  */
 
 export type ProductFlavor = 'meetily' | 'afterword'
 
 function normalizeFlavor(raw: string | undefined): ProductFlavor {
   const value = (raw || '').trim().toLowerCase()
-  if (
-    value === 'afterword' ||
-    value.startsWith('afterword-') ||
-    // Legacy Meetnola flavor values.
-    value === 'meetnola' ||
-    value.startsWith('meetnola-')
-  ) {
+  if (value === 'afterword' || value.startsWith('afterword-')) {
     return 'afterword'
   }
   return 'meetily'
@@ -33,9 +24,6 @@ export const productFlavor: ProductFlavor = normalizeFlavor(
 )
 
 export const isAfterword = productFlavor === 'afterword'
-
-/** @deprecated Use `isAfterword`. Kept so older call sites keep compiling. */
-export const isMeetnola = isAfterword
 
 /** Afterword-only module surface — import lazily from call sites when needed. */
 export const afterwordExtensions = isAfterword

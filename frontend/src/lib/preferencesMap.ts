@@ -41,7 +41,7 @@ export const PREFERENCES = [
     id: 'call-detection',
     label: 'Detect meetings',
     keys: [
-      'localStorage:meetily.callDetectionEnabled',
+      'localStorage:afterword.callDetectionEnabled',
       'ipc:plugin:afterword|set_call_detection_enabled',
     ],
     backend: 'localStorage (persist) + Rust meeting_detection (runtime)',

@@ -957,9 +957,20 @@ pub async fn api_save_meeting_title<R: Runtime>(
     }
 }
 
+fn maybe_schedule_meeting_title<R: Runtime>(
+    app: AppHandle<R>,
+    pool: sqlx::SqlitePool,
+    meeting_id: String,
+) {
+    #[cfg(feature = "afterword")]
+    crate::afterword::meeting_title::schedule_generated_title(app, pool, meeting_id);
+    #[cfg(not(feature = "afterword"))]
+    let _ = (app, pool, meeting_id);
+}
+
 #[tauri::command]
 pub async fn api_save_transcript<R: Runtime>(
-    _app: AppHandle<R>,
+    app: AppHandle<R>,
     state: tauri::State<'_, AppState>,
     meeting_title: String,
     transcripts: Vec<serde_json::Value>,
@@ -1019,6 +1030,7 @@ pub async fn api_save_transcript<R: Runtime>(
                 "Successfully saved transcript and created meeting with id: {}",
                 meeting_id
             );
+            maybe_schedule_meeting_title(app, pool.clone(), meeting_id.clone());
             Ok(serde_json::json!({
                 "status": "success",
                 "message": "Transcript saved successfully",
@@ -1037,7 +1049,8 @@ pub async fn api_save_transcript<R: Runtime>(
 }
 
 #[tauri::command]
-pub async fn api_append_transcript(
+pub async fn api_append_transcript<R: Runtime>(
+    app: AppHandle<R>,
     state: tauri::State<'_, AppState>,
     meeting_id: String,
     transcripts: Vec<serde_json::Value>,
@@ -1056,12 +1069,15 @@ pub async fn api_append_transcript(
 
     let pool = state.db_manager.pool();
     match TranscriptsRepository::append_transcripts(pool, &meeting_id, &transcripts_to_save).await {
-        Ok(count) => Ok(serde_json::json!({
-            "status": "success",
-            "message": "Transcript segments appended",
-            "meeting_id": meeting_id,
-            "appended": count
-        })),
+        Ok(count) => {
+            maybe_schedule_meeting_title(app, pool.clone(), meeting_id.clone());
+            Ok(serde_json::json!({
+                "status": "success",
+                "message": "Transcript segments appended",
+                "meeting_id": meeting_id,
+                "appended": count
+            }))
+        }
         Err(sqlx::Error::RowNotFound) => Err(format!("Meeting not found: {}", meeting_id)),
         Err(e) => Err(format!("Failed to append transcript: {}", e)),
     }

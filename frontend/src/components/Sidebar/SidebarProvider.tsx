@@ -1,9 +1,11 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { safelyUnlisten } from '@/lib/tauriEvents';
 import { useTranscriptSearch, type TranscriptSearchResult } from '@/hooks/useTranscriptSearch';
 import { createRecordingPath } from '@/lib/quickNoteRoute';
 import { useSummaryPolling } from '@/hooks/useSummaryPolling';
@@ -115,6 +117,35 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   }, [serverAddress, fetchMeetings]);
 
   useEffect(() => {
+    let cancelled = false;
+    let unlisten: UnlistenFn | undefined;
+
+    const setup = async () => {
+      unlisten = await listen<{ meeting_id: string; title: string; previous_title: string }>(
+        'meeting-title-suggested',
+        (event) => {
+          const meetingId = event.payload?.meeting_id;
+          const title = event.payload?.title?.trim();
+          if (!meetingId || !title) return;
+          setMeetings((current) =>
+            current.map((meeting) => (meeting.id === meetingId ? { ...meeting, title } : meeting)),
+          );
+          setCurrentMeeting((current) =>
+            current && current.id === meetingId ? { ...current, title } : current,
+          );
+        },
+      );
+      if (cancelled) safelyUnlisten(unlisten, 'sidebar:meeting-title-suggested');
+    };
+
+    void setup();
+    return () => {
+      cancelled = true;
+      safelyUnlisten(unlisten, 'sidebar:meeting-title-suggested');
+    };
+  }, []);
+
+  useEffect(() => {
     const fetchSettings = async () => {
       setServerAddress('http://localhost:5167');
       setTranscriptServerAddress('http://127.0.0.1:8178/stream');
@@ -143,7 +174,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const toggleCollapse = () => {
+  const toggleCollapse = useCallback(() => {
     setIsCollapsed(previous => {
       const next = !previous;
       try {
@@ -153,7 +184,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
       }
       return next;
     });
-  };
+  }, []);
 
   // Update current meeting when on home page
   useEffect(() => {
@@ -170,38 +201,59 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 
   // Function to handle recording toggle from sidebar.
   // The recording route starts a session, or reopens the one already running.
-  const handleRecordingToggle = () => {
+  const handleRecordingToggle = useCallback(() => {
     router.push(createRecordingPath());
-  };
+  }, [router]);
+
+  const value = useMemo<SidebarContextType>(() => ({
+    noteFolders,
+    folderRevision,
+    refreshNoteFolders,
+    currentMeeting,
+    setCurrentMeeting,
+    sidebarItems,
+    isCollapsed,
+    toggleCollapse,
+    meetings,
+    setMeetings,
+    isMeetingActive,
+    setIsMeetingActive,
+    handleRecordingToggle,
+    searchTranscripts,
+    searchResults,
+    isSearching,
+    setServerAddress,
+    serverAddress,
+    transcriptServerAddress,
+    setTranscriptServerAddress,
+    activeSummaryPolls,
+    startSummaryPolling,
+    stopSummaryPolling,
+    refetchMeetings: fetchMeetings,
+  }), [
+    activeSummaryPolls,
+    currentMeeting,
+    fetchMeetings,
+    folderRevision,
+    handleRecordingToggle,
+    isCollapsed,
+    isMeetingActive,
+    isSearching,
+    meetings,
+    noteFolders,
+    refreshNoteFolders,
+    searchResults,
+    searchTranscripts,
+    serverAddress,
+    sidebarItems,
+    startSummaryPolling,
+    stopSummaryPolling,
+    toggleCollapse,
+    transcriptServerAddress,
+  ]);
 
   return (
-    <SidebarContext.Provider value={{
-      noteFolders,
-      folderRevision,
-      refreshNoteFolders,
-      currentMeeting,
-      setCurrentMeeting,
-      sidebarItems,
-      isCollapsed,
-      toggleCollapse,
-      meetings,
-      setMeetings,
-      isMeetingActive,
-      setIsMeetingActive,
-      handleRecordingToggle,
-      searchTranscripts,
-      searchResults,
-      isSearching,
-      setServerAddress,
-      serverAddress,
-      transcriptServerAddress,
-      setTranscriptServerAddress,
-      activeSummaryPolls,
-      startSummaryPolling,
-      stopSummaryPolling,
-      refetchMeetings: fetchMeetings,
-
-    }}>
+    <SidebarContext.Provider value={value}>
       {children}
     </SidebarContext.Provider>
   );
