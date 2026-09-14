@@ -2,6 +2,11 @@
 //!
 //! Size is physical inner pixels; position is physical outer origin. Overlay
 //! title bars keep those two coordinate spaces distinct.
+//!
+//! On macOS, Tauri/tao convert physical coordinates with the *current window*
+//! scale. A frame saved on a 2x display must be reapplied as logical points
+//! (`physical / target_scale`) or it is interpreted with the 1x primary scale
+//! and jumps off the saved screen.
 
 const MIN_LOGICAL_WIDTH: f64 = 600.0;
 const MIN_LOGICAL_HEIGHT: f64 = 400.0;
@@ -96,12 +101,36 @@ impl MonitorBounds {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WindowFrame {
     pub width: u32,
     pub height: u32,
     pub x: i32,
     pub y: i32,
+    /// Scale of the monitor this frame is expressed against. Apply the frame
+    /// as logical points (`physical / scale`) so mixed-DPI setups do not
+    /// reinterpret a 2x save using a 1x window.
+    pub scale_factor: f64,
+}
+
+impl WindowFrame {
+    pub fn logical_size(self) -> (f64, f64) {
+        let scale = sane_scale(self.scale_factor);
+        (self.width as f64 / scale, self.height as f64 / scale)
+    }
+
+    pub fn logical_position(self) -> (f64, f64) {
+        let scale = sane_scale(self.scale_factor);
+        (self.x as f64 / scale, self.y as f64 / scale)
+    }
+}
+
+fn sane_scale(scale: f64) -> f64 {
+    if scale.is_finite() && scale > 0.0 {
+        scale
+    } else {
+        1.0
+    }
 }
 
 pub fn sanitize_restored_frame(
@@ -185,6 +214,7 @@ pub fn sanitize_restored_frame(
         height,
         x,
         y,
+        scale_factor: sane_scale(target.scale_factor),
     })
 }
 
@@ -600,8 +630,82 @@ mod tests {
                 height: 2818,
                 x: 6596,
                 y: 62,
+                scale_factor: 2.0,
             },
             &[display]
         ));
+    }
+
+    fn dell_qhd_primary() -> MonitorBounds {
+        // 1x QHD primary work area (menu bar + dock reserved).
+        MonitorBounds {
+            x: 0,
+            y: 45,
+            width: 2560,
+            height: 1364,
+            scale_factor: 1.0,
+        }
+    }
+
+    fn lg_5k_side() -> MonitorBounds {
+        // tao reports each monitor in that display's own physical space, so a
+        // 2x 5K to the right of a 1x 2560 display starts at x=5120, not 2560.
+        MonitorBounds {
+            x: 5120,
+            y: 0,
+            width: 5120,
+            height: 2880,
+            scale_factor: 2.0,
+        }
+    }
+
+    #[test]
+    fn mixed_dpi_side_display_frame_stays_on_5k_and_converts_to_logical() {
+        let primary = dell_qhd_primary();
+        let side = lg_5k_side();
+        let frame = sanitize_restored_frame(
+            1972.0,
+            1638.0,
+            Some(6076.0),
+            Some(664.0),
+            &[primary, side],
+            Some(primary),
+        )
+        .unwrap();
+
+        assert_eq!(frame.width, 1972);
+        assert_eq!(frame.height, 1638);
+        assert_eq!(frame.x, 6076);
+        assert_eq!(frame.y, 664);
+        assert_eq!(frame.scale_factor, 2.0);
+        assert!(side.contains_point(frame.x, frame.y));
+        assert!(!primary.contains_point(frame.x, frame.y));
+
+        let (logical_w, logical_h) = frame.logical_size();
+        let (logical_x, logical_y) = frame.logical_position();
+        assert!((logical_w - 986.0).abs() < f64::EPSILON);
+        assert!((logical_h - 819.0).abs() < f64::EPSILON);
+        assert!((logical_x - 3038.0).abs() < f64::EPSILON);
+        assert!((logical_y - 332.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn mixed_dpi_physical_apply_on_1x_would_miss_the_5k() {
+        // If we fed 6076 as physical to a window still on the 1x primary,
+        // AppKit would treat it as 6076 points — past both 2560-point screens.
+        let primary = dell_qhd_primary();
+        let side = lg_5k_side();
+        let frame = sanitize_restored_frame(
+            1972.0,
+            1638.0,
+            Some(6076.0),
+            Some(664.0),
+            &[primary, side],
+            Some(primary),
+        )
+        .unwrap();
+        let (logical_x, _) = frame.logical_position();
+        assert!(logical_x < 5120.0, "logical origin must land on the 5K (2560–5120 points)");
+        assert!(logical_x >= 2560.0);
     }
 }

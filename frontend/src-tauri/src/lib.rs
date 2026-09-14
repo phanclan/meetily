@@ -64,18 +64,24 @@ mod window_state;
 use audio::{list_audio_devices, AudioDevice, trigger_audio_permission};
 use log::{error as log_error, info as log_info};
 use notifications::commands::NotificationManagerState;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, Position, Runtime, Size, WebviewWindow, WindowEvent};
+use tauri::{
+    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Position, Runtime, Size,
+    WebviewWindow, WindowEvent,
+};
 use tauri_plugin_store::StoreExt;
 use tokio::sync::RwLock;
 
 static RECORDING_FLAG: AtomicBool = AtomicBool::new(false);
 static WINDOW_STATE_PERSIST_ENABLED: AtomicBool = AtomicBool::new(false);
 static WINDOW_STATE_PERSIST_SEQ: AtomicU64 = AtomicU64::new(0);
+static WINDOW_STATE_RESTORE_HOLDOFF_UNTIL: std::sync::LazyLock<StdMutex<Option<Instant>>> =
+    std::sync::LazyLock::new(|| StdMutex::new(None));
 const WINDOW_STATE_STORE: &str = "window-state.json";
 const MAIN_WINDOW_STATE_KEY: &str = "main";
 const WINDOW_STATE_PERSIST_DEBOUNCE: Duration = Duration::from_millis(250);
+const WINDOW_STATE_RESTORE_HOLDOFF: Duration = Duration::from_millis(900);
 
 // Global language preference storage (default to "auto-translate" for automatic translation to English)
 static LANGUAGE_PREFERENCE: std::sync::LazyLock<StdMutex<String>> =
@@ -97,6 +103,11 @@ struct PersistedWindowState {
     #[serde(default)]
     y: Option<f64>,
     maximized: bool,
+    /// Window scale when this frame was saved. Restore converts through the
+    /// target monitor scale, not this value, so a 2x save is not replayed
+    /// through a 1x window.
+    #[serde(default)]
+    scale_factor: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -161,6 +172,11 @@ fn persist_main_window_state<R: Runtime>(
     if !persist_while_hidden && !window.is_visible().unwrap_or(false) {
         return Ok(());
     }
+    // Restoring a mixed-DPI frame is async. Any persist in that window still
+    // reports the primary-display geometry and would overwrite the save.
+    if in_restore_holdoff() {
+        return Ok(());
+    }
     if window.is_minimized().unwrap_or(false) || window.is_fullscreen().unwrap_or(false) {
         return Ok(());
     }
@@ -200,6 +216,7 @@ fn persist_main_window_state<R: Runtime>(
         x: position.map(|p| p.x as f64),
         y: position.map(|p| p.y as f64),
         maximized,
+        scale_factor: window.scale_factor().ok(),
     };
 
     let store = window
@@ -253,11 +270,17 @@ fn persist_then_hide_main_window<R: Runtime>(window: &WebviewWindow<R>) {
 }
 
 /// Final save before process exit (menu quit / tray quit / complete_app_quit).
-/// Forces a persist even if the window was already hidden to tray.
+/// Visible windows are captured here. If the window is already hidden to tray,
+/// CloseRequested already wrote the last on-screen frame — do not replace it
+/// with the hidden window's (often primary-display) geometry.
 pub(crate) fn persist_main_window_before_quit<R: Runtime>(app: &AppHandle<R>) {
     let Some(window) = app.get_webview_window("main") else {
         return;
     };
+    if !window.is_visible().unwrap_or(false) {
+        log::debug!("Skipping quit-time window persist; last visible frame already saved");
+        return;
+    }
     WINDOW_STATE_PERSIST_SEQ.fetch_add(1, Ordering::SeqCst);
     // Quit can race bootstrap; still try to capture the last visible frame.
     WINDOW_STATE_PERSIST_ENABLED.store(true, Ordering::SeqCst);
@@ -266,9 +289,31 @@ pub(crate) fn persist_main_window_before_quit<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
+fn begin_restore_holdoff() {
+    if let Ok(mut until) = WINDOW_STATE_RESTORE_HOLDOFF_UNTIL.lock() {
+        *until = Some(Instant::now() + WINDOW_STATE_RESTORE_HOLDOFF);
+    }
+}
+
+fn in_restore_holdoff() -> bool {
+    WINDOW_STATE_RESTORE_HOLDOFF_UNTIL
+        .lock()
+        .ok()
+        .and_then(|until| *until)
+        .is_some_and(|deadline| Instant::now() < deadline)
+}
+
 fn enable_main_window_state_persist<R: Runtime>(window: &WebviewWindow<R>) {
     WINDOW_STATE_PERSIST_ENABLED.store(true, Ordering::SeqCst);
-    schedule_persist_main_window_state(window, true);
+    // Do not persist immediately: restore has not finished applying, and a
+    // premature save would store the default primary-display frame.
+    let window = window.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(WINDOW_STATE_RESTORE_HOLDOFF + Duration::from_millis(100)).await;
+        if let Err(e) = persist_main_window_state(&window, false) {
+            log::warn!("Failed to persist main window state after restore: {}", e);
+        }
+    });
 }
 
 fn restore_main_window_state<R: Runtime>(window: &WebviewWindow<R>) {
@@ -276,10 +321,19 @@ fn restore_main_window_state<R: Runtime>(window: &WebviewWindow<R>) {
         return;
     };
 
+    begin_restore_holdoff();
+
     let monitors = window_monitor_bounds(window);
     let primary = primary_monitor_bounds(window, &monitors);
-    // Size was captured with `inner_size` (physical pixels). Restoring as
-    // logical points made Retina windows jump to ~2x on every relaunch.
+    log::info!(
+        "Restoring main window {}x{} at {:?},{:?} (saved scale {:?}) with {} monitor(s)",
+        state.width,
+        state.height,
+        state.x,
+        state.y,
+        state.scale_factor,
+        monitors.len()
+    );
     if let Some(frame) = window_state::sanitize_restored_frame(
         state.width,
         state.height,
@@ -304,6 +358,11 @@ fn restore_main_window_state<R: Runtime>(window: &WebviewWindow<R>) {
                 frame.x,
                 frame.y
             );
+        }
+        if !state.maximized {
+            if let Err(e) = window.unmaximize() {
+                log::debug!("Failed to unmaximize before restore: {}", e);
+            }
         }
         apply_window_frame(window, frame);
     } else if !state.maximized {
@@ -331,6 +390,7 @@ fn ensure_main_window_frame_is_sane<R: Runtime>(window: &WebviewWindow<R>) {
         height: size.height,
         x: origin.x,
         y: origin.y,
+        scale_factor: window.scale_factor().unwrap_or(1.0),
     };
     if !window_state::frame_needs_correction(current, &monitors) {
         return;
@@ -361,12 +421,45 @@ fn ensure_main_window_frame_is_sane<R: Runtime>(window: &WebviewWindow<R>) {
 }
 
 fn apply_window_frame<R: Runtime>(window: &WebviewWindow<R>, frame: window_state::WindowFrame) {
-    if let Err(e) = window.set_size(Size::Physical(PhysicalSize::new(frame.width, frame.height))) {
+    let (logical_w, logical_h) = frame.logical_size();
+    let (logical_x, logical_y) = frame.logical_position();
+    log::info!(
+        "Applying main window frame {}x{} at {},{} as logical {:.1}x{:.1} at {:.1},{:.1} (scale {:.2})",
+        frame.width,
+        frame.height,
+        frame.x,
+        frame.y,
+        logical_w,
+        logical_h,
+        logical_x,
+        logical_y,
+        frame.scale_factor
+    );
+    // Logical points are scale-independent. Physical set_size/set_position are
+    // converted with the *current* window scale, so a 2x-display save applied
+    // while the window still sits on a 1x primary lands off every screen.
+    if let Err(e) = window.set_size(Size::Logical(LogicalSize::new(logical_w, logical_h))) {
         log::warn!("Failed to restore main window size: {}", e);
     }
-    if let Err(e) = window.set_position(Position::Physical(PhysicalPosition::new(frame.x, frame.y)))
+    if let Err(e) = window.set_position(Position::Logical(LogicalPosition::new(logical_x, logical_y)))
     {
         log::warn!("Failed to restore main window position: {}", e);
+    }
+}
+
+fn schedule_restore_retries<R: Runtime>(window: &WebviewWindow<R>) {
+    if load_main_window_state(&window.app_handle()).is_none() {
+        return;
+    }
+    for delay_ms in [50_u64, 400] {
+        let window = window.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+            restore_main_window_state(&window);
+            if delay_ms == 400 {
+                ensure_main_window_frame_is_sane(&window);
+            }
+        });
     }
 }
 
@@ -425,10 +518,11 @@ fn frontend_bootstrap_complete<R: Runtime>(app: AppHandle<R>) -> Result<(), Stri
     }
 
     // Monitors are usually fully enumerated by the time the frontend is ready.
-    // Re-apply saved state so a side-display frame is not left on the primary
-    // after an early .setup restore that ran with incomplete geometry.
+    // Re-apply saved state as logical points so a mixed-DPI side display is not
+    // interpreted with the primary's scale. AppKit applies setFrame async, so
+    // retry shortly after show.
     restore_main_window_state(&window);
-    ensure_main_window_frame_is_sane(&window);
+    schedule_restore_retries(&window);
     enable_main_window_state_persist(&window);
 
     if let Err(e) = window.set_focus() {
@@ -803,30 +897,9 @@ pub fn run() {
 
             if let Some(window) = _app.get_webview_window("main") {
                 restore_main_window_state(&window);
-
-                // Secondary displays are sometimes missing during .setup. If the
-                // saved origin was not on any monitor yet, retry shortly once
-                // display geometry is more likely complete.
-                let monitors_after_setup = window_monitor_bounds(&window);
-                let needs_monitor_retry = load_main_window_state(&_app.handle()).is_some_and(|state| {
-                    match (state.x, state.y) {
-                        (Some(x), Some(y)) => {
-                            let ox = x.round() as i32;
-                            let oy = y.round() as i32;
-                            !monitors_after_setup
-                                .iter()
-                                .any(|monitor| monitor.contains_point(ox, oy))
-                        }
-                        _ => false,
-                    }
-                });
-                if needs_monitor_retry {
-                    let window_for_retry = window.clone();
-                    tauri::async_runtime::spawn(async move {
-                        tokio::time::sleep(Duration::from_millis(400)).await;
-                        restore_main_window_state(&window_for_retry);
-                    });
-                }
+                // Always retry: secondary displays and mixed-DPI scale can be
+                // missing or wrong during the first hidden restore.
+                schedule_restore_retries(&window);
 
                 let window_for_bootstrap_timeout = window.clone();
                 tauri::async_runtime::spawn(async move {
