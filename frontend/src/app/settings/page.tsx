@@ -1,8 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { ArrowLeft, Settings2, Mic, Database as DatabaseIcon, SparkleIcon, FlaskConical } from 'lucide-react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { invoke } from '@tauri-apps/api/core';
 import { TranscriptSettings, type TranscriptModelProps } from '@/components/TranscriptSettings';
 import { RecordingSettings } from '@/components/RecordingSettings';
@@ -13,21 +12,7 @@ import { useConfig } from '@/contexts/ConfigContext';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { getBuildInfo, type BuildInfo } from '@/lib/buildInfo';
 import { ChromeDragBar } from '@/components/WindowChrome';
-import { cn } from '@/lib/utils';
-
-const TABS = [
-  { value: 'general', label: 'General', icon: Settings2 },
-  { value: 'recording', label: 'Recording', icon: Mic },
-  { value: 'Transcriptionmodels', label: 'Transcription', icon: DatabaseIcon },
-  { value: 'summaryModels', label: 'AI Enhancement', icon: SparkleIcon },
-  { value: 'beta', label: 'Beta', icon: FlaskConical },
-] as const;
-
-type TabValue = (typeof TABS)[number]['value'];
-
-function isTabValue(value: string | null): value is TabValue {
-  return TABS.some((tab) => tab.value === value);
-}
+import { parseSettingsTab, settingsTabMeta } from '@/lib/settingsNav';
 
 const TRANSCRIPT_PROVIDERS = ['localWhisper', 'parakeet', 'deepgram', 'elevenLabs', 'groq', 'openai'] as const;
 
@@ -37,20 +22,13 @@ function toTranscriptProvider(value: string | null | undefined): TranscriptModel
 }
 
 export default function SettingsPage() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const { transcriptModelConfig, setTranscriptModelConfig } = useConfig();
 
-  const [activeTab, setActiveTab] = useState<TabValue>('general');
+  const activeTab = parseSettingsTab(searchParams.get('tab')) ?? 'general';
   const onboardingIntent = searchParams.get('onboarding');
   const [buildInfo, setBuildInfo] = useState<BuildInfo | null>(null);
-
-  useEffect(() => {
-    const requestedTab = searchParams.get('tab');
-    if (isTabValue(requestedTab)) {
-      setActiveTab(requestedTab);
-    }
-  }, [searchParams]);
+  const activeSection = settingsTabMeta(activeTab);
 
   useEffect(() => {
     getBuildInfo().then(setBuildInfo).catch(console.error);
@@ -83,75 +61,13 @@ export default function SettingsPage() {
     void loadTranscriptConfig();
   }, [setTranscriptModelConfig]);
 
-  const selectTab = useCallback(
-    (value: TabValue) => {
-      setActiveTab(value);
-      const params = new URLSearchParams(searchParams.toString());
-      if (value === 'general') {
-        params.delete('tab');
-      } else {
-        params.set('tab', value);
-      }
-      const query = params.toString();
-      router.replace(query ? `/settings?${query}` : '/settings');
-    },
-    [router, searchParams],
-  );
-
-  const activeSection = useMemo(
-    () => TABS.find((tab) => tab.value === activeTab) ?? TABS[0],
-    [activeTab],
-  );
-
   return (
-    <div className="flex h-screen flex-col bg-background">
-      <div className="sticky top-0 z-10 border-b border-stone-200 bg-background">
-        <ChromeDragBar className="px-5 md:px-8">
-          <button
-            type="button"
-            onClick={() => router.back()}
-            className="no-drag flex items-center gap-2 text-stone-600 transition-colors hover:text-stone-900"
-          >
-            <ArrowLeft className="h-5 w-5" />
-            <span>Back</span>
-          </button>
-        </ChromeDragBar>
-      </div>
+    <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-background">
+      <ChromeDragBar />
 
-      <div className="flex min-h-0 flex-1">
-        <nav
-          aria-label="Settings sections"
-          className="flex w-[220px] shrink-0 flex-col border-r border-stone-200/80 px-3 py-4"
-        >
-          <ul className="flex flex-col gap-0.5">
-            {TABS.map((tab) => {
-              const Icon = tab.icon;
-              const isActive = tab.value === activeTab;
-              return (
-                <li key={tab.value}>
-                  <button
-                    type="button"
-                    onClick={() => selectTab(tab.value)}
-                    aria-current={isActive ? 'page' : undefined}
-                    className={cn(
-                      'flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition-colors',
-                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-400 focus-visible:ring-offset-2',
-                      isActive
-                        ? 'bg-stone-100 font-medium text-stone-900'
-                        : 'text-stone-600 hover:bg-stone-50 hover:text-stone-900',
-                    )}
-                  >
-                    <Icon className="h-4 w-4 shrink-0" aria-hidden />
-                    <span>{tab.label}</span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </nav>
-
-        <div className="min-w-0 flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-3xl px-5 py-5 md:px-8">
+      <div className="notes-scroll-frame">
+        <div className="notes-scrollbar">
+          <div className="mx-auto max-w-3xl px-5 pb-6 pt-0 md:px-8">
             {onboardingIntent === 'groq-key' && (
               <Alert className="mb-6 border-blue-200 bg-blue-50 text-blue-950">
                 <AlertDescription className="space-y-2">
@@ -164,9 +80,9 @@ export default function SettingsPage() {
               </Alert>
             )}
 
-            <h2 className="font-serif text-2xl tracking-tight text-stone-900">
+            <h1 className="font-serif text-2xl tracking-tight text-stone-900">
               {activeSection.label}
-            </h2>
+            </h1>
 
             <div className="mt-5">
               {activeTab === 'general' && <PreferenceSettings />}

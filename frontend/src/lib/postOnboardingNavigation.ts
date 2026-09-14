@@ -6,10 +6,11 @@ import {
   AFTERWORD_GATEWAY_ENDPOINT,
   AFTERWORD_SUMMARY_PROVIDER,
 } from '@/constants/modelDefaults';
+import { settingsPath } from '@/lib/settingsNav';
 
 const HOME_ROUTE = '/';
-const GROQ_SETUP_ROUTE = '/settings?tab=Transcriptionmodels&onboarding=groq-key';
-const GATEWAY_SETUP_ROUTE = '/settings?tab=Summarymodels&onboarding=gateway-key';
+const GROQ_SETUP_ROUTE = settingsPath('Transcriptionmodels', 'onboarding=groq-key');
+const GATEWAY_SETUP_ROUTE = settingsPath('summaryModels', 'onboarding=gateway-key');
 
 type ProviderConfig = {
   provider?: string | null;

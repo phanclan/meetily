@@ -2,7 +2,7 @@
 import { NoteFolderSidebar } from '@/components/NoteFolderControls';
 
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { File, Settings, Home, Trash2, Mic, Pencil, SearchIcon, X, Upload, FolderOpen, ChevronDown, MoreHorizontal, MessageCircle, PanelLeftClose } from 'lucide-react';
+import { File, Settings, Home, Trash2, Mic, Pencil, SearchIcon, X, Upload, FolderOpen, ChevronDown, MoreHorizontal, MessageCircle, PanelLeftClose, ArrowLeft, Settings2, Database, SparkleIcon, FlaskConical, type LucideIcon } from 'lucide-react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { useSidebar } from './SidebarProvider';
 import type { CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
@@ -44,6 +44,21 @@ import { cn } from '@/lib/utils';
 import { homeAskPath, isHomeAskOpen } from '@/lib/askRoute';
 import { createSavedNotePath } from '@/lib/savedNoteRoute';
 import { RECORDING_ROUTE } from '@/lib/quickNoteRoute';
+import {
+  SETTINGS_TABS,
+  isSettingsPath,
+  settingsPath,
+  settingsTabFromSearch,
+  type SettingsTab,
+} from '@/lib/settingsNav';
+
+const SETTINGS_TAB_ICONS = {
+  general: Settings2,
+  recording: Mic,
+  Transcriptionmodels: Database,
+  summaryModels: SparkleIcon,
+  beta: FlaskConical,
+} as const satisfies Record<SettingsTab, LucideIcon>;
 
 function RailItem({
   icon,
@@ -91,6 +106,60 @@ function RailItem({
       <TooltipTrigger asChild>{button}</TooltipTrigger>
       <TooltipContent side="right"><p>{label}</p></TooltipContent>
     </Tooltip>
+  );
+}
+
+function SettingsRail({
+  collapsed,
+  activeTab,
+  onHome,
+  onSelectTab,
+}: {
+  collapsed: boolean;
+  activeTab: SettingsTab;
+  onHome: () => void;
+  onSelectTab: (tab: SettingsTab) => void;
+}) {
+  return (
+    <>
+      <div className="shrink-0">
+        <RailItem
+          collapsed={collapsed}
+          label="Home"
+          ariaLabel="Back to Home"
+          icon={<ArrowLeft className="h-4 w-4" />}
+          onClick={onHome}
+        />
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {!collapsed && (
+          <p className="mb-1 shrink-0 px-3 py-0.5 text-xs font-medium uppercase tracking-wider text-gray-400">
+            Settings
+          </p>
+        )}
+        <ul aria-label="Settings sections" className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+          {SETTINGS_TABS.map((tab) => {
+            const Icon = SETTINGS_TAB_ICONS[tab.value];
+            const isActive = tab.value === activeTab;
+            return (
+              <li key={tab.value}>
+                <RailItem
+                  collapsed={collapsed}
+                  label={tab.label}
+                  icon={<Icon className="h-4 w-4" />}
+                  active={isActive}
+                  ariaCurrent={isActive ? 'page' : undefined}
+                  onClick={() => onSelectTab(tab.value)}
+                />
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+      <div className="shrink-0 border-t border-gray-100 py-1">
+        <Info isCollapsed={collapsed} />
+      </div>
+    </>
   );
 }
 
@@ -161,6 +230,8 @@ const Sidebar: React.FC = () => {
   });
   const [settingsSaveSuccess, setSettingsSaveSuccess] = useState<boolean | null>(null);
   const isHomePage = pathname === '/';
+  const isSettingsPage = isSettingsPath(pathname);
+  const settingsTab = settingsTabFromSearch(searchParams.toString());
 
   // State for edit modal
   const [editModalState, setEditModalState] = useState<{ isOpen: boolean; meetingId: string | null; currentTitle: string }>({
@@ -635,7 +706,7 @@ const Sidebar: React.FC = () => {
   return (
     <>
     <nav
-      aria-label="Main navigation"
+      aria-label={isSettingsPage ? 'Settings' : 'Main navigation'}
       data-expanded={isCollapsed ? 'false' : 'true'}
       className="sidebar-rail sticky top-0 z-40 flex h-screen flex-shrink-0 flex-col overflow-hidden bg-background [&_button:focus-visible]:-outline-offset-2 [&_button:focus-visible]:outline [&_button:focus-visible]:outline-2 [&_button:focus-visible]:outline-stone-700"
     >
@@ -663,6 +734,15 @@ const Sidebar: React.FC = () => {
           )}
         </div>
 
+        {isSettingsPage ? (
+          <SettingsRail
+            collapsed={isCollapsed}
+            activeTab={settingsTab}
+            onHome={() => router.push('/')}
+            onSelectTab={(tab) => router.replace(settingsPath(tab, searchParams.toString()))}
+          />
+        ) : (
+          <>
         {isCollapsed ? (
           <RailItem
             collapsed
@@ -815,6 +895,8 @@ const Sidebar: React.FC = () => {
           />
           <Info isCollapsed={isCollapsed} />
         </div>
+          </>
+        )}
       </nav>
 
       {/* Confirmation Modal for Delete */}

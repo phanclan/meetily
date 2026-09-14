@@ -4,7 +4,7 @@ Inventory of real preference keys so toggles do not fight. The TypeScript
 source of this table is `frontend/src/lib/preferencesMap.ts`. Update both
 when adding a writer.
 
-`/settings` is the settings shell (left rail already exists). Task modals
+`/settings` reuses the app left rail for section nav. Task modals
 that remain: audio devices, transcription language, transcription-required
 model selector, error alert, chunk-drop warning. The old Preferences overlay
 on Home was removed; do not reopen it.

@@ -35,7 +35,7 @@
         "typecheck": "tsc --noEmit --incremental false",
         "test:recording": "node --test tests/lib/recording-lifecycle.test.mjs",
         "test:markdown": "node --require ./scripts/register-typescript-tests.cjs --test tests/lib/blocknote-markdown.test.ts",
-        "test:lib": "node --require ./scripts/register-typescript-tests.cjs --test tests/lib/ask-route.test.ts tests/lib/call-detection.test.ts tests/lib/meeting-title.test.ts"
+        "test:lib": "node --require ./scripts/register-typescript-tests.cjs --test tests/lib/ask-route.test.ts tests/lib/call-detection.test.ts tests/lib/meeting-title.test.ts tests/lib/settings-nav.test.ts"
     },
     "dependencies": {
         "@blocknote/core": "0.36.0",
