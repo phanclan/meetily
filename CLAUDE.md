@@ -436,6 +436,8 @@ $env:RUST_LOG="debug"; ./clean_run_windows.bat
 Afterword is this fork's product. Meetily code stays in-tree for selective upstream
 adoption. Shipped identity is Afterword, not Meetily or Meetnola.
 
+- GitHub: `https://github.com/phanclan/afterword` (`origin`). Old `phanclan/meetily` URL redirects.
+- `upstream` stays `https://github.com/Zackriya-Solutions/meetily.git` (fetch only)
 - Afterword bundle id: `com.afterword.app`
 - Afterword app data: `~/Library/Application Support/com.afterword.app/`
 - Afterword DB: `~/Library/Application Support/com.afterword.app/meeting_minutes.sqlite`
