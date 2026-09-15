@@ -39,6 +39,51 @@ export interface RecordingStoppedPayload {
  * Recording Service
  * Singleton service for managing recording lifecycle operations
  */
+const START_RECORDING_TIMEOUT_MS = 12_000;
+const ADOPT_RECORDING_TIMEOUT_MS = 1_000;
+
+function invokeWithTimeout<T>(cmd: string, args?: Record<string, unknown>, ms = START_RECORDING_TIMEOUT_MS): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      reject(new Error('Recording failed to start. The microphone did not come up in time — try again.'));
+    }, ms);
+    invoke<T>(cmd, args)
+      .then((value) => {
+        window.clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        window.clearTimeout(timer);
+        reject(error);
+      });
+  });
+}
+
+async function adoptIfRecordingStarted(): Promise<boolean> {
+  try {
+    const state = await Promise.race([
+      invoke<RecordingState>('get_recording_state'),
+      new Promise<null>(resolve => {
+        window.setTimeout(() => resolve(null), ADOPT_RECORDING_TIMEOUT_MS);
+      }),
+    ]);
+    return Boolean(state?.is_recording);
+  } catch {
+    return false;
+  }
+}
+
+async function startRecordingCommand(cmd: string, args?: Record<string, unknown>): Promise<void> {
+  try {
+    await invokeWithTimeout(cmd, args);
+  } catch (error) {
+    if (await adoptIfRecordingStarted()) {
+      return;
+    }
+    throw error;
+  }
+}
+
 export class RecordingService {
   /**
    * Check if recording is currently active
@@ -69,7 +114,7 @@ export class RecordingService {
    * @returns Promise<void>
    */
   async startRecording(): Promise<void> {
-    return invoke('start_recording');
+    return startRecordingCommand('start_recording');
   }
 
   /**
@@ -84,7 +129,7 @@ export class RecordingService {
     systemDeviceName: string | null,
     meetingName: string
   ): Promise<void> {
-    return invoke('start_recording_with_devices_and_meeting', {
+    return startRecordingCommand('start_recording_with_devices_and_meeting', {
       mic_device_name: micDeviceName,
       system_device_name: systemDeviceName,
       meeting_name: meetingName

@@ -170,6 +170,24 @@ export function RecordingStateProvider({ children }: { children: React.ReactNode
   }, [state.status, state.isRecording, syncWithBackend]);
 
   useEffect(() => {
+    if (state.status !== RecordingStatus.STARTING) return;
+    const timer = window.setTimeout(() => {
+      setState(prev => {
+        if (prev.status !== RecordingStatus.STARTING || prev.isRecording) return prev;
+        return {
+          ...prev,
+          status: RecordingStatus.ERROR,
+          statusMessage: 'Recording failed to start. The microphone did not come up in time — try again.',
+          isRecording: false,
+          isPaused: false,
+          isActive: false,
+        };
+      });
+    }, 15000);
+    return () => window.clearTimeout(timer);
+  }, [state.status]);
+
+  useEffect(() => {
     mounted.current = true;
     let disposed = false;
     const unsubscribers: (() => void)[] = [];

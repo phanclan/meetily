@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use std::collections::VecDeque;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use anyhow::Result;
@@ -17,22 +18,27 @@ use super::vad::{ContinuousVadProcessor};
 /// waiting for VAD to detect the end of the utterance. Continuous speech still reaches
 /// the transcript roughly every this many milliseconds.
 const MAX_LIVE_UTTERANCE_MS: u32 = 8000;
-/// Mix when either stream has this much audio. 600ms is the working live-transcript
-/// window: 50ms mixed fine on paper but VAD emitted zero speech segments in real
-/// recordings (16s of saved audio, 0 chunks queued). Do not shrink this without a
-/// spoken-resume check.
+/// Mix this much audio at a time. Keep this at 600ms until a spoken resume still
+/// produces VAD segments; shrinking it without that check has gone to 0 chunks queued.
 const MIX_WINDOW_MS: f32 = 600.0;
 /// How many mix windows to retain before dropping the oldest samples (4.8s at 600ms).
 /// Core Audio can stall ~1s at stream start; a 400ms cap dropped mic speech.
 const MIX_MAX_BUFFER_WINDOWS: usize = 8;
+/// After this much silence from the microphone, mix system audio alone so a
+/// dropped USB mic does not freeze the recording for the rest of the meeting.
+const MIC_STALE_MS: u64 = (2.0 * MIX_WINDOW_MS) as u64;
 
 /// Ring buffer for synchronized audio mixing
 /// Accumulates samples from mic and system streams until we have aligned windows
 struct AudioMixerRingBuffer {
     mic_buffer: VecDeque<f32>,
     system_buffer: VecDeque<f32>,
-    window_size_samples: usize,  // Fixed mixing window (e.g., 50ms)
-    max_buffer_size: usize,  // Safety limit (400ms at 50ms windows)
+    window_size_samples: usize,
+    max_buffer_size: usize,
+    mic_chunks_seen: usize,
+    mic_samples_seen: usize,
+    system_samples_seen: usize,
+    last_mic_samples_at: Option<Instant>,
 }
 
 impl AudioMixerRingBuffer {
@@ -53,6 +59,10 @@ impl AudioMixerRingBuffer {
             system_buffer: VecDeque::with_capacity(max_buffer_size),
             window_size_samples,
             max_buffer_size,
+            mic_chunks_seen: 0,
+            mic_samples_seen: 0,
+            system_samples_seen: 0,
+            last_mic_samples_at: None,
         }
     }
 
@@ -68,8 +78,18 @@ impl AudioMixerRingBuffer {
         }
 
         match device_type {
-            DeviceType::Microphone => self.mic_buffer.extend(samples),
-            DeviceType::System => self.system_buffer.extend(samples),
+            DeviceType::Microphone => {
+                self.mic_chunks_seen += 1;
+                self.mic_samples_seen += samples.len();
+                if !samples.is_empty() {
+                    self.last_mic_samples_at = Some(Instant::now());
+                }
+                self.mic_buffer.extend(samples);
+            }
+            DeviceType::System => {
+                self.system_samples_seen += samples.len();
+                self.system_buffer.extend(samples);
+            }
         }
 
         // CRITICAL FIX: Add warnings before dropping samples
@@ -94,8 +114,22 @@ impl AudioMixerRingBuffer {
         }
     }
 
+    fn mic_is_fresh(&self) -> bool {
+        self.last_mic_samples_at
+            .map(|at| at.elapsed() < Duration::from_millis(MIC_STALE_MS))
+            .unwrap_or(false)
+    }
+
     fn can_mix(&self) -> bool {
-        self.mic_buffer.len() >= self.window_size_samples ||
+        if self.mic_buffer.len() >= self.window_size_samples {
+            return true;
+        }
+        // Wait for a full mic window while the microphone is still delivering.
+        // Mixing earlier zero-pads speech and Silero never crosses min_speech_time.
+        // If the mic has gone stale (unplug, CPAL stop), mix system audio alone.
+        if self.mic_is_fresh() {
+            return false;
+        }
         self.system_buffer.len() >= self.window_size_samples
     }
 
@@ -150,6 +184,31 @@ impl AudioMixerRingBuffer {
         Some((mic_window, sys_window))
     }
 
+    fn take_remaining(&mut self) -> Option<(Vec<f32>, Vec<f32>)> {
+        if self.mic_buffer.is_empty() && self.system_buffer.is_empty() {
+            return None;
+        }
+        Some((self.mic_buffer.drain(..).collect(), self.system_buffer.drain(..).collect()))
+    }
+
+    fn snapshot_stats(&self) -> (usize, usize, usize, usize, usize) {
+        (
+            self.mic_chunks_seen,
+            self.mic_samples_seen,
+            self.system_samples_seen,
+            self.mic_buffer.len(),
+            self.system_buffer.len(),
+        )
+    }
+
+}
+
+fn rms(samples: &[f32]) -> f32 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+    let sum_squares: f32 = samples.iter().map(|&sample| sample * sample).sum();
+    (sum_squares / samples.len() as f32).sqrt()
 }
 
 /// Simple audio mixer without aggressive ducking
@@ -587,30 +646,24 @@ impl AudioCapture {
         // RAW AUDIO: No gain applied here - will be applied AFTER mixing
         // This prevents amplifying system audio bleed-through in the microphone
 
-        // DIAGNOSTIC: Log audio levels for debugging (especially mic issues)
-        // if chunk_id % 100 == 0 && !mono_data.is_empty() {
-        //     let raw_rms = (mono_data.iter().map(|&x| x * x).sum::<f32>() / mono_data.len() as f32).sqrt();
-        //     let raw_peak = mono_data.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
-
-        //         info!("🎙️ [{:?}] Chunk {} - Raw: RMS={:.6}, Peak={:.6}",
-        //               self.device_type, chunk_id, raw_rms, raw_peak);
-
-        //     // Warn if microphone is completely silent
-        //     if matches!(self.device_type, DeviceType::Microphone) && raw_rms == 0.0 && raw_peak == 0.0 {
-        //         warn!("⚠️ Microphone producing ZERO audio - check permissions or hardware!");
-        //     }
-        // }
-        // else if chunk_id % 100 == 0 && matches!(self.device_type, DeviceType::System) {
-        //     let raw_rms = (mono_data.iter().map(|&x| x * x).sum::<f32>() / mono_data.len() as f32).sqrt();
-        //     let raw_peak = mono_data.iter().map(|&x| x.abs()).fold(0.0f32, f32::max);
-        //     info!("🔊 [{:?}] Chunk {} - Raw: RMS={:.6}, Peak={:.6}",
-        //       self.device_type, chunk_id, raw_rms, raw_peak);
-            
-        //     // Warn if system audio is completely silent
-        //     if raw_rms == 0.0 && raw_peak == 0.0 {
-        //         warn!("⚠️ System audio producing ZERO audio - check permissions or hardware!");
-        //     }
-        // }
+        if !mono_data.is_empty() && chunk_id < 5 {
+            let raw_rms = rms(&mono_data);
+            let raw_peak = mono_data.iter().copied().map(f32::abs).fold(0.0f32, f32::max);
+            info!(
+                "🎙️ [{:?}] Chunk {} - {} samples, RMS={:.6}, Peak={:.6}",
+                self.device_type,
+                chunk_id,
+                mono_data.len(),
+                raw_rms,
+                raw_peak
+            );
+            if matches!(self.device_type, DeviceType::Microphone) && raw_rms < 0.0001 && raw_peak < 0.0001 {
+                warn!(
+                    "⚠️ Microphone producing ZERO audio on chunk {} — check the Yeti mute button and Microphone permission for Afterword",
+                    chunk_id
+                );
+            }
+        }
 
         // Use global recording timestamp for proper synchronization
         let timestamp = self.state.get_recording_duration().unwrap_or(0.0);
@@ -704,6 +757,8 @@ pub struct AudioPipeline {
     mixer: ProfessionalAudioMixer,
     // Recording sender for pre-mixed audio
     recording_sender_for_mixed: Option<mpsc::UnboundedSender<AudioChunk>>,
+    mixed_windows: u64,
+    consecutive_silent_windows: u64,
 }
 
 impl AudioPipeline {
@@ -772,6 +827,8 @@ impl AudioPipeline {
             ring_buffer,
             mixer,
             recording_sender_for_mixed: None,  // Will be set by manager
+            mixed_windows: 0,
+            consecutive_silent_windows: 0,
         }
     }
 
@@ -831,63 +888,9 @@ impl AudioPipeline {
                     // System audio remains raw
                     self.ring_buffer.add_samples(chunk.device_type.clone(), chunk.data);
 
-                    // STEP 2: Mix audio in fixed windows when both streams have sufficient data
                     while self.ring_buffer.can_mix() {
                         if let Some((mic_window, sys_window)) = self.ring_buffer.extract_window() {
-                            // Simple mixing without aggressive ducking
-                            let mixed_clean = self.mixer.mix_window(&mic_window, &sys_window);
-
-                            // NO POST-GAIN NEEDED: Microphone already normalized by EBU R128 to -23 LUFS
-                            // This is broadcast-standard loudness (Netflix/YouTube/Spotify level)
-                            // System audio at natural levels
-                            // Previous 2x gain was causing excessive limiting/distortion
-                            let mixed_with_gain = mixed_clean;
-
-                            // STEP 3: Send mixed audio for transcription (VAD + Whisper)
-                            match self.vad_processor.process_audio(&mixed_with_gain) {
-                                Ok(speech_segments) => {
-                                    for segment in speech_segments {
-                                        let duration_ms = segment.end_timestamp_ms - segment.start_timestamp_ms;
-
-                                        if segment.samples.len() >= 800 {  // Minimum 50ms at 16kHz - matches Parakeet capability
-                                            info!("📤 Sending VAD segment: {:.1}ms, {} samples",
-                                                  duration_ms, segment.samples.len());
-
-                                            let transcription_chunk = AudioChunk {
-                                                data: segment.samples,
-                                                sample_rate: 16000,
-                                                timestamp: segment.start_timestamp_ms / 1000.0,
-                                                chunk_id: self.chunk_id_counter,
-                                                device_type: DeviceType::Microphone,  // Mixed audio
-                                            };
-
-                                            if let Err(e) = self.transcription_sender.send(transcription_chunk) {
-                                                warn!("Failed to send VAD segment: {}", e);
-                                            } else {
-                                                self.chunk_id_counter += 1;
-                                            }
-                                        } else {
-                                            debug!("⏭️ Dropping short VAD segment: {:.1}ms ({} samples < 800)",
-                                                   duration_ms, segment.samples.len());
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    warn!("⚠️ VAD error: {}", e);
-                                }
-                            }
-
-                            // STEP 4: Send mixed audio for recording (WAV file)
-                            if let Some(ref sender) = self.recording_sender_for_mixed {
-                                let recording_chunk = AudioChunk {
-                                    data: mixed_with_gain.clone(),
-                                    sample_rate: self.sample_rate,
-                                    timestamp: chunk.timestamp,
-                                    chunk_id: self.chunk_id_counter,
-                                    device_type: DeviceType::Microphone,  // Mixed audio
-                                };
-                                let _ = sender.send(recording_chunk);
-                            }
+                            self.mix_and_forward(mic_window, sys_window, chunk.timestamp);
                         }
                     }
                 }
@@ -909,37 +912,124 @@ impl AudioPipeline {
         Ok(())
     }
 
-    fn flush_remaining_audio(&mut self) -> Result<()> {
-        info!("Flushing remaining audio from pipeline (processed {} chunks)", self.processed_chunks);
+    fn mix_and_forward(&mut self, mic_window: Vec<f32>, sys_window: Vec<f32>, timestamp: f64) {
+        let mixed = self.mixer.mix_window(&mic_window, &sys_window);
+        let mic_rms = rms(&mic_window);
+        let sys_rms = rms(&sys_window);
+        let mix_rms = rms(&mixed);
+        self.mixed_windows += 1;
 
-        // Flush any remaining audio from VAD processor and send segments to transcription
+        if self.mixed_windows == 1 || self.mixed_windows % 10 == 0 {
+            info!(
+                "🎚️ Mix window {}: mic_rms={:.4} sys_rms={:.4} mix_rms={:.4} mic_samples={} sys_samples={}",
+                self.mixed_windows,
+                mic_rms,
+                sys_rms,
+                mix_rms,
+                mic_window.len(),
+                sys_window.len()
+            );
+        }
+
+        if mix_rms < 0.0005 && mic_rms < 0.0005 {
+            self.consecutive_silent_windows += 1;
+            if self.consecutive_silent_windows == 10 {
+                warn!(
+                    "⚠️ Mixed audio has been silent for 10 windows. Microphone samples are reaching the mixer as zeros — check the Yeti mute button and Microphone permission for this app."
+                );
+            }
+        } else {
+            self.consecutive_silent_windows = 0;
+        }
+
+        match self.vad_processor.process_audio(&mixed) {
+            Ok(speech_segments) => {
+                for segment in speech_segments {
+                    self.forward_speech_segment(segment.samples, segment.start_timestamp_ms, segment.end_timestamp_ms, "VAD");
+                }
+            }
+            Err(e) => {
+                warn!("⚠️ VAD error: {}", e);
+            }
+        }
+
+        if let Some(ref sender) = self.recording_sender_for_mixed {
+            let recording_chunk = AudioChunk {
+                data: mixed,
+                sample_rate: self.sample_rate,
+                timestamp,
+                chunk_id: self.chunk_id_counter,
+                device_type: DeviceType::Microphone,
+            };
+            let _ = sender.send(recording_chunk);
+        }
+    }
+
+    fn forward_speech_segment(
+        &mut self,
+        samples: Vec<f32>,
+        start_timestamp_ms: f64,
+        end_timestamp_ms: f64,
+        label: &str,
+    ) {
+        let duration_ms = end_timestamp_ms - start_timestamp_ms;
+        if samples.len() < 800 {
+            debug!(
+                "⏭️ Dropping short {} segment: {:.1}ms ({} samples < 800)",
+                label, duration_ms, samples.len()
+            );
+            return;
+        }
+
+        info!(
+            "📤 Sending {} segment: {:.1}ms, {} samples",
+            label, duration_ms, samples.len()
+        );
+
+        let transcription_chunk = AudioChunk {
+            data: samples,
+            sample_rate: 16000,
+            timestamp: start_timestamp_ms / 1000.0,
+            chunk_id: self.chunk_id_counter,
+            device_type: DeviceType::Microphone,
+        };
+
+        if let Err(e) = self.transcription_sender.send(transcription_chunk) {
+            warn!("Failed to send {} segment: {}", label, e);
+        } else {
+            self.chunk_id_counter += 1;
+        }
+    }
+
+    fn flush_remaining_audio(&mut self) -> Result<()> {
+        let (mic_chunks, mic_samples, sys_samples, mic_buffered, sys_buffered) =
+            self.ring_buffer.snapshot_stats();
+        info!(
+            "Flushing remaining audio from pipeline (processed {} chunks, mixed {} windows, mic_chunks={}, mic_samples={}, sys_samples={}, mic_buffered={}, sys_buffered={})",
+            self.processed_chunks,
+            self.mixed_windows,
+            mic_chunks,
+            mic_samples,
+            sys_samples,
+            mic_buffered,
+            sys_buffered
+        );
+
+        if let Some((mic_window, sys_window)) = self.ring_buffer.take_remaining() {
+            if !mic_window.is_empty() || !sys_window.is_empty() {
+                self.mix_and_forward(mic_window, sys_window, 0.0);
+            }
+        }
+
         match self.vad_processor.flush() {
             Ok(final_segments) => {
                 for segment in final_segments {
-                    let duration_ms = segment.end_timestamp_ms - segment.start_timestamp_ms;
-
-                    // Send segments >= 50ms (800 samples at 16kHz) - matches main pipeline filter
-                    if segment.samples.len() >= 800 {
-                        info!("📤 Sending final VAD segment to Whisper: {:.1}ms duration, {} samples",
-                              duration_ms, segment.samples.len());
-
-                        let transcription_chunk = AudioChunk {
-                            data: segment.samples,
-                            sample_rate: 16000,
-                            timestamp: segment.start_timestamp_ms / 1000.0,
-                            chunk_id: self.chunk_id_counter,
-                            device_type: DeviceType::Microphone,
-                        };
-
-                        if let Err(e) = self.transcription_sender.send(transcription_chunk) {
-                            warn!("Failed to send final VAD segment: {}", e);
-                        } else {
-                            self.chunk_id_counter += 1;
-                        }
-                    } else {
-                        info!("⏭️ Skipping short final segment: {:.1}ms ({} samples < 800)",
-                              duration_ms, segment.samples.len());
-                    }
+                    self.forward_speech_segment(
+                        segment.samples,
+                        segment.start_timestamp_ms,
+                        segment.end_timestamp_ms,
+                        "final VAD",
+                    );
                 }
             }
             Err(e) => {
@@ -1099,5 +1189,66 @@ mod tests {
     fn mix_window_stays_at_the_working_live_transcript_size() {
         assert_eq!(MIX_WINDOW_MS, 600.0);
         assert_eq!(MIX_MAX_BUFFER_WINDOWS, 8);
+    }
+
+    fn samples(value: f32, count: usize) -> Vec<f32> {
+        vec![value; count]
+    }
+
+    #[test]
+    fn does_not_mix_when_system_is_ahead_of_partial_mic() {
+        let mut buffer = AudioMixerRingBuffer::new(16_000);
+        let window = buffer.window_size_samples;
+        buffer.add_samples(DeviceType::System, samples(0.1, window));
+        buffer.add_samples(DeviceType::Microphone, samples(0.9, window / 4));
+        assert!(!buffer.can_mix());
+        assert!(buffer.extract_window().is_none());
+    }
+
+    #[test]
+    fn mixes_a_full_mic_window_without_zero_padding_speech() {
+        let mut buffer = AudioMixerRingBuffer::new(16_000);
+        let window = buffer.window_size_samples;
+        buffer.add_samples(DeviceType::Microphone, samples(0.9, window));
+        buffer.add_samples(DeviceType::System, samples(0.1, window / 4));
+        assert!(buffer.can_mix());
+        let (mic, _sys) = buffer.extract_window().expect("mic-ready mix");
+        assert_eq!(mic.len(), window);
+        assert!(mic.iter().all(|&sample| sample == 0.9));
+    }
+
+    #[test]
+    fn mixes_system_audio_when_the_microphone_never_arrives() {
+        let mut buffer = AudioMixerRingBuffer::new(16_000);
+        let window = buffer.window_size_samples;
+        buffer.add_samples(DeviceType::System, samples(0.1, window));
+        assert!(buffer.can_mix());
+        let (mic, sys) = buffer.extract_window().expect("system-only mix");
+        assert!(mic.iter().all(|&sample| sample == 0.0));
+        assert!(sys.iter().all(|&sample| sample == 0.1));
+    }
+
+    #[test]
+    fn does_not_system_only_mix_after_the_microphone_has_started() {
+        let mut buffer = AudioMixerRingBuffer::new(16_000);
+        let window = buffer.window_size_samples;
+        buffer.add_samples(DeviceType::Microphone, samples(0.9, 1));
+        buffer.add_samples(DeviceType::System, samples(0.1, window));
+        assert!(!buffer.can_mix());
+        assert!(buffer.extract_window().is_none());
+    }
+
+    #[test]
+    fn mixes_system_audio_again_after_the_microphone_goes_stale() {
+        let mut buffer = AudioMixerRingBuffer::new(16_000);
+        let window = buffer.window_size_samples;
+        buffer.add_samples(DeviceType::Microphone, samples(0.9, 1));
+        buffer.add_samples(DeviceType::System, samples(0.1, window));
+        assert!(!buffer.can_mix());
+        buffer.last_mic_samples_at = Instant::now().checked_sub(Duration::from_millis(MIC_STALE_MS + 50));
+        assert!(buffer.can_mix());
+        let (mic, sys) = buffer.extract_window().expect("stale-mic system mix");
+        assert!(sys.iter().all(|&sample| sample == 0.1));
+        assert_eq!(mic.len(), window);
     }
 }

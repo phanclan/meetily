@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { invoke } from '@tauri-apps/api/core';
 import {
   ArrowLeft,
+  AlertCircle,
   CheckCircle2,
   CircleDot,
   Copy,
@@ -558,6 +559,8 @@ export function NoteWorkspace({ mode }: { mode: NoteWorkspaceMode }) {
                   <CircleDot className="h-3.5 w-3.5 text-red-500" />
                 ) : recordingState.status === RecordingStatus.SAVING ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : recordingState.status === RecordingStatus.ERROR ? (
+                  <AlertCircle className="h-3.5 w-3.5 text-red-500" />
                 ) : (
                   <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
                 )
@@ -572,7 +575,9 @@ export function NoteWorkspace({ mode }: { mode: NoteWorkspaceMode }) {
                     ? 'Finishing transcript'
                     : recordingState.status === RecordingStatus.SAVING
                       ? 'Saving meeting'
-                      : 'Ready'}
+                      : recordingState.status === RecordingStatus.ERROR
+                        ? (recordingState.statusMessage || 'Recording failed')
+                        : 'Ready'}
             </StatusPill>
 
             <DropdownMenu>

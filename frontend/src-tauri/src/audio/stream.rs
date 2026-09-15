@@ -140,10 +140,9 @@ impl AudioStream {
             recording_sender,
         );
 
-        // Build the appropriate stream based on sample format
+        info!("Building CPAL input stream for {}", device.name);
         let stream = Self::build_stream(&cpal_device, &config, capture.clone())?;
-
-        // Start the stream
+        info!("Starting CPAL input stream for {}", device.name);
         stream.play()?;
         info!("CPAL stream started for device: {}", device.name);
 
@@ -398,7 +397,8 @@ impl AudioStreamManager {
         let backend = get_current_backend();
         info!("🎙️ Starting audio streams with backend: {:?}", backend);
 
-        // Start microphone stream
+        // Microphone first. Opening the Core Audio tap before CPAL deadlocks
+        // stream.play() on the Yeti, and the UI stays on "Starting recording".
         if let Some(mic_device) = microphone_device {
             info!("🎤 Creating microphone stream: {} (always uses CPAL)", mic_device.name);
             match AudioStream::create(mic_device.clone(), self.state.clone(), DeviceType::Microphone, recording_sender.clone()).await {
@@ -416,7 +416,6 @@ impl AudioStreamManager {
             info!("ℹ️ No microphone device specified, skipping microphone stream");
         }
 
-        // Start system audio stream
         if let Some(sys_device) = system_device {
             info!("🔊 Creating system audio stream: {} (backend: {:?})", sys_device.name, backend);
             match AudioStream::create(sys_device.clone(), self.state.clone(), DeviceType::System, recording_sender.clone()).await {
